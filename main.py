@@ -4,7 +4,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ConversationHandler
 from config import TELEGRAM_BOT_TOKEN, DB_PATH
 from database.db import DatabaseManager
 from providers.fast_flights import FastFlightsProvider
-from daemon.scheduler import TrackerDaemonScheduler
+from daemon.scheduler import register_active_trackers_on_startup
 from bot.handlers import start_command, help_command, cancel_command, execute_search
 from bot.handlers.track import (
     start_newtrack, handle_origin_input, select_origin_callback,
@@ -27,7 +27,12 @@ async def main():
     db = DatabaseManager(DB_PATH)
     await db.init_db()
 
+    provider = FastFlightsProvider()
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Register active trackers from database on boot
+    active_count = await register_active_trackers_on_startup(app, db, provider)
+    logging.info(f"Loaded and registered {active_count} active background trackers into JobQueue.")
 
     # Register command handlers
     app.add_handler(CommandHandler("start", start_command))

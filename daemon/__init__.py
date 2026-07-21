@@ -1,3 +1,3 @@
-from .scheduler import TrackerDaemonScheduler
+from .scheduler import TrackerDaemonScheduler, register_active_trackers_on_startup
 
-__all__ = ["TrackerDaemonScheduler"]
+__all__ = ["TrackerDaemonScheduler", "register_active_trackers_on_startup"]

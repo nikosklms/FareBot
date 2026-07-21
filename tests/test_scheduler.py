@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from daemon.scheduler import TrackerDaemonScheduler
+from telegram.error import Forbidden, TelegramError
+from daemon.scheduler import TrackerDaemonScheduler, register_active_trackers_on_startup
 from providers.base import FlightOffer
 
 @pytest.mark.asyncio
@@ -104,3 +105,44 @@ async def test_scheduler_notification_button_payloads():
     assert inline_keyboard[0][0].url == "http://test.url"
     assert "dash_pause_4" in inline_keyboard[1][0].callback_data
     assert "dash_del_4" in inline_keyboard[1][1].callback_data
+
+@pytest.mark.asyncio
+async def test_scheduler_handles_forbidden_user_blocks_bot():
+    db_mock = MagicMock()
+    db_mock.get_tracker_by_id = AsyncMock(return_value={
+        "id": 5, "user_id": 104, "origin_code": "ATH", "destination_code": "LON",
+        "departure_date": "2026-08-15", "max_budget": 250.0, "consecutive_failures": 0, "status": "ACTIVE"
+    })
+    db_mock.log_price = AsyncMock()
+    db_mock.update_tracker_status = AsyncMock()
+    db_mock.reset_failure_count = AsyncMock()
+
+    provider_mock = MagicMock()
+    provider_mock.search_flights = AsyncMock(return_value=[
+        FlightOffer("ATH", "LON", "2026-08-15", price=200.0, airline="Aegean")
+    ])
+
+    bot_mock = MagicMock()
+    bot_mock.send_message = AsyncMock(side_effect=Forbidden("Bot was blocked by the user"))
+
+    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
+    await scheduler.poll_tracker(tracker_id=5, bot=bot_mock)
+
+    db_mock.update_tracker_status.assert_called_with(5, "PAUSED")
+
+@pytest.mark.asyncio
+async def test_register_active_trackers_on_startup():
+    db_mock = MagicMock()
+    db_mock.get_active_trackers = AsyncMock(return_value=[
+        {"id": 10, "frequency_hours": 6},
+        {"id": 11, "frequency_hours": 12}
+    ])
+    provider_mock = MagicMock()
+
+    app_mock = MagicMock()
+    job_queue_mock = MagicMock()
+    app_mock.job_queue = job_queue_mock
+
+    registered = await register_active_trackers_on_startup(app_mock, db_mock, provider_mock)
+    assert registered == 2
+    assert job_queue_mock.run_repeating.call_count == 2
