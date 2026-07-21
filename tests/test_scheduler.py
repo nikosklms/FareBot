@@ -163,4 +163,32 @@ def test_schedule_and_unschedule_tracker_job():
     job_queue_mock.get_jobs_by_name.assert_called_with("tracker_job_99")
     assert mock_job.schedule_removal.call_count == 2
 
+@pytest.mark.asyncio
+async def test_scheduler_polls_with_direct_only_flag():
+    db_mock = MagicMock()
+    db_mock.get_tracker_by_id = AsyncMock(return_value={
+        "id": 50, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
+        "departure_date": "2026-08-15", "max_budget": 200.0, "direct_only": 1,
+        "consecutive_failures": 0, "status": "ACTIVE"
+    })
+    db_mock.log_price = AsyncMock()
+    db_mock.update_tracker_status = AsyncMock()
+    db_mock.reset_failure_count = AsyncMock()
+
+    provider_mock = MagicMock()
+    provider_mock.search_flights = AsyncMock(return_value=[
+        FlightOffer("ATH", "LON", "2026-08-15", price=180.0, airline="Aegean", is_direct=True)
+    ])
+
+    bot_mock = MagicMock()
+    bot_mock.send_message = AsyncMock()
+
+    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
+    await scheduler.poll_tracker(tracker_id=50, bot=bot_mock)
+
+    provider_mock.search_flights.assert_called_once_with(
+        origin="ATH", destination="LON", departure_date="2026-08-15", direct_only=True
+    )
+
+
 

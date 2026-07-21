@@ -46,10 +46,12 @@ class TrackerDaemonScheduler:
             )
             return
 
+        direct_only = bool(tracker.get("direct_only", 0))
         offers = await self.provider.search_flights(
             origin=tracker["origin_code"],
             destination=tracker["destination_code"],
-            departure_date=tracker["departure_date"]
+            departure_date=tracker["departure_date"],
+            direct_only=direct_only
         )
 
         if not offers:
@@ -68,13 +70,16 @@ class TrackerDaemonScheduler:
 
         if lowest.price <= tracker["max_budget"]:
             await self.db.update_tracker_status(tracker_id, "PAUSED")
+            filter_badge = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
+            stop_badge = "Direct ✈️" if lowest.is_direct else "1+ Stops 🔄"
             alert_text = (
                 "🚨 **PRICE DROP ALERT!** 🚨\n\n"
                 f"📍 **Route**: {lowest.origin} ✈️ {lowest.destination}\n"
                 f"📅 **Date**: {lowest.departure_date}\n"
                 f"🎯 **Target Budget**: €{tracker['max_budget']:.2f}\n"
-                f"💶 **Current Price**: **€{lowest.price:.2f}**\n"
-                f"🏢 **Airline**: {lowest.airline or 'Various'}"
+                f"💶 **Current Price**: **€{lowest.price:.2f}** ({stop_badge})\n"
+                f"🏢 **Airline**: {lowest.airline or 'Various'}\n"
+                f"⚙️ **Filter**: {filter_badge}"
             )
             buttons = [
                 [InlineKeyboardButton("🔗 View & Book Flight", url=lowest.booking_url or "https://www.google.com/travel/flights")],
@@ -83,6 +88,7 @@ class TrackerDaemonScheduler:
             await self._safe_send_message(
                 bot, tracker_id, tracker["user_id"], alert_text, InlineKeyboardMarkup(buttons)
             )
+
 
 def schedule_tracker_job(
     job_queue,
