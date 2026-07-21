@@ -1,7 +1,12 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# Automatically load environment variables from .env if present
+load_dotenv(BASE_DIR / ".env")
+
 DB_PATH = os.getenv("FAREST_DB_PATH", str(BASE_DIR / "farebot.db"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
