@@ -45,21 +45,36 @@ async def test_search_command_wizard_start():
     update.message.reply_text.assert_called_once()
 
 @pytest.mark.asyncio
-async def test_execute_search_top_5_formatting():
+async def test_search_wizard_flight_type_step():
+    from bot.handlers.search import handle_search_date, select_search_flight_type_callback, SEARCH_FLIGHT_TYPE
+
     update = MagicMock()
-    status_msg = AsyncMock()
-    update.message.reply_text = AsyncMock(return_value=status_msg)
+    update.message.text = "2028-12-01"
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.user_data = {
+        "search_origin_code": "ATH",
+        "search_destination_code": "LON"
+    }
 
-    offers = [
-        FlightOffer("ATH", "LON", "2026-08-15", price=100.0 + i * 10, airline=f"Airline {i}", is_direct=(i % 2 == 0))
-        for i in range(7)
-    ]
+    state = await handle_search_date(update, context)
+    assert state == SEARCH_FLIGHT_TYPE
+    assert context.user_data["search_departure_date"] == "2028-12-01"
+    update.message.reply_text.assert_called_once()
+    assert "flight type preference" in update.message.reply_text.call_args[0][0].lower()
 
-    with patch("bot.handlers.search.provider.search_flights", return_value=offers):
-        await execute_search(update, origin="ATH", destination="LON", date="2026-08-15")
-        status_msg.edit_text.assert_called_once()
-        text = status_msg.edit_text.call_args[0][0]
-        assert "Top 5" in text or "Search Results" in text
-        assert "1️⃣" in text and "5️⃣" in text
-        assert "6️⃣" not in text
+
+    # Test callback selection
+    query = MagicMock()
+    query.data = "src_fl_type_1"
+    query.answer = AsyncMock()
+    update.callback_query = query
+
+    with patch("bot.handlers.search.execute_search", new=AsyncMock()) as mock_exec:
+        next_state = await select_search_flight_type_callback(update, context)
+        assert next_state == -1  # ConversationHandler.END
+        mock_exec.assert_called_once_with(
+            update, "ATH", "LON", "2028-12-01", direct_only=True
+        )
+
 

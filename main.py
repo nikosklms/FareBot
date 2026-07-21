@@ -38,6 +38,7 @@ from bot.handlers import (
     handle_search_destination,
     select_search_destination_callback,
     handle_search_date,
+    select_search_flight_type_callback,
     search_track_callback_handler,
     ORIGIN,
     DESTINATION,
@@ -47,7 +48,8 @@ from bot.handlers import (
     FREQUENCY,
     SEARCH_ORIGIN,
     SEARCH_DESTINATION,
-    SEARCH_DATE
+    SEARCH_DATE,
+    SEARCH_FLIGHT_TYPE
 )
 from daemon import register_active_trackers
 
@@ -101,13 +103,15 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_destination),
                 CallbackQueryHandler(select_search_destination_callback, pattern="^src_dst_|re_src_dst")
             ],
-            SEARCH_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date)]
+            SEARCH_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date)],
+            SEARCH_FLIGHT_TYPE: [CallbackQueryHandler(select_search_flight_type_callback, pattern="^src_fl_type_")]
         },
         fallbacks=[CommandHandler("cancel", cancel_command)],
         per_chat=True,
         per_user=True
     )
     app.add_handler(search_wizard)
+
 
     # Register track wizard
     track_wizard = ConversationHandler(

@@ -9,7 +9,7 @@ from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
 from daemon import schedule_tracker_job
 
-SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE = range(10, 13)
+SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE = range(10, 14)
 resolver = LocationResolver()
 provider = FastFlightsProvider()
 db_manager = DatabaseManager(DB_PATH)
@@ -19,6 +19,10 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     args = context.args
     if args and len(args) >= 3:
         origin, destination, date_str = args[0].upper(), args[1].upper(), args[2]
+        direct_only = False
+        if len(args) >= 4 and args[3].lower() in ["direct", "direct_only", "--direct", "-d"]:
+            direct_only = True
+
         try:
             parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             today = datetime.now(timezone.utc).date()
@@ -29,13 +33,13 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("❌ Invalid date format. Use `YYYY-MM-DD` (e.g. `/search ATH LON 2026-08-15`).", parse_mode="Markdown")
             return ConversationHandler.END
 
-        await execute_search(update, origin, destination, date_str)
+        await execute_search(update, origin, destination, date_str, direct_only=direct_only)
         return ConversationHandler.END
 
     context.user_data.clear()
     await update.message.reply_text(
         "🔍 **Instant Flight Search**\n\n"
-        "🛫 **Step 1/3**: Where are you flying from? (e.g., 'Athens', 'ATH')",
+        "🛫 **Step 1/4**: Where are you flying from? (e.g., 'Athens', 'ATH')",
         parse_mode="Markdown"
     )
     return SEARCH_ORIGIN
@@ -70,7 +74,7 @@ async def select_search_origin_callback(update: Update, context: ContextTypes.DE
 
     await query.message.edit_text(
         f"✅ Origin set to: **{iata} - {name}**\n\n"
-        "🛬 **Step 2/3**: Where are you flying to? (e.g., 'London', 'LON')",
+        "🛬 **Step 2/4**: Where are you flying to? (e.g., 'London', 'LON')",
         parse_mode="Markdown"
     )
     return SEARCH_DESTINATION
@@ -105,7 +109,7 @@ async def select_search_destination_callback(update: Update, context: ContextTyp
 
     await query.message.edit_text(
         f"✅ Destination set to: **{iata} - {name}**\n\n"
-        "📅 **Step 3/3**: Enter departure date (`YYYY-MM-DD`):",
+        "📅 **Step 3/4**: Enter departure date (`YYYY-MM-DD`):",
         parse_mode="Markdown"
     )
     return SEARCH_DATE
@@ -122,11 +126,31 @@ async def handle_search_date(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ Invalid date format. Please enter date as `YYYY-MM-DD` (e.g. `2026-08-15`):", parse_mode="Markdown")
         return SEARCH_DATE
 
+    context.user_data["search_departure_date"] = date_str
+
+    buttons = [
+        [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="src_fl_type_1")],
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="src_fl_type_0")]
+    ]
+    await update.message.reply_text(
+        "✈️ **Step 4/4**: Select your flight type preference:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+    return SEARCH_FLIGHT_TYPE
+
+async def select_search_flight_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    direct_only = bool(int(query.data.split("_")[3]))
+
     origin = context.user_data["search_origin_code"]
     destination = context.user_data["search_destination_code"]
+    date = context.user_data["search_departure_date"]
 
-    await execute_search(update, origin, destination, date_str)
+    await execute_search(update, origin, destination, date, direct_only=direct_only)
     return ConversationHandler.END
+
 
 async def execute_search(
     update: Update, origin: str, destination: str, date: str, direct_only: bool = False
