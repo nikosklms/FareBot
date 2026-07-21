@@ -72,8 +72,10 @@ class TrackerDaemonScheduler:
             await self.db.update_tracker_status(tracker_id, "PAUSED")
             filter_badge = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
             stop_badge = "Direct ✈️" if lowest.is_direct else "1+ Stops 🔄"
-            time_line = f"\n🕒 **Flight Times**: {lowest.departure_time} ➔ {lowest.arrival_time}" if (lowest.departure_time and lowest.arrival_time) else ""
+            offset_str = f" (+{lowest.day_offset})" if getattr(lowest, "day_offset", 0) > 0 else ""
+            time_line = f"\n🕒 **Flight Times**: {lowest.departure_time} ➔ {lowest.arrival_time}{offset_str}" if (lowest.departure_time and lowest.arrival_time) else ""
             alert_text = (
+
                 "🚨 **PRICE DROP ALERT!** 🚨\n\n"
                 f"📍 **Route**: {lowest.origin} ✈️ {lowest.destination}\n"
                 f"📅 **Date**: {lowest.departure_date}{time_line}\n"

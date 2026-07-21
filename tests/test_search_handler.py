@@ -95,6 +95,25 @@ async def test_execute_search_departure_arrival_times_formatting():
         assert "17:45" in text
         assert "19:55" in text
 
+@pytest.mark.asyncio
+async def test_execute_search_overnight_day_offset_formatting():
+    update = MagicMock()
+    status_msg = AsyncMock()
+    update.message.reply_text = AsyncMock(return_value=status_msg)
+
+    offer = FlightOffer(
+        "ATH", "LON", "2027-04-03", price=120.0, airline="Aegean",
+        is_direct=True, departure_time="23:00", arrival_time="04:15", day_offset=1
+    )
+
+    with patch("bot.handlers.search.provider.search_flights", return_value=[offer]):
+        await execute_search(update, origin="ATH", destination="LON", date="2027-04-03")
+        status_msg.edit_text.assert_called_once()
+        text = status_msg.edit_text.call_args[0][0]
+        assert "23:00 ➔ 04:15 (+1)" in text
+
+
+
 
 
 
