@@ -43,3 +43,23 @@ async def test_search_command_wizard_start():
     res = await search_command(update, context)
     assert res == SEARCH_ORIGIN
     update.message.reply_text.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_execute_search_top_5_formatting():
+    update = MagicMock()
+    status_msg = AsyncMock()
+    update.message.reply_text = AsyncMock(return_value=status_msg)
+
+    offers = [
+        FlightOffer("ATH", "LON", "2026-08-15", price=100.0 + i * 10, airline=f"Airline {i}", is_direct=(i % 2 == 0))
+        for i in range(7)
+    ]
+
+    with patch("bot.handlers.search.provider.search_flights", return_value=offers):
+        await execute_search(update, origin="ATH", destination="LON", date="2026-08-15")
+        status_msg.edit_text.assert_called_once()
+        text = status_msg.edit_text.call_args[0][0]
+        assert "Top 5" in text or "Search Results" in text
+        assert "1️⃣" in text and "5️⃣" in text
+        assert "6️⃣" not in text
+

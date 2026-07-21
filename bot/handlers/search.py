@@ -129,34 +129,43 @@ async def handle_search_date(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 async def execute_search(
-    update: Update, origin: str, destination: str, date: str
+    update: Update, origin: str, destination: str, date: str, direct_only: bool = False
 ) -> None:
     message = update.message or (update.callback_query.message if update.callback_query else None)
     if not message:
         return
 
-    status_msg = await message.reply_text(f"🔍 Searching flights from **{origin}** to **{destination}** on **{date}**...", parse_mode="Markdown")
+    filter_label = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
+    status_msg = await message.reply_text(f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** on **{date}**...", parse_mode="Markdown")
 
-    offers = await provider.search_flights(origin=origin, destination=destination, departure_date=date)
+    offers = await provider.search_flights(origin=origin, destination=destination, departure_date=date, direct_only=direct_only)
 
     if not offers:
-        await status_msg.edit_text("❌ No flight offers found for the specified route and date.")
+        await status_msg.edit_text(f"❌ No matching flight offers found for **{origin} ✈️ {destination}** on **{date}** ({filter_label}).", parse_mode="Markdown")
         return
 
-    lowest = min(offers, key=lambda x: x.price)
+    top_offers = offers[:5]
+    reply_lines = [
+        f"✈️ **Top {len(top_offers)} Flight Results** ({filter_label})\n",
+        f"📍 **Route**: {origin} ✈️ {destination} | 📅 **Date**: {date}\n"
+    ]
 
-    reply_text = (
-        f"✈️ **Flight Search Results**\n\n"
-        f"📍 **Route**: {lowest.origin} ✈️ {lowest.destination}\n"
-        f"📅 **Date**: {lowest.departure_date}\n"
-        f"💶 **Lowest Price**: {lowest.currency} {lowest.price:.2f}\n"
-        f"🏢 **Airline**: {lowest.airline or 'Various'}\n"
-    )
+    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+    for i, o in enumerate(top_offers):
+        stop_badge = "Direct ✈️" if o.is_direct else "1+ Stops 🔄"
+        reply_lines.append(f"{emojis[i]} **€{o.price:.2f}** — {o.airline or 'Various'} ({stop_badge})")
+
+    reply_text = "\n".join(reply_lines)
+    lowest = top_offers[0]
 
     keyboard = []
     if lowest.booking_url:
-        keyboard.append([InlineKeyboardButton("🔗 View on Google Flights", url=lowest.booking_url)])
-    keyboard.append([InlineKeyboardButton("🔔 Track Prices for this Flight", callback_data=f"track_{origin}_{destination}_{date}_{lowest.price}")])
+        keyboard.append([InlineKeyboardButton("🔗 View Best Offer on Google Flights", url=lowest.booking_url)])
+    
+    direct_flag_val = 1 if direct_only else 0
+    keyboard.append([
+        InlineKeyboardButton(f"🔔 Track Lowest (€{lowest.price:.2f})", callback_data=f"track_{origin}_{destination}_{date}_{lowest.price}_{direct_flag_val}")
+    ])
 
     await status_msg.edit_text(reply_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -168,6 +177,7 @@ async def search_track_callback_handler(update: Update, context: ContextTypes.DE
     parts = query.data.split("_")
     if len(parts) >= 5:
         origin, destination, date, price = parts[1], parts[2], parts[3], float(parts[4])
+        direct_only = int(parts[5]) if len(parts) >= 6 else 0
         user_id = query.from_user.id
 
         active_count = await db_manager.get_active_trackers_count(user_id)
@@ -186,19 +196,23 @@ async def search_track_callback_handler(update: Update, context: ContextTypes.DE
             destination_name=destination,
             departure_date=date,
             max_budget=price,
-            frequency_hours=6
+            frequency_hours=6,
+            direct_only=direct_only
         )
 
         if context.job_queue:
             schedule_tracker_job(context.job_queue, tracker_id, 6)
 
+        flight_type_str = "Direct Flights Only ✈️" if direct_only else "Any Flights (Direct & Layovers) 🔄"
         await query.message.reply_text(
             f"🔔 **Tracking Started!**\n\n"
             f"📍 **Route**: {origin} ✈️ {destination}\n"
             f"📅 **Date**: {date}\n"
+            f"✈️ **Flight Type**: {flight_type_str}\n"
             f"🎯 **Target Budget**: €{price:.2f}\n"
             f"🔄 **Polling Frequency**: Every 6 hours\n\n"
             "Fare Bot will notify you if prices drop lower!",
             parse_mode="Markdown"
         )
+
 
