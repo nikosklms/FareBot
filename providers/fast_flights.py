@@ -84,9 +84,18 @@ def parse_google_flights_payload_generic(
             airline_name = ", ".join(clean_airlines) if clean_airlines else "Various Airlines"
 
             legs = flight_info[2]
-            orig_val = legs[0][3] if legs and isinstance(legs[0], list) and len(legs[0]) > 3 else None
-            dest_val = legs[-1][6] if legs and isinstance(legs[-1], list) and len(legs[-1]) > 6 else None
-            is_direct_flight = (len(legs) == 1) if isinstance(legs, list) else True
+            valid_legs = [l for l in legs if isinstance(l, list)] if isinstance(legs, list) else []
+            orig_val = valid_legs[0][3] if valid_legs and len(valid_legs[0]) > 3 else None
+            dest_val = valid_legs[-1][6] if valid_legs and len(valid_legs[-1]) > 6 else None
+            is_direct_flight = (len(valid_legs) == 1) if valid_legs else True
+
+            def _fmt_t(t_list):
+                if isinstance(t_list, list) and len(t_list) >= 2 and isinstance(t_list[0], int) and isinstance(t_list[1], int):
+                    return f"{t_list[0]:02d}:{t_list[1]:02d}"
+                return None
+
+            dep_time = _fmt_t(valid_legs[0][8]) if valid_legs and len(valid_legs[0]) > 8 else None
+            arr_time = _fmt_t(valid_legs[-1][10]) if valid_legs and len(valid_legs[-1]) > 10 else None
 
             orig = orig_val if isinstance(orig_val, str) and len(orig_val) == 3 else default_origin
             dest = dest_val if isinstance(dest_val, str) and len(dest_val) == 3 else default_destination
@@ -102,9 +111,12 @@ def parse_google_flights_payload_generic(
                         currency=currency,
                         airline=airline_name,
                         is_direct=is_direct_flight,
+                        departure_time=dep_time,
+                        arrival_time=arr_time,
                         booking_url=f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20{orig}%20on%20{departure_date}"
                     )
                 )
+
 
         for child in obj:
             _walk(child)

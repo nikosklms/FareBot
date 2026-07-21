@@ -92,11 +92,12 @@ async def test_fast_flights_direct_only_filter():
 
 @pytest.mark.asyncio
 async def test_parse_google_flights_payload_direct_vs_layover():
-    """Verify that parsing payloads with 1 leg vs multiple legs sets is_direct accurately."""
+    """Verify that parsing payloads with 1 leg vs multiple legs sets is_direct, departure_time, and arrival_time accurately."""
     # Sample leg structure matching Google Flights payload for 1 leg (direct) vs 2 legs (layover)
-    direct_leg = ["segment1"] + [None]*21 + [["flight_meta"]]
-    layover_leg1 = ["segment1"] + [None]*21 + [["flight_meta"]]
-    layover_leg2 = ["segment2"] + [None]*21 + [["flight_meta"]]
+    # Leg format: index 8 is departure time [17, 45], index 10 is arrival time [19, 55], index 22 is metadata list
+    direct_leg = [None]*8 + [[17, 45], None, [19, 55]] + [None]*11 + [["flight_meta"]]
+    layover_leg1 = [None]*8 + [[13, 20], None, [14, 45]] + [None]*11 + [["flight_meta"]]
+    layover_leg2 = [None]*8 + [[15, 40], None, [17, 20]] + [None]*11 + [["flight_meta"]]
 
     # Construct mock payload structure matching parse_google_flights_payload_generic expectations
     flight_node_direct = [None, ["Transavia"], [direct_leg]]
@@ -114,12 +115,17 @@ async def test_parse_google_flights_payload_direct_vs_layover():
     assert offers_direct[0].price == 85.0
     assert offers_direct[0].airline == "Transavia"
     assert offers_direct[0].is_direct is True
+    assert offers_direct[0].departure_time == "17:45"
+    assert offers_direct[0].arrival_time == "19:55"
 
     offers_layover = parse_google_flights_payload_generic(js_content_layover, "SKG", "WAW", "2027-04-03")
     assert len(offers_layover) == 1
     assert offers_layover[0].price == 101.0
     assert offers_layover[0].airline == "LOT"
     assert offers_layover[0].is_direct is False
+    assert offers_layover[0].departure_time == "13:20"
+    assert offers_layover[0].arrival_time == "17:20"
+
 
 
 
