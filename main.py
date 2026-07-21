@@ -9,7 +9,12 @@ from config import TELEGRAM_BOT_TOKEN, DB_PATH
 from database.db import DatabaseManager
 from providers.fast_flights import FastFlightsProvider
 from daemon.scheduler import register_active_trackers_on_startup
-from bot.handlers import start_command, help_command, cancel_command, execute_search
+from bot.handlers import (
+    start_command, help_command, cancel_command,
+    search_command, handle_search_origin, select_search_origin_callback,
+    handle_search_destination, select_search_destination_callback, handle_search_date,
+    SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE
+)
 from bot.handlers.track import (
     start_newtrack, handle_origin_input, select_origin_callback,
     handle_destination_input, select_destination_callback,
@@ -58,6 +63,28 @@ def main():
     app.add_handler(CommandHandler("mytracks", mytracks_command))
     app.add_handler(CallbackQueryHandler(dashboard_callback_handler, pattern="^dash_"))
 
+    # Register search wizard
+    search_wizard = ConversationHandler(
+        entry_points=[CommandHandler("search", search_command)],
+        states={
+            SEARCH_ORIGIN: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_origin),
+                CallbackQueryHandler(select_search_origin_callback, pattern="^src_org_|re_src_org")
+            ],
+            SEARCH_DESTINATION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_destination),
+                CallbackQueryHandler(select_search_destination_callback, pattern="^src_dst_|re_src_dst")
+            ],
+            SEARCH_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_command)],
+        per_chat=True,
+        per_user=True,
+        per_message=False
+    )
+    app.add_handler(search_wizard)
+
+    # Register track wizard
     track_wizard = ConversationHandler(
         entry_points=[CommandHandler("newtrack", start_newtrack)],
         states={
