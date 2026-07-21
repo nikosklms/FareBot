@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import (
     ApplicationBuilder, Application, CommandHandler, ConversationHandler,
     MessageHandler, CallbackQueryHandler, filters
@@ -24,12 +24,26 @@ logging.basicConfig(
 )
 
 async def post_init(application: Application) -> None:
-    """Async startup initialization hook for database and background daemons."""
+    """Async startup initialization hook for database, background daemons, and bot commands menu."""
     db = DatabaseManager(DB_PATH)
     await db.init_db()
     provider = FastFlightsProvider()
     active_count = await register_active_trackers_on_startup(application, db, provider)
     logging.info(f"Loaded and registered {active_count} active background trackers into JobQueue.")
+
+    # Register Bot Command Menu in Telegram UI (setMyCommands API)
+    commands = [
+        BotCommand("search", "Instant single flight price search"),
+        BotCommand("newtrack", "Start background price tracking daemon"),
+        BotCommand("mytracks", "Manage your active tracking daemons"),
+        BotCommand("help", "View bot usage guide and help"),
+        BotCommand("cancel", "Cancel current wizard setup"),
+    ]
+    try:
+        await application.bot.set_my_commands(commands)
+        logging.info("Successfully registered Telegram Bot Commands Menu.")
+    except Exception as e:
+        logging.warning(f"Failed to set Telegram Bot Commands Menu: {e}")
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
@@ -59,7 +73,10 @@ def main():
             BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_budget)],
             FREQUENCY: [CallbackQueryHandler(select_frequency_callback, pattern="^freq_")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_command)]
+        fallbacks=[CommandHandler("cancel", cancel_command)],
+        per_chat=True,
+        per_user=True,
+        per_message=False
     )
     app.add_handler(track_wizard)
 
