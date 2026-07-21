@@ -13,7 +13,7 @@ from bot.handlers import (
     start_command, help_command, cancel_command,
     search_command, handle_search_origin, select_search_origin_callback,
     handle_search_destination, select_search_destination_callback, handle_search_date,
-    SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE
+    search_track_callback_handler, SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE
 )
 from bot.handlers.track import (
     start_newtrack, handle_origin_input, select_origin_callback,
@@ -62,6 +62,7 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("mytracks", mytracks_command))
     app.add_handler(CallbackQueryHandler(dashboard_callback_handler, pattern="^dash_"))
+    app.add_handler(CallbackQueryHandler(search_track_callback_handler, pattern="^track_"))
 
     # Register search wizard
     search_wizard = ConversationHandler(

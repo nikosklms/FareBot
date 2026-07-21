@@ -4,10 +4,13 @@ from telegram.ext import (
 )
 from providers.fast_flights import FastFlightsProvider
 from services.resolver import LocationResolver
+from config import DB_PATH, MAX_TRACKERS_PER_USER
+from database.db import DatabaseManager
 
 SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE = range(10, 13)
 resolver = LocationResolver()
 provider = FastFlightsProvider()
+db_manager = DatabaseManager(DB_PATH)
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for /search command."""
@@ -134,3 +137,42 @@ async def execute_search(
     keyboard.append([InlineKeyboardButton("🔔 Track Prices for this Flight", callback_data=f"track_{origin}_{destination}_{date}_{lowest.price}")])
 
     await status_msg.edit_text(reply_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def search_track_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback for 'Track Prices for this Flight' button on search results."""
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split("_")
+    if len(parts) >= 5:
+        origin, destination, date, price = parts[1], parts[2], parts[3], float(parts[4])
+        user_id = query.from_user.id
+
+        active_count = await db_manager.get_active_trackers_count(user_id)
+        if active_count >= MAX_TRACKERS_PER_USER:
+            await query.message.reply_text(
+                f"⚠️ You have reached your limit of {MAX_TRACKERS_PER_USER} active trackers.\n"
+                "Please delete an existing tracker using `/mytracks` first."
+            )
+            return
+
+        tracker_id = await db_manager.create_tracker(
+            user_id=user_id,
+            origin_code=origin,
+            origin_name=origin,
+            destination_code=destination,
+            destination_name=destination,
+            departure_date=date,
+            max_budget=price,
+            frequency_hours=6
+        )
+
+        await query.message.reply_text(
+            f"🔔 **Tracking Started!**\n\n"
+            f"📍 **Route**: {origin} ✈️ {destination}\n"
+            f"📅 **Date**: {date}\n"
+            f"🎯 **Target Budget**: €{price:.2f}\n"
+            f"🔄 **Polling Frequency**: Every 6 hours\n\n"
+            "Fare Bot will notify you if prices drop lower!",
+            parse_mode="Markdown"
+        )
