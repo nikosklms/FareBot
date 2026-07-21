@@ -27,6 +27,7 @@ from bot.handlers import (
     handle_destination_input,
     select_destination_callback,
     handle_departure_date,
+    select_flight_type_callback,
     handle_budget,
     select_frequency_callback,
     mytracks_command,
@@ -41,6 +42,7 @@ from bot.handlers import (
     ORIGIN,
     DESTINATION,
     DEPARTURE_DATE,
+    FLIGHT_TYPE,
     BUDGET,
     FREQUENCY,
     SEARCH_ORIGIN,
@@ -120,6 +122,7 @@ def main():
                 CallbackQueryHandler(select_destination_callback, pattern="^sel_dst_|re_dst")
             ],
             DEPARTURE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date)],
+            FLIGHT_TYPE: [CallbackQueryHandler(select_flight_type_callback, pattern="^fl_type_")],
             BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_budget)],
             FREQUENCY: [CallbackQueryHandler(select_frequency_callback, pattern="^freq_")]
         },
@@ -128,6 +131,7 @@ def main():
         per_user=True
     )
     app.add_handler(track_wizard)
+
 
     print("🤖 Fare Bot is starting...")
     app.run_polling(drop_pending_updates=True)

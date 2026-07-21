@@ -37,11 +37,27 @@ async def test_handle_departure_date_validation():
     assert state == DEPARTURE_DATE
     assert "cannot be in the past" in update.message.reply_text.call_args[0][0]
 
-    # Future date should advance to BUDGET state
+    # Future date should advance to FLIGHT_TYPE state
     update.message.text = "2028-12-01"
     state = await handle_departure_date(update, context)
-    assert state == BUDGET
     assert context.user_data["departure_date"] == "2028-12-01"
+
+@pytest.mark.asyncio
+async def test_handle_flight_type_selection():
+    from bot.handlers.track import select_flight_type_callback, BUDGET
+
+    update = MagicMock()
+    query = MagicMock()
+    query.data = "fl_type_1"
+    query.answer = AsyncMock()
+    query.message.edit_text = AsyncMock()
+    update.callback_query = query
+    context = MagicMock()
+    context.user_data = {}
+
+    state = await select_flight_type_callback(update, context)
+    assert state == BUDGET
+    assert context.user_data["direct_only"] == 1
 
 @pytest.mark.asyncio
 async def test_handle_budget_validation():
@@ -67,4 +83,5 @@ async def test_handle_budget_validation():
     state = await handle_budget(update, context)
     assert state == FREQUENCY
     assert context.user_data["max_budget"] == 150.50
+
 

@@ -6,7 +6,7 @@ from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
 from daemon import schedule_tracker_job
 
-ORIGIN, DESTINATION, DEPARTURE_DATE, BUDGET, FREQUENCY = range(5)
+ORIGIN, DESTINATION, DEPARTURE_DATE, FLIGHT_TYPE, BUDGET, FREQUENCY = range(6)
 resolver = LocationResolver()
 db_manager = DatabaseManager(DB_PATH)
 
@@ -21,7 +21,7 @@ async def start_newtrack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     context.user_data.clear()
-    await update.message.reply_text("🛫 **Step 1/5**: Where are you flying from? (e.g., 'Athens', 'ATH')", parse_mode="Markdown")
+    await update.message.reply_text("🛫 **Step 1/6**: Where are you flying from? (e.g., 'Athens', 'ATH')", parse_mode="Markdown")
     return ORIGIN
 
 async def handle_origin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -55,7 +55,7 @@ async def select_origin_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.message.edit_text(
         f"✅ Origin set to: **{iata} - {name}**\n\n"
-        "🛬 **Step 2/5**: Where are you flying to? (e.g., 'London', 'LON')",
+        "🛬 **Step 2/6**: Where are you flying to? (e.g., 'London', 'LON')",
         parse_mode="Markdown"
     )
     return DESTINATION
@@ -91,7 +91,7 @@ async def select_destination_callback(update: Update, context: ContextTypes.DEFA
 
     await query.message.edit_text(
         f"✅ Destination set to: **{iata} - {name}**\n\n"
-        "📅 **Step 3/5**: Enter departure date (`YYYY-MM-DD`):",
+        "📅 **Step 3/6**: Enter departure date (`YYYY-MM-DD`):",
         parse_mode="Markdown"
     )
     return DEPARTURE_DATE
@@ -110,8 +110,27 @@ async def handle_departure_date(update: Update, context: ContextTypes.DEFAULT_TY
 
     context.user_data["departure_date"] = date_str
 
+    buttons = [
+        [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="fl_type_1")],
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")]
+    ]
     await update.message.reply_text(
-        "💶 **Step 4/5**: What is your maximum budget threshold in EUR? (e.g., `250`)",
+        "✈️ **Step 4/6**: Select your flight type preference:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+    return FLIGHT_TYPE
+
+async def select_flight_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    direct_only = int(query.data.split("_")[2])
+    context.user_data["direct_only"] = direct_only
+
+    type_label = "Direct Flights Only ✈️" if direct_only else "Any Flights (Direct & Layovers) 🔄"
+    await query.message.edit_text(
+        f"✅ Flight type set to: **{type_label}**\n\n"
+        "💶 **Step 5/6**: What is your maximum budget threshold in EUR? (e.g., `250`)",
         parse_mode="Markdown"
     )
     return BUDGET
@@ -133,7 +152,7 @@ async def handle_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         [InlineKeyboardButton("24 Hours (Daily)", callback_data="freq_24")]
     ]
     await update.message.reply_text(
-        "⏰ **Step 5/5**: How often should Fare Bot check prices?",
+        "⏰ **Step 6/6**: How often should Fare Bot check prices?",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown"
     )
@@ -146,6 +165,7 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
 
     user_id = query.from_user.id
     ud = context.user_data
+    direct_only = ud.get("direct_only", 0)
 
     tracker_id = await db_manager.create_tracker(
         user_id=user_id,
@@ -155,20 +175,24 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
         destination_name=ud["destination_name"],
         departure_date=ud["departure_date"],
         max_budget=ud["max_budget"],
-        frequency_hours=freq_hours
+        frequency_hours=freq_hours,
+        direct_only=direct_only
     )
 
     if context.job_queue:
         schedule_tracker_job(context.job_queue, tracker_id, freq_hours)
 
+    flight_type_str = "Direct Flights Only ✈️" if direct_only else "Any Flights (Direct & Layovers) 🔄"
     summary = (
         "✅ **Tracking Daemon Initialized!**\n\n"
         f"📍 **Route**: {ud['origin_code']} ✈️ {ud['destination_code']}\n"
         f"📅 **Date**: {ud['departure_date']}\n"
+        f"✈️ **Flight Type**: {flight_type_str}\n"
         f"🎯 **Target Budget**: €{ud['max_budget']:.2f}\n"
         f"🔄 **Polling Frequency**: Every {freq_hours} hours\n\n"
         "You will receive a push notification as soon as a price drops below your budget!"
     )
     await query.message.edit_text(summary, parse_mode="Markdown")
     return ConversationHandler.END
+
 
