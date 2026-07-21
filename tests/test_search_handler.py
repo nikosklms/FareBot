@@ -77,4 +77,24 @@ async def test_search_wizard_flight_type_step():
             update, "ATH", "LON", "2028-12-01", direct_only=True
         )
 
+@pytest.mark.asyncio
+async def test_execute_search_departure_arrival_times_formatting():
+    update = MagicMock()
+    status_msg = AsyncMock()
+    update.message.reply_text = AsyncMock(return_value=status_msg)
+
+    offer = FlightOffer(
+        "SKG", "ORY", "2027-04-03", price=85.0, airline="Transavia",
+        is_direct=True, departure_time="17:45", arrival_time="19:55"
+    )
+
+    with patch("bot.handlers.search.provider.search_flights", return_value=[offer]):
+        await execute_search(update, origin="SKG", destination="ORY", date="2027-04-03")
+        status_msg.edit_text.assert_called_once()
+        text = status_msg.edit_text.call_args[0][0]
+        assert "17:45" in text
+        assert "19:55" in text
+
+
+
 

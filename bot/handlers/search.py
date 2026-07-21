@@ -177,9 +177,11 @@ async def execute_search(
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
     for i, o in enumerate(top_offers):
         stop_badge = "Direct ✈️" if o.is_direct else "1+ Stops 🔄"
-        reply_lines.append(f"{emojis[i]} **€{o.price:.2f}** — {o.airline or 'Various'} ({stop_badge})")
+        time_info = f" | 🕒 {o.departure_time} ➔ {o.arrival_time}" if (o.departure_time and o.arrival_time) else ""
+        reply_lines.append(f"{emojis[i]} **€{o.price:.2f}** — {o.airline or 'Various'} ({stop_badge}){time_info}")
 
     reply_text = "\n".join(reply_lines)
+
     lowest = top_offers[0]
 
     keyboard = []
