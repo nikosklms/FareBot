@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from providers.fast_flights import FastFlightsProvider, parse_google_flights_payload
+from providers.fast_flights import FastFlightsProvider, parse_google_flights_payload_generic
 from providers.base import FlightOffer
 
 @pytest.mark.asyncio
@@ -42,3 +42,21 @@ async def test_skg_to_lon_returns_absolute_lowest_price_first():
     # Verify that the lowest price is <= 130 (e.g. Ryanair €93 to STN or easyJet €130 to LGW)
     lowest_offer = offers[0]
     assert lowest_offer.price <= 130.0, f"Expected lowest price <= 130.0, got: {lowest_offer.price} ({lowest_offer.airline})"
+
+@pytest.mark.asyncio
+async def test_ath_to_bud_returns_wizz_air_lowest_price_first():
+    """Verify that searching ATH to BUD finds Wizz Air €60 as the absolute lowest price option first."""
+    provider = FastFlightsProvider()
+    offers = await provider.search_flights(
+        origin="ATH",
+        destination="BUD",
+        departure_date="2026-11-12"
+    )
+    assert len(offers) > 0
+
+    prices = [o.price for o in offers]
+    assert prices == sorted(prices), f"Offers are not sorted by price! Got: {prices}"
+
+    lowest_offer = offers[0]
+    assert lowest_offer.price <= 60.0, f"Expected lowest price <= 60.0, got: {lowest_offer.price} ({lowest_offer.airline})"
+    assert "Wizz" in lowest_offer.airline or lowest_offer.price <= 60.0

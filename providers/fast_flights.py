@@ -30,8 +30,19 @@ class UrllibFetchIntegration(FetchIntegration):
         with urllib.request.urlopen(req, timeout=12) as response:
             return response.read().decode("utf-8")
 
-def parse_google_flights_payload(html: str, default_origin: str, default_destination: str, departure_date: str, return_date: Optional[str], currency: str) -> List[FlightOffer]:
-    """Parse both payload[2] (Top/Best Flights) and payload[3] (Other Flights) from Google Flights HTML."""
+def parse_google_flights_payload_generic(
+    html: str,
+    default_origin: str,
+    default_destination: str,
+    departure_date: str,
+    return_date: Optional[str] = None,
+    currency: str = "EUR"
+) -> List[FlightOffer]:
+    """
+    Generic recursive payload parser for Google Flights HTML response.
+    Traverses the JSON payload tree to extract all valid flight offers across all sections
+    (Top/Best Flights, Low-Cost Carriers like Wizz Air/Ryanair/easyJet, and Other Flights).
+    """
     offers: List[FlightOffer] = []
     try:
         parser = LexborHTMLParser(html)
@@ -46,65 +57,70 @@ def parse_google_flights_payload(html: str, default_origin: str, default_destina
         logger.warning(f"Failed to parse script.ds:1 JSON payload: {e}")
         return offers
 
-    def unwrap_item(item):
-        while isinstance(item, list) and len(item) == 1 and isinstance(item[0], list):
-            item = item[0]
-        return item
-
-    def process_flight_list(flight_list):
-        if not flight_list or not isinstance(flight_list, list):
+    def _walk(obj):
+        if not isinstance(obj, list):
             return
 
-        for raw_item in flight_list:
-            try:
-                item = unwrap_item(raw_item)
-                if not isinstance(item, list) or len(item) == 0:
-                    continue
+        flight_info = None
+        price_val = None
 
-                flight_info = None
-                price_val = None
+        for elem in obj:
+            if isinstance(elem, list):
+                # Valid flight_info node: contains airline list at index 1 and legs list at index 2
+                if len(elem) >= 3 and isinstance(elem[1], list) and isinstance(elem[2], list) and len(elem[2]) > 0:
+                    first_leg = elem[2][0]
+                    # Verify first_leg is a valid segment with full flight details (len > 22 and flight segment metadata)
+                    if isinstance(first_leg, list) and len(first_leg) > 22 and isinstance(first_leg[22], list):
+                        flight_info = elem
 
-                for elem in item:
-                    if isinstance(elem, list):
-                        if len(elem) >= 3 and isinstance(elem[1], list) and isinstance(elem[2], list):
-                            flight_info = elem
-                        if len(elem) >= 1 and isinstance(elem[0], list) and len(elem[0]) >= 2:
-                            if elem[0][0] is None and isinstance(elem[0][1], (int, float)):
-                                price_val = float(elem[0][1])
+                # Valid price_info node: contains [None, price_number] or [price_number]
+                if len(elem) >= 1 and isinstance(elem[0], list) and len(elem[0]) >= 2:
+                    if elem[0][0] is None and isinstance(elem[0][1], (int, float)):
+                        price_val = float(elem[0][1])
 
-                if flight_info and price_val is not None and price_val > 0:
-                    airlines = flight_info[1] if isinstance(flight_info[1], list) else ["Various Airlines"]
-                    airline_name = ", ".join(airlines) if airlines else "Various Airlines"
-                    legs = flight_info[2] if isinstance(flight_info[2], list) else []
-                    orig = legs[0][3] if legs and len(legs[0]) > 3 else default_origin
-                    dest = legs[-1][6] if legs and len(legs[-1]) > 6 else default_destination
+        if flight_info and price_val is not None and price_val > 0:
+            raw_airlines = flight_info[1] if isinstance(flight_info[1], list) else []
+            clean_airlines = [a for a in raw_airlines if isinstance(a, str) and not a.startswith("http") and len(a) < 40]
+            airline_name = ", ".join(clean_airlines) if clean_airlines else "Various Airlines"
 
-                    offers.append(
-                        FlightOffer(
-                            origin=orig,
-                            destination=dest,
-                            departure_date=departure_date,
-                            return_date=return_date,
-                            price=price_val,
-                            currency=currency,
-                            airline=airline_name,
-                            booking_url=f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20{orig}%20on%20{departure_date}"
-                        )
+            legs = flight_info[2]
+            orig_val = legs[0][3] if legs and isinstance(legs[0], list) and len(legs[0]) > 3 else None
+            dest_val = legs[-1][6] if legs and isinstance(legs[-1], list) and len(legs[-1]) > 6 else None
+
+            orig = orig_val if isinstance(orig_val, str) and len(orig_val) == 3 else default_origin
+            dest = dest_val if isinstance(dest_val, str) and len(dest_val) == 3 else default_destination
+
+            if len(orig) == 3 and len(dest) == 3 and orig.isalpha() and dest.isalpha():
+                offers.append(
+                    FlightOffer(
+                        origin=orig,
+                        destination=dest,
+                        departure_date=departure_date,
+                        return_date=return_date,
+                        price=price_val,
+                        currency=currency,
+                        airline=airline_name,
+                        booking_url=f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20{orig}%20on%20{departure_date}"
                     )
-            except Exception:
-                continue
+                )
 
-    # Parse payload[2] (Top / Best Flights - includes low-cost carriers like Ryanair/easyJet)
-    if len(payload) > 2 and isinstance(payload[2], list):
-        process_flight_list(payload[2])
+        for child in obj:
+            _walk(child)
 
-    # Parse payload[3] (Other Flights)
-    if len(payload) > 3 and isinstance(payload[3], list):
-        for sub in payload[3]:
-            if isinstance(sub, list):
-                process_flight_list(sub)
+    _walk(payload)
 
-    return offers
+    # Deduplicate offers by (price, airline, origin, destination)
+    unique_offers: List[FlightOffer] = []
+    seen = set()
+    for offer in offers:
+        key = (offer.price, offer.airline, offer.origin, offer.destination)
+        if key not in seen:
+            seen.add(key)
+            unique_offers.append(offer)
+
+    # Sort strictly ascending by numerical float price so lowest price option is ALWAYS #1
+    unique_offers.sort(key=lambda x: x.price)
+    return unique_offers
 
 class FastFlightsProvider(AbstractFlightProvider):
     async def search_flights(
@@ -136,7 +152,7 @@ class FastFlightsProvider(AbstractFlightProvider):
 
                 try:
                     html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
-                    return parse_google_flights_payload(html, origin, dest_code, departure_date, return_date, currency)
+                    return parse_google_flights_payload_generic(html, origin, dest_code, departure_date, return_date, currency)
                 except Exception as e:
                     logger.error(f"Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
                     return []
@@ -161,6 +177,6 @@ class FastFlightsProvider(AbstractFlightProvider):
                 seen.add(key)
                 unique_offers.append(offer)
 
-        # Sort strictly ascending by price so lowest price option is ALWAYS #1
+        # Sort strictly ascending by numerical float price so lowest price option is ALWAYS #1
         unique_offers.sort(key=lambda x: x.price)
         return unique_offers
