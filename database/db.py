@@ -2,13 +2,54 @@ import sqlite3
 import aiosqlite
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
+from config import DB_PATH
+
+def init_db(db_path: Optional[str] = None):
+    """Synchronously initialize SQLite database tables."""
+    target_path = db_path or DB_PATH
+    conn = sqlite3.connect(target_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trackers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                origin_code TEXT NOT NULL,
+                origin_name TEXT NOT NULL,
+                destination_code TEXT NOT NULL,
+                destination_name TEXT NOT NULL,
+                departure_date TEXT NOT NULL,
+                return_date TEXT,
+                max_budget REAL NOT NULL,
+                currency TEXT DEFAULT 'EUR',
+                frequency_hours INTEGER DEFAULT 6,
+                status TEXT DEFAULT 'ACTIVE',
+                consecutive_failures INTEGER DEFAULT 0,
+                last_checked_at TIMESTAMP,
+                last_price_found REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS price_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tracker_id INTEGER NOT NULL,
+                price REAL NOT NULL,
+                airline TEXT,
+                checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(tracker_id) REFERENCES trackers(id) ON DELETE CASCADE
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
 
 class DatabaseManager:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
 
     async def init_db(self):
-        """Initialize tables according to design spec."""
+        """Initialize tables asynchronously according to design spec."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS trackers (
