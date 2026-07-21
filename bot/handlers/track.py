@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from services.resolver import LocationResolver
 from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
+from daemon import schedule_tracker_job
 
 ORIGIN, DESTINATION, DEPARTURE_DATE, BUDGET, FREQUENCY = range(5)
 resolver = LocationResolver()
@@ -96,6 +98,16 @@ async def select_destination_callback(update: Update, context: ContextTypes.DEFA
 
 async def handle_departure_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     date_str = update.message.text.strip()
+    try:
+        parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        today = datetime.now(timezone.utc).date()
+        if parsed_date < today:
+            await update.message.reply_text("❌ Departure date cannot be in the past. Please enter a valid future date (`YYYY-MM-DD`):", parse_mode="Markdown")
+            return DEPARTURE_DATE
+    except ValueError:
+        await update.message.reply_text("❌ Invalid date format. Please enter date as `YYYY-MM-DD` (e.g. `2026-08-15`):", parse_mode="Markdown")
+        return DEPARTURE_DATE
+
     context.user_data["departure_date"] = date_str
 
     await update.message.reply_text(
@@ -107,6 +119,9 @@ async def handle_departure_date(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         budget = float(update.message.text.strip())
+        if budget <= 0:
+            await update.message.reply_text("❌ Budget must be a positive number greater than 0. Please enter a valid amount:")
+            return BUDGET
         context.user_data["max_budget"] = budget
     except ValueError:
         await update.message.reply_text("❌ Invalid budget amount. Please enter a number (e.g. `250`).")
@@ -132,7 +147,7 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
     user_id = query.from_user.id
     ud = context.user_data
 
-    await db_manager.create_tracker(
+    tracker_id = await db_manager.create_tracker(
         user_id=user_id,
         origin_code=ud["origin_code"],
         origin_name=ud["origin_name"],
@@ -142,6 +157,9 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
         max_budget=ud["max_budget"],
         frequency_hours=freq_hours
     )
+
+    if context.job_queue:
+        schedule_tracker_job(context.job_queue, tracker_id, freq_hours)
 
     summary = (
         "✅ **Tracking Daemon Initialized!**\n\n"
@@ -153,3 +171,4 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
     )
     await query.message.edit_text(summary, parse_mode="Markdown")
     return ConversationHandler.END
+

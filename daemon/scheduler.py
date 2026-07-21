@@ -84,25 +84,54 @@ class TrackerDaemonScheduler:
                 bot, tracker_id, tracker["user_id"], alert_text, InlineKeyboardMarkup(buttons)
             )
 
+def schedule_tracker_job(
+    job_queue,
+    tracker_id: int,
+    frequency_hours: int = 6,
+    db: Optional[DatabaseManager] = None,
+    provider: Optional[AbstractFlightProvider] = None
+):
+    """Dynamically schedule a repeating price check job for a tracker into JobQueue."""
+    if not job_queue:
+        return
+
+    # Unschedule any pre-existing job with the same name first
+    unschedule_tracker_job(job_queue, tracker_id)
+
+    target_db = db or DatabaseManager(DB_PATH)
+    target_provider = provider or FastFlightsProvider()
+    scheduler = TrackerDaemonScheduler(target_db, target_provider)
+    interval_seconds = max(frequency_hours, 1) * 3600
+
+    async def _job_callback(context, t_id=tracker_id):
+        await scheduler.poll_tracker(t_id, context.bot)
+
+    job_queue.run_repeating(
+        _job_callback,
+        interval=interval_seconds,
+        first=10,
+        name=f"tracker_job_{tracker_id}"
+    )
+
+def unschedule_tracker_job(job_queue, tracker_id: int):
+    """Remove a scheduled tracker job from JobQueue if present."""
+    if not job_queue:
+        return
+
+    jobs = job_queue.get_jobs_by_name(f"tracker_job_{tracker_id}")
+    if jobs:
+        for job in jobs:
+            job.schedule_removal()
+
 async def register_active_trackers_on_startup(app, db: DatabaseManager, provider: AbstractFlightProvider) -> int:
     """Reload all ACTIVE trackers from SQLite into JobQueue on startup."""
     active_trackers = await db.get_active_trackers()
-    scheduler = TrackerDaemonScheduler(db, provider)
     count = 0
 
     if app.job_queue:
         for t in active_trackers:
-            interval_seconds = t.get("frequency_hours", 6) * 3600
-
-            async def _job_callback(context, t_id=t["id"]):
-                await scheduler.poll_tracker(t_id, context.bot)
-
-            app.job_queue.run_repeating(
-                _job_callback,
-                interval=interval_seconds,
-                first=10,
-                name=f"tracker_job_{t['id']}"
-            )
+            freq = t.get("frequency_hours", 6)
+            schedule_tracker_job(app.job_queue, t["id"], freq, db=db, provider=provider)
             count += 1
 
     return count
@@ -121,3 +150,4 @@ def register_active_trackers(application):
         loop.create_task(_do_register())
     except RuntimeError:
         asyncio.run(_do_register())
+

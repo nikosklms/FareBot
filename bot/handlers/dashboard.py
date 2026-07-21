@@ -2,6 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import DB_PATH
 from database.db import DatabaseManager
+from daemon import schedule_tracker_job, unschedule_tracker_job
 
 db_manager = DatabaseManager(DB_PATH)
 
@@ -43,12 +44,21 @@ async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAU
     if data.startswith("dash_pause_"):
         tracker_id = int(data.split("_")[2])
         await db_manager.update_tracker_status(tracker_id, "PAUSED")
+        if context.job_queue:
+            unschedule_tracker_job(context.job_queue, tracker_id)
         await query.message.edit_text(f"⏸ Tracker #{tracker_id} paused.")
     elif data.startswith("dash_resume_"):
         tracker_id = int(data.split("_")[2])
         await db_manager.update_tracker_status(tracker_id, "ACTIVE")
+        t = await db_manager.get_tracker_by_id(tracker_id)
+        freq = t.get("frequency_hours", 6) if t else 6
+        if context.job_queue:
+            schedule_tracker_job(context.job_queue, tracker_id, freq)
         await query.message.edit_text(f"▶️ Tracker #{tracker_id} resumed.")
     elif data.startswith("dash_del_"):
         tracker_id = int(data.split("_")[2])
         await db_manager.delete_tracker(tracker_id)
+        if context.job_queue:
+            unschedule_tracker_job(context.job_queue, tracker_id)
         await query.message.edit_text(f"🗑️ Tracker #{tracker_id} deleted.")
+

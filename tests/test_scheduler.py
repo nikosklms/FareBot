@@ -146,3 +146,21 @@ async def test_register_active_trackers_on_startup():
     registered = await register_active_trackers_on_startup(app_mock, db_mock, provider_mock)
     assert registered == 2
     assert job_queue_mock.run_repeating.call_count == 2
+
+def test_schedule_and_unschedule_tracker_job():
+    from daemon.scheduler import schedule_tracker_job, unschedule_tracker_job
+
+    job_queue_mock = MagicMock()
+    mock_job = MagicMock()
+    job_queue_mock.get_jobs_by_name.return_value = [mock_job]
+
+    schedule_tracker_job(job_queue_mock, tracker_id=99, frequency_hours=12)
+    job_queue_mock.run_repeating.assert_called_once()
+    assert job_queue_mock.run_repeating.call_args[1]["name"] == "tracker_job_99"
+    assert mock_job.schedule_removal.call_count == 1
+
+    unschedule_tracker_job(job_queue_mock, tracker_id=99)
+    job_queue_mock.get_jobs_by_name.assert_called_with("tracker_job_99")
+    assert mock_job.schedule_removal.call_count == 2
+
+

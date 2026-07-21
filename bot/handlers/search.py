@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
@@ -6,6 +7,7 @@ from providers.fast_flights import FastFlightsProvider
 from services.resolver import LocationResolver
 from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
+from daemon import schedule_tracker_job
 
 SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE = range(10, 13)
 resolver = LocationResolver()
@@ -16,8 +18,18 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Entry point for /search command."""
     args = context.args
     if args and len(args) >= 3:
-        origin, destination, date = args[0].upper(), args[1].upper(), args[2]
-        await execute_search(update, origin, destination, date)
+        origin, destination, date_str = args[0].upper(), args[1].upper(), args[2]
+        try:
+            parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            today = datetime.now(timezone.utc).date()
+            if parsed_date < today:
+                await update.message.reply_text("❌ Departure date cannot be in the past.")
+                return ConversationHandler.END
+        except ValueError:
+            await update.message.reply_text("❌ Invalid date format. Use `YYYY-MM-DD` (e.g. `/search ATH LON 2026-08-15`).", parse_mode="Markdown")
+            return ConversationHandler.END
+
+        await execute_search(update, origin, destination, date_str)
         return ConversationHandler.END
 
     context.user_data.clear()
@@ -100,6 +112,16 @@ async def select_search_destination_callback(update: Update, context: ContextTyp
 
 async def handle_search_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     date_str = update.message.text.strip()
+    try:
+        parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        today = datetime.now(timezone.utc).date()
+        if parsed_date < today:
+            await update.message.reply_text("❌ Departure date cannot be in the past. Please enter a valid future date (`YYYY-MM-DD`):", parse_mode="Markdown")
+            return SEARCH_DATE
+    except ValueError:
+        await update.message.reply_text("❌ Invalid date format. Please enter date as `YYYY-MM-DD` (e.g. `2026-08-15`):", parse_mode="Markdown")
+        return SEARCH_DATE
+
     origin = context.user_data["search_origin_code"]
     destination = context.user_data["search_destination_code"]
 
@@ -167,6 +189,9 @@ async def search_track_callback_handler(update: Update, context: ContextTypes.DE
             frequency_hours=6
         )
 
+        if context.job_queue:
+            schedule_tracker_job(context.job_queue, tracker_id, 6)
+
         await query.message.reply_text(
             f"🔔 **Tracking Started!**\n\n"
             f"📍 **Route**: {origin} ✈️ {destination}\n"
@@ -176,3 +201,4 @@ async def search_track_callback_handler(update: Update, context: ContextTypes.DE
             "Fare Bot will notify you if prices drop lower!",
             parse_mode="Markdown"
         )
+
