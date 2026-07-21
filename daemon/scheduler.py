@@ -1,10 +1,13 @@
 import logging
+import asyncio
 from datetime import datetime, timezone
+from typing import Optional
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Forbidden, TelegramError, RetryAfter
 from database.db import DatabaseManager
 from providers.base import AbstractFlightProvider
-from config import MAX_CONSECUTIVE_FAILURES
+from providers.fast_flights import FastFlightsProvider
+from config import DB_PATH, MAX_CONSECUTIVE_FAILURES
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +100,24 @@ async def register_active_trackers_on_startup(app, db: DatabaseManager, provider
             app.job_queue.run_repeating(
                 _job_callback,
                 interval=interval_seconds,
-                first=10,  # First run 10 seconds after boot
+                first=10,
                 name=f"tracker_job_{t['id']}"
             )
             count += 1
 
     return count
+
+def register_active_trackers(application):
+    """Helper to register active background trackers on application startup."""
+    db = DatabaseManager(DB_PATH)
+    provider = FastFlightsProvider()
+
+    async def _do_register():
+        active_count = await register_active_trackers_on_startup(application, db, provider)
+        logger.info(f"Loaded and registered {active_count} active background trackers into JobQueue.")
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_do_register())
+    except RuntimeError:
+        asyncio.run(_do_register())

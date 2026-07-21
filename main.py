@@ -47,7 +47,7 @@ from bot.handlers import (
     SEARCH_DESTINATION,
     SEARCH_DATE
 )
-from scheduler.jobs import register_active_trackers, check_tracked_prices
+from daemon import register_active_trackers
 
 # Enable logging
 logging.basicConfig(
