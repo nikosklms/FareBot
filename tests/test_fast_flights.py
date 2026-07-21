@@ -1,7 +1,8 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 from providers.fast_flights import FastFlightsProvider, parse_google_flights_payload_generic
 from providers.base import FlightOffer
+
 
 @pytest.mark.asyncio
 async def test_fast_flights_search_success():
@@ -68,7 +69,8 @@ async def test_fast_flights_direct_only_filter():
     offer_direct = FlightOffer("ATH", "LON", "2026-08-15", price=150.0, is_direct=True)
     offer_stop = FlightOffer("ATH", "LON", "2026-08-15", price=120.0, is_direct=False)
 
-    with patch("providers.fast_flights.create_query", return_value=MagicMock()):
+    with patch("providers.fast_flights.create_query") as mock_cq:
+        mock_cq.return_value = MagicMock()
         with patch("providers.fast_flights.parse_google_flights_payload_generic", return_value=[offer_stop, offer_direct]):
             with patch("providers.fast_flights.UrllibFetchIntegration.fetch_html", return_value="<html></html>"):
                 results_all = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=False)
@@ -77,5 +79,47 @@ async def test_fast_flights_direct_only_filter():
                 results_direct = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=True)
                 assert len(results_direct) == 1
                 assert results_direct[0].is_direct is True
+
+                # Verify max_stops=0 was passed to create_query (NOT stops=0)
+                mock_cq.assert_called_with(
+                    flights=ANY,
+                    trip="one-way",
+                    passengers=ANY,
+                    currency="EUR",
+                    max_stops=0
+                )
+
+
+@pytest.mark.asyncio
+async def test_parse_google_flights_payload_direct_vs_layover():
+    """Verify that parsing payloads with 1 leg vs multiple legs sets is_direct accurately."""
+    # Sample leg structure matching Google Flights payload for 1 leg (direct) vs 2 legs (layover)
+    direct_leg = ["segment1"] + [None]*21 + [["flight_meta"]]
+    layover_leg1 = ["segment1"] + [None]*21 + [["flight_meta"]]
+    layover_leg2 = ["segment2"] + [None]*21 + [["flight_meta"]]
+
+    # Construct mock payload structure matching parse_google_flights_payload_generic expectations
+    flight_node_direct = [None, ["Transavia"], [direct_leg]]
+    flight_node_layover = [None, ["LOT"], [layover_leg1, layover_leg2]]
+
+    payload_direct = [flight_node_direct, [[None, 85.0]]]
+    payload_layover = [flight_node_layover, [[None, 101.0]]]
+
+    import json
+    js_content_direct = f"<script class=\"ds:1\">data:{json.dumps([payload_direct])},</script>"
+    js_content_layover = f"<script class=\"ds:1\">data:{json.dumps([payload_layover])},</script>"
+
+    offers_direct = parse_google_flights_payload_generic(js_content_direct, "SKG", "ORY", "2027-04-03")
+    assert len(offers_direct) == 1
+    assert offers_direct[0].price == 85.0
+    assert offers_direct[0].airline == "Transavia"
+    assert offers_direct[0].is_direct is True
+
+    offers_layover = parse_google_flights_payload_generic(js_content_layover, "SKG", "WAW", "2027-04-03")
+    assert len(offers_layover) == 1
+    assert offers_layover[0].price == 101.0
+    assert offers_layover[0].airline == "LOT"
+    assert offers_layover[0].is_direct is False
+
 
 

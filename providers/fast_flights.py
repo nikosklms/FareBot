@@ -153,9 +153,10 @@ class FastFlightsProvider(AbstractFlightProvider):
                     "currency": currency
                 }
                 if direct_only:
-                    query_kwargs["stops"] = 0
+                    query_kwargs["max_stops"] = 0
 
                 q = create_query(**query_kwargs)
+
 
                 try:
                     html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
