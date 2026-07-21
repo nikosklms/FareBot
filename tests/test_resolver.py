@@ -20,3 +20,16 @@ def test_resolver_city_search():
     assert len(matches) > 0
     iata_codes = [m[0] for m in matches]
     assert any(code in ["LON", "LHR", "LGW", "STN"] for code in iata_codes)
+
+def test_resolver_thessaloniki():
+    resolver = LocationResolver()
+    matches = resolver.resolve("thessaloniki")
+    assert len(matches) > 0
+    assert matches[0][0] == "SKG"
+    assert "Thessaloniki" in matches[0][1]
+
+def test_resolver_skg_exact():
+    resolver = LocationResolver()
+    matches = resolver.resolve("skg")
+    assert len(matches) > 0
+    assert matches[0][0] == "SKG"
