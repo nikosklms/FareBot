@@ -179,9 +179,11 @@ async def execute_search(
         stop_badge = "Direct ✈️" if o.is_direct else "1+ Stops 🔄"
         offset_str = f" (+{o.day_offset})" if getattr(o, "day_offset", 0) > 0 else ""
         time_info = f" | 🕒 {o.departure_time} ➔ {o.arrival_time}{offset_str}" if (o.departure_time and o.arrival_time) else ""
-        reply_lines.append(f"{emojis[i]} **€{o.price:.2f}** — {o.airline or 'Various'} ({stop_badge}){time_info}")
+        price_str = f"[**€{o.price:.2f}**]({o.booking_url})" if o.booking_url else f"**€{o.price:.2f}**"
+        reply_lines.append(f"{emojis[i]} {price_str} — {o.airline or 'Various'} ({stop_badge}){time_info}")
 
     reply_text = "\n".join(reply_lines)
+
 
 
     lowest = top_offers[0]
