@@ -94,3 +94,25 @@ async def test_db_tracker_status_and_failures():
     finally:
         if os.path.exists(db_path):
             os.remove(db_path)
+
+@pytest.mark.asyncio
+async def test_db_direct_only_tracker_field():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+
+    try:
+        db = DatabaseManager(db_path)
+        await db.init_db()
+
+        t_id = await db.create_tracker(
+            user_id=200, origin_code="ATH", origin_name="Athens",
+            destination_code="LON", destination_name="London",
+            departure_date="2026-08-15", max_budget=200.0, direct_only=1
+        )
+
+        tracker = await db.get_tracker_by_id(t_id)
+        assert tracker["direct_only"] == 1
+    finally:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+

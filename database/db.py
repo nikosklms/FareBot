@@ -23,6 +23,7 @@ def init_db(db_path: Optional[str] = None):
                 max_budget REAL NOT NULL,
                 currency TEXT DEFAULT 'EUR',
                 frequency_hours INTEGER DEFAULT 6,
+                direct_only INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'ACTIVE',
                 consecutive_failures INTEGER DEFAULT 0,
                 last_checked_at TIMESTAMP,
@@ -30,6 +31,10 @@ def init_db(db_path: Optional[str] = None):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            cursor.execute("ALTER TABLE trackers ADD COLUMN direct_only INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +69,7 @@ class DatabaseManager:
                     max_budget REAL NOT NULL,
                     currency TEXT DEFAULT 'EUR',
                     frequency_hours INTEGER DEFAULT 6,
+                    direct_only INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'ACTIVE',
                     consecutive_failures INTEGER DEFAULT 0,
                     last_checked_at TIMESTAMP,
@@ -71,6 +77,10 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            try:
+                await db.execute("ALTER TABLE trackers ADD COLUMN direct_only INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS price_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,20 +104,22 @@ class DatabaseManager:
         max_budget: float,
         return_date: Optional[str] = None,
         frequency_hours: int = 6,
-        currency: str = "EUR"
+        currency: str = "EUR",
+        direct_only: int = 0
     ) -> int:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO trackers (
                     user_id, origin_code, origin_name, destination_code, destination_name,
-                    departure_date, return_date, max_budget, frequency_hours, currency
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    departure_date, return_date, max_budget, frequency_hours, currency, direct_only
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user_id, origin_code, origin_name, destination_code, destination_name,
-                departure_date, return_date, max_budget, frequency_hours, currency
+                departure_date, return_date, max_budget, frequency_hours, currency, direct_only
             ))
             await db.commit()
             return cursor.lastrowid
+
 
     async def get_active_trackers_count(self, user_id: int) -> int:
         async with aiosqlite.connect(self.db_path) as db:
