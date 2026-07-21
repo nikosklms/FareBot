@@ -72,15 +72,17 @@ class TrackerDaemonScheduler:
             await self.db.update_tracker_status(tracker_id, "PAUSED")
             filter_badge = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
             stop_badge = "Direct ✈️" if lowest.is_direct else "1+ Stops 🔄"
+            time_line = f"\n🕒 **Flight Times**: {lowest.departure_time} ➔ {lowest.arrival_time}" if (lowest.departure_time and lowest.arrival_time) else ""
             alert_text = (
                 "🚨 **PRICE DROP ALERT!** 🚨\n\n"
                 f"📍 **Route**: {lowest.origin} ✈️ {lowest.destination}\n"
-                f"📅 **Date**: {lowest.departure_date}\n"
+                f"📅 **Date**: {lowest.departure_date}{time_line}\n"
                 f"🎯 **Target Budget**: €{tracker['max_budget']:.2f}\n"
                 f"💶 **Current Price**: **€{lowest.price:.2f}** ({stop_badge})\n"
                 f"🏢 **Airline**: {lowest.airline or 'Various'}\n"
                 f"⚙️ **Filter**: {filter_badge}"
             )
+
             buttons = [
                 [InlineKeyboardButton("🔗 View & Book Flight", url=lowest.booking_url or "https://www.google.com/travel/flights")],
                 [InlineKeyboardButton("⏸ Keep Paused", callback_data=f"dash_pause_{tracker_id}"), InlineKeyboardButton("🗑️ Delete", callback_data=f"dash_del_{tracker_id}")]

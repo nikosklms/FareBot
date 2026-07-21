@@ -191,4 +191,34 @@ async def test_scheduler_polls_with_direct_only_flag():
     )
 
 
+@pytest.mark.asyncio
+async def test_scheduler_alert_includes_flight_times():
+    db_mock = MagicMock()
+    db_mock.get_tracker_by_id = AsyncMock(return_value={
+        "id": 60, "user_id": 100, "origin_code": "SKG", "destination_code": "ORY",
+        "departure_date": "2027-04-03", "max_budget": 100.0, "direct_only": 1,
+        "consecutive_failures": 0, "status": "ACTIVE"
+    })
+    db_mock.log_price = AsyncMock()
+    db_mock.update_tracker_status = AsyncMock()
+    db_mock.reset_failure_count = AsyncMock()
+
+    provider_mock = MagicMock()
+    provider_mock.search_flights = AsyncMock(return_value=[
+        FlightOffer("SKG", "ORY", "2027-04-03", price=85.0, airline="Transavia", is_direct=True, departure_time="17:45", arrival_time="19:55")
+    ])
+
+    bot_mock = MagicMock()
+    bot_mock.send_message = AsyncMock()
+
+    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
+    await scheduler.poll_tracker(tracker_id=60, bot=bot_mock)
+
+    bot_mock.send_message.assert_called_once()
+    msg_text = bot_mock.send_message.call_args[1]["text"]
+    assert "17:45" in msg_text
+    assert "19:55" in msg_text
+
+
+
 
