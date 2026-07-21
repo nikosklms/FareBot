@@ -17,14 +17,17 @@ async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     for t in trackers:
         status_icon = "🟢" if t["status"] == "ACTIVE" else "⏸️" if t["status"] == "PAUSED" else "🔴"
         price_text = f"€{t['last_price_found']:.2f}" if t.get("last_price_found") else "Not checked yet"
+        flight_type_text = "Direct Flights Only ✈️" if t.get("direct_only") else "Any Flights 🔄"
         text = (
             f"{status_icon} **Tracker #{t['id']}**\n"
             f"📍 **Route**: {t['origin_code']} ✈️ {t['destination_code']}\n"
             f"📅 **Date**: {t['departure_date']}\n"
+            f"⚙️ **Flight Type**: {flight_type_text}\n"
             f"🎯 **Target Budget**: €{t['max_budget']:.2f}\n"
             f"📊 **Status**: {t['status']}\n"
             f"💶 **Last Price**: {price_text}"
         )
+
 
         buttons = []
         if t["status"] == "ACTIVE":

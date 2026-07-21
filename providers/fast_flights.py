@@ -142,18 +142,20 @@ class FastFlightsProvider(AbstractFlightProvider):
 
         async def _fetch_for_dest(dest_code: str) -> List[FlightOffer]:
             async with sem:
-                stops_param = 0 if direct_only else None
                 flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
                 if return_date:
                     flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
 
-                q = create_query(
-                    flights=flight_queries,
-                    trip="round-trip" if return_date else "one-way",
-                    passengers=Passengers(adults=1),
-                    stops=stops_param,
-                    currency=currency
-                )
+                query_kwargs = {
+                    "flights": flight_queries,
+                    "trip": "round-trip" if return_date else "one-way",
+                    "passengers": Passengers(adults=1),
+                    "currency": currency
+                }
+                if direct_only:
+                    query_kwargs["stops"] = 0
+
+                q = create_query(**query_kwargs)
 
                 try:
                     html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
@@ -161,6 +163,7 @@ class FastFlightsProvider(AbstractFlightProvider):
                 except Exception as e:
                     logger.error(f"Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
                     return []
+
 
         tasks = [_fetch_for_dest(d) for d in target_destinations]
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
