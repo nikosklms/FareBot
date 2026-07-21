@@ -126,6 +126,24 @@ async def test_parse_google_flights_payload_direct_vs_layover():
     assert offers_layover[0].departure_time == "13:20"
     assert offers_layover[0].arrival_time == "17:20"
 
+@pytest.mark.asyncio
+async def test_parse_google_flights_overnight_flight_day_offset():
+    """Verify that overnight flights spanning across midnight accurately calculate day_offset."""
+    # Leg format: index 8 is [23, 0], index 10 is [4, 15], index 20 is [2027, 4, 3], index 21 is [2027, 4, 4], index 22 is metadata
+    overnight_leg = [None]*8 + [[23, 0], None, [4, 15]] + [None]*9 + [[2027, 4, 3], [2027, 4, 4], [["flight_meta"]]]
+    flight_node = [None, ["Aegean"], [overnight_leg]]
+    payload = [flight_node, [[None, 120.0]]]
+
+    import json
+    js_content = f"<script class=\"ds:1\">data:{json.dumps([payload])},</script>"
+
+    offers = parse_google_flights_payload_generic(js_content, "ATH", "LON", "2027-04-03")
+    assert len(offers) == 1
+    assert offers[0].departure_time == "23:00"
+    assert offers[0].arrival_time == "04:15"
+    assert offers[0].day_offset == 1
+
+
 
 
 

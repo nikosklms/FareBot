@@ -17,7 +17,9 @@ class FlightOffer:
     is_direct: bool = True
     departure_time: Optional[str] = None
     arrival_time: Optional[str] = None
+    day_offset: int = 0
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 
 class AbstractFlightProvider(ABC):

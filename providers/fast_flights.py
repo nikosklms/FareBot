@@ -94,8 +94,23 @@ def parse_google_flights_payload_generic(
                     return f"{t_list[0]:02d}:{t_list[1]:02d}"
                 return None
 
+            def _calc_day_offset(dep_d_list, arr_d_list):
+                try:
+                    if isinstance(dep_d_list, list) and len(dep_d_list) >= 3 and isinstance(arr_d_list, list) and len(arr_d_list) >= 3:
+                        from datetime import date
+                        d1 = date(dep_d_list[0], dep_d_list[1], dep_d_list[2])
+                        d2 = date(arr_d_list[0], arr_d_list[1], arr_d_list[2])
+                        return max(0, (d2 - d1).days)
+                except Exception:
+                    pass
+                return 0
+
             dep_time = _fmt_t(valid_legs[0][8]) if valid_legs and len(valid_legs[0]) > 8 else None
             arr_time = _fmt_t(valid_legs[-1][10]) if valid_legs and len(valid_legs[-1]) > 10 else None
+
+            dep_d_raw = valid_legs[0][20] if valid_legs and len(valid_legs[0]) > 20 else None
+            arr_d_raw = valid_legs[-1][21] if valid_legs and len(valid_legs[-1]) > 21 else None
+            day_offset_val = _calc_day_offset(dep_d_raw, arr_d_raw)
 
             orig = orig_val if isinstance(orig_val, str) and len(orig_val) == 3 else default_origin
             dest = dest_val if isinstance(dest_val, str) and len(dest_val) == 3 else default_destination
@@ -113,9 +128,11 @@ def parse_google_flights_payload_generic(
                         is_direct=is_direct_flight,
                         departure_time=dep_time,
                         arrival_time=arr_time,
+                        day_offset=day_offset_val,
                         booking_url=f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20{orig}%20on%20{departure_date}"
                     )
                 )
+
 
 
         for child in obj:
