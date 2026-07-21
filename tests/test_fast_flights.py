@@ -60,3 +60,22 @@ async def test_ath_to_bud_returns_wizz_air_lowest_price_first():
     lowest_offer = offers[0]
     assert lowest_offer.price <= 60.0, f"Expected lowest price <= 60.0, got: {lowest_offer.price} ({lowest_offer.airline})"
     assert "Wizz" in lowest_offer.airline or lowest_offer.price <= 60.0
+
+@pytest.mark.asyncio
+async def test_fast_flights_direct_only_filter():
+    provider = FastFlightsProvider()
+
+    offer_direct = FlightOffer("ATH", "LON", "2026-08-15", price=150.0, is_direct=True)
+    offer_stop = FlightOffer("ATH", "LON", "2026-08-15", price=120.0, is_direct=False)
+
+    with patch("providers.fast_flights.create_query", return_value=MagicMock()):
+        with patch("providers.fast_flights.parse_google_flights_payload_generic", return_value=[offer_stop, offer_direct]):
+            with patch("providers.fast_flights.UrllibFetchIntegration.fetch_html", return_value="<html></html>"):
+                results_all = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=False)
+                assert len(results_all) == 2
+
+                results_direct = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=True)
+                assert len(results_direct) == 1
+                assert results_direct[0].is_direct is True
+
+

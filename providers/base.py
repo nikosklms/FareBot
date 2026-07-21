@@ -14,6 +14,7 @@ class FlightOffer:
     airline: Optional[str] = None
     flight_number: Optional[str] = None
     booking_url: Optional[str] = None
+    is_direct: bool = True
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AbstractFlightProvider(ABC):
@@ -24,7 +25,9 @@ class AbstractFlightProvider(ABC):
         destination: str,
         departure_date: str,
         return_date: Optional[str] = None,
-        currency: str = "EUR"
+        currency: str = "EUR",
+        direct_only: bool = False
     ) -> List[FlightOffer]:
         """Fetch matching flight offers for the given criteria."""
         pass
+

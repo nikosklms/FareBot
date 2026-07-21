@@ -86,6 +86,7 @@ def parse_google_flights_payload_generic(
             legs = flight_info[2]
             orig_val = legs[0][3] if legs and isinstance(legs[0], list) and len(legs[0]) > 3 else None
             dest_val = legs[-1][6] if legs and isinstance(legs[-1], list) and len(legs[-1]) > 6 else None
+            is_direct_flight = (len(legs) == 1) if isinstance(legs, list) else True
 
             orig = orig_val if isinstance(orig_val, str) and len(orig_val) == 3 else default_origin
             dest = dest_val if isinstance(dest_val, str) and len(dest_val) == 3 else default_destination
@@ -100,6 +101,7 @@ def parse_google_flights_payload_generic(
                         price=price_val,
                         currency=currency,
                         airline=airline_name,
+                        is_direct=is_direct_flight,
                         booking_url=f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20{orig}%20on%20{departure_date}"
                     )
                 )
@@ -129,7 +131,8 @@ class FastFlightsProvider(AbstractFlightProvider):
         destination: str,
         departure_date: str,
         return_date: Optional[str] = None,
-        currency: str = "EUR"
+        currency: str = "EUR",
+        direct_only: bool = False
     ) -> List[FlightOffer]:
         loop = asyncio.get_running_loop()
         fetcher = UrllibFetchIntegration()
@@ -139,6 +142,7 @@ class FastFlightsProvider(AbstractFlightProvider):
 
         async def _fetch_for_dest(dest_code: str) -> List[FlightOffer]:
             async with sem:
+                stops_param = 0 if direct_only else None
                 flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
                 if return_date:
                     flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
@@ -147,6 +151,7 @@ class FastFlightsProvider(AbstractFlightProvider):
                     flights=flight_queries,
                     trip="round-trip" if return_date else "one-way",
                     passengers=Passengers(adults=1),
+                    stops=stops_param,
                     currency=currency
                 )
 
@@ -177,6 +182,10 @@ class FastFlightsProvider(AbstractFlightProvider):
                 seen.add(key)
                 unique_offers.append(offer)
 
+        if direct_only:
+            unique_offers = [o for o in unique_offers if o.is_direct]
+
         # Sort strictly ascending by numerical float price so lowest price option is ALWAYS #1
         unique_offers.sort(key=lambda x: x.price)
         return unique_offers
+
