@@ -1,6 +1,10 @@
 import logging
 import asyncio
-from telegram.ext import ApplicationBuilder, CommandHandler, ConversationHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder, Application, CommandHandler, ConversationHandler,
+    MessageHandler, CallbackQueryHandler, filters
+)
 from config import TELEGRAM_BOT_TOKEN, DB_PATH
 from database.db import DatabaseManager
 from providers.fast_flights import FastFlightsProvider
@@ -19,20 +23,20 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-async def main():
+async def post_init(application: Application) -> None:
+    """Async startup initialization hook for database and background daemons."""
+    db = DatabaseManager(DB_PATH)
+    await db.init_db()
+    provider = FastFlightsProvider()
+    active_count = await register_active_trackers_on_startup(application, db, provider)
+    logging.info(f"Loaded and registered {active_count} active background trackers into JobQueue.")
+
+def main():
     if not TELEGRAM_BOT_TOKEN:
         print("ERROR: TELEGRAM_BOT_TOKEN environment variable is not set!")
         return
 
-    db = DatabaseManager(DB_PATH)
-    await db.init_db()
-
-    provider = FastFlightsProvider()
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Register active trackers from database on boot
-    active_count = await register_active_trackers_on_startup(app, db, provider)
-    logging.info(f"Loaded and registered {active_count} active background trackers into JobQueue.")
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
 
     # Register command handlers
     app.add_handler(CommandHandler("start", start_command))
@@ -60,7 +64,7 @@ async def main():
     app.add_handler(track_wizard)
 
     print("🤖 Fare Bot is starting...")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
