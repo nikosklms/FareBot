@@ -8,20 +8,9 @@ from selectolax.lexbor import LexborHTMLParser
 from fast_flights import create_query, FlightQuery, Passengers
 from fast_flights.integrations.base import FetchIntegration
 from providers.base import AbstractFlightProvider, FlightOffer
+from services.airports_data import MULTI_AIRPORT_CITIES
 
 logger = logging.getLogger(__name__)
-
-# Map multi-airport city codes to constituent airport codes for comprehensive LCC coverage
-MULTI_AIRPORT_CITIES = {
-    "LON": ["LON", "STN", "LGW", "LHR", "LTN"],
-    "PAR": ["PAR", "CDG", "ORY", "BVA"],
-    "NYC": ["NYC", "JFK", "EWR", "LGA"],
-    "ROM": ["ROM", "FCO", "CIA"],
-    "MIL": ["MIL", "MXP", "LIN", "BGY"],
-    "TYO": ["TYO", "HND", "NRT"],
-    "BER": ["BER"],
-    "MUC": ["MUC"],
-}
 
 class UrllibFetchIntegration(FetchIntegration):
     """Custom reliable HTTP fetcher for Google Flights to prevent TLS fingerprinting hangs."""
@@ -130,27 +119,28 @@ class FastFlightsProvider(AbstractFlightProvider):
         fetcher = UrllibFetchIntegration()
 
         target_destinations = MULTI_AIRPORT_CITIES.get(destination.upper(), [destination])
+        sem = asyncio.Semaphore(2)  # Limit concurrent HTTP requests to prevent Google rate limits
 
         async def _fetch_for_dest(dest_code: str) -> List[FlightOffer]:
-            flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
-            if return_date:
-                flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
+            async with sem:
+                flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
+                if return_date:
+                    flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
 
-            q = create_query(
-                flights=flight_queries,
-                trip="round-trip" if return_date else "one-way",
-                passengers=Passengers(adults=1),
-                currency=currency
-            )
+                q = create_query(
+                    flights=flight_queries,
+                    trip="round-trip" if return_date else "one-way",
+                    passengers=Passengers(adults=1),
+                    currency=currency
+                )
 
-            try:
-                html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
-                return parse_google_flights_payload(html, origin, dest_code, departure_date, return_date, currency)
-            except Exception as e:
-                logger.error(f"Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
-                return []
+                try:
+                    html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
+                    return parse_google_flights_payload(html, origin, dest_code, departure_date, return_date, currency)
+                except Exception as e:
+                    logger.error(f"Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
+                    return []
 
-        # Fetch for all target destinations concurrently or sequentially
         tasks = [_fetch_for_dest(d) for d in target_destinations]
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
 

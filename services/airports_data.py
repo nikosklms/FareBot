@@ -1,5 +1,55 @@
 # Comprehensive Global Airport and City Database (~500+ Commercial Airports Worldwide)
 
+# Mapping multi-airport city codes to constituent airport codes for complete LCC coverage
+MULTI_AIRPORT_CITIES = {
+    # EUROPE
+    "LON": ["LON", "LHR", "LGW", "STN", "LTN", "LCY", "SEN"],  # London, UK
+    "PAR": ["PAR", "CDG", "ORY", "BVA"],                       # Paris, France
+    "ROM": ["ROM", "FCO", "CIA"],                              # Rome, Italy
+    "MIL": ["MIL", "MXP", "LIN", "BGY"],                      # Milan, Italy
+    "VCE": ["VCE", "TSF"],                                      # Venice, Italy
+    "BCN": ["BCN", "GRO", "REU"],                              # Barcelona, Spain
+    "MAD": ["MAD"],                                            # Madrid, Spain
+    "STO": ["STO", "ARN", "NYO", "BMA"],                      # Stockholm, Sweden
+    "MOW": ["MOW", "SVO", "DME", "VKO"],                      # Moscow, Russia
+    "IST": ["IST", "SAW"],                                     # Istanbul, Turkey
+    "BFS": ["BFS", "BHD"],                                     # Belfast, UK
+    "BER": ["BER"],                                            # Berlin, Germany
+
+    # NORTH AMERICA
+    "NYC": ["NYC", "JFK", "EWR", "LGA"],                      # New York City, USA
+    "WAS": ["WAS", "IAD", "DCA", "BWI"],                      # Washington D.C., USA
+    "CHI": ["CHI", "ORD", "MDW"],                              # Chicago, USA
+    "MIA": ["MIA", "FLL", "PBI"],                              # South Florida / Miami, USA
+    "DFW": ["DFW", "DAL"],                                     # Dallas / Fort Worth, USA
+    "HOU": ["HOU", "IAH", "HOU"],                              # Houston, USA
+    "SFO": ["SFO", "OAK", "SJC"],                              # San Francisco Bay Area, USA
+    "LAX": ["LAX", "BUR", "LGB", "SNA", "ONT"],                # Greater Los Angeles, USA
+    "MCO": ["MCO", "SFB"],                                     # Orlando, USA
+    "YTO": ["YTO", "YYZ", "YTZ"],                              # Toronto, Canada
+    "MEX": ["MEX", "NLU"],                                     # Mexico City, Mexico
+
+    # LATIN AMERICA
+    "SAO": ["SAO", "GRU", "CGH", "VCP"],                      # São Paulo, Brazil
+    "RIO": ["RIO", "GIG", "SDU"],                              # Rio de Janeiro, Brazil
+    "BUE": ["BUE", "EZE", "AEP"],                              # Buenos Aires, Argentina
+
+    # ASIA PACIFIC
+    "TYO": ["TYO", "HND", "NRT"],                              # Tokyo, Japan
+    "OSA": ["OSA", "KIX", "ITM", "UKB"],                      # Osaka, Japan
+    "SEL": ["SEL", "ICN", "GMP"],                              # Seoul, South Korea
+    "BJS": ["BJS", "PEK", "PKX"],                              # Beijing, China
+    "SHA": ["SHA", "PVG"],                                     # Shanghai, China
+    "TPE": ["TPE", "TSA"],                                     # Taipei, Taiwan
+    "BKK": ["BKK", "DMK"],                                     # Bangkok, Thailand
+    "JKT": ["JKT", "CGK", "HLP"],                              # Jakarta, Indonesia
+    "MNL": ["MNL", "CRK"],                                     # Manila, Philippines
+
+    # MIDDLE EAST & AFRICA
+    "DXB": ["DXB", "DWC"],                                     # Dubai, UAE
+    "JNB": ["JNB", "HLA"],                                     # Johannesburg, South Africa
+}
+
 AIRPORT_DATA = [
     # GREECE
     ("ATH", "Athens Eleftherios Venizelos", "Greece"),
