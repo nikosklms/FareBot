@@ -85,10 +85,13 @@ class TrackerDaemonScheduler:
                 f"⚙️ **Filter**: {filter_badge}"
             )
 
+            from providers.fast_flights import build_google_flights_url
+            booking_link = lowest.booking_url or build_google_flights_url(lowest.origin, lowest.destination, lowest.departure_date, direct_only=direct_only)
             buttons = [
-                [InlineKeyboardButton("🔗 View & Book Flight", url=lowest.booking_url or "https://www.google.com/travel/flights")],
+                [InlineKeyboardButton("🔗 View & Book Flight", url=booking_link)],
                 [InlineKeyboardButton("⏸ Keep Paused", callback_data=f"dash_pause_{tracker_id}"), InlineKeyboardButton("🗑️ Delete", callback_data=f"dash_del_{tracker_id}")]
             ]
+
             await self._safe_send_message(
                 bot, tracker_id, tracker["user_id"], alert_text, InlineKeyboardMarkup(buttons)
             )

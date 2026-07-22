@@ -143,6 +143,29 @@ async def test_parse_google_flights_overnight_flight_day_offset():
     assert offers[0].arrival_time == "04:15"
     assert offers[0].day_offset == 1
 
+@pytest.mark.asyncio
+async def test_google_flights_url_generation_and_deep_link_extraction():
+    """Verify that generated booking URLs use Google Flights /search?tfs= format and extract offer tokens when available."""
+    from providers.fast_flights import build_google_flights_url
+    url = build_google_flights_url("SKG", "BUD", "2027-01-09", direct_only=True)
+    assert "google.com/travel/flights/search?tfs=" in url
+    assert "SKG" not in url or "tfs=" in url
+    assert "?q=" not in url
+
+    # Test payload parsing with a valid offer token string starting with Cj
+    leg = [None]*8 + [[22, 50], None, [23, 30]] + [None]*11 + [["flight_meta"]]
+    flight_node = [None, ["Wizz Air"], [leg]]
+    price_node = [[None, 25.0], "CjRIdi1NelI5YmdfR1VBQUFXNGdCRy0tLS0tLS0tZWpja3gyMEFBQUFBR3BnQjh3SndXTU9BEgZXNjI0NDgaCgjDExACGgNFVVI4HXChFg=="]
+    payload = [flight_node, price_node]
+
+    import json
+    js_content = f"<script class=\"ds:1\">data:{json.dumps([payload])},</script>"
+    offers = parse_google_flights_payload_generic(js_content, "SKG", "BUD", "2027-01-09")
+    assert len(offers) == 1
+    assert offers[0].booking_url is not None
+    assert "google.com/travel/flights/search?tfs=CjRIdi" in offers[0].booking_url
+
+
 
 
 

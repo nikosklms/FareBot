@@ -187,10 +187,13 @@ async def execute_search(
 
 
     lowest = top_offers[0]
+    from providers.fast_flights import build_google_flights_url
+    booking_url = lowest.booking_url or build_google_flights_url(origin, destination, date, direct_only=direct_only)
 
-    keyboard = []
-    if lowest.booking_url:
-        keyboard.append([InlineKeyboardButton("🔗 View Best Offer on Google Flights", url=lowest.booking_url)])
+    keyboard = [
+        [InlineKeyboardButton("🔗 View Best Offer on Google Flights", url=booking_url)]
+    ]
+
     
     direct_flag_val = 1 if direct_only else 0
     keyboard.append([

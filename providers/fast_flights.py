@@ -30,6 +30,29 @@ class UrllibFetchIntegration(FetchIntegration):
         with urllib.request.urlopen(req, timeout=12) as response:
             return response.read().decode("utf-8")
 
+def build_google_flights_url(
+    origin: str,
+    destination: str,
+    departure_date: str,
+    currency: str = "EUR",
+    direct_only: bool = False
+) -> str:
+    """Construct a valid Google Flights search URL with protobuf tfs parameter."""
+    try:
+        from fast_flights import create_query, FlightQuery, Passengers
+        q = create_query(
+            flights=[FlightQuery(date=departure_date, from_airport=origin, to_airport=destination)],
+            passengers=Passengers(adults=1),
+            currency=currency
+        )
+        params = q.params()
+        if direct_only:
+            params["max_stops"] = 0
+        return f"https://www.google.com/travel/flights/search?{urllib.parse.urlencode(params)}"
+    except Exception as e:
+        logger.warning(f"Failed to generate Google Flights tfs URL: {e}")
+        return f"https://www.google.com/travel/flights/search?tfs=GhoSC{departure_date}jBRID{origin}rUSA{destination}&curr={currency}"
+
 def parse_google_flights_payload_generic(
     html: str,
     default_origin: str,
@@ -38,18 +61,14 @@ def parse_google_flights_payload_generic(
     return_date: Optional[str] = None,
     currency: str = "EUR"
 ) -> List[FlightOffer]:
-    """
-    Generic recursive payload parser for Google Flights HTML response.
-    Traverses the JSON payload tree to extract all valid flight offers across all sections
-    (Top/Best Flights, Low-Cost Carriers like Wizz Air/Ryanair/easyJet, and Other Flights).
-    """
+    """Parse Google Flights html JSON payload and extract matching flight offers."""
     offers: List[FlightOffer] = []
-    try:
-        parser = LexborHTMLParser(html)
-        script = parser.css_first(r"script.ds\:1")
-        if not script:
-            return offers
+    parser = LexborHTMLParser(html)
+    script = parser.css_first(r"script.ds\:1")
+    if not script:
+        return offers
 
+    try:
         js = script.text()
         data_str = js.split("data:", 1)[1].rsplit(",", 1)[0]
         payload = json.loads(data_str)
@@ -63,6 +82,7 @@ def parse_google_flights_payload_generic(
 
         flight_info = None
         price_val = None
+        token_str = None
 
         for elem in obj:
             if isinstance(elem, list):
@@ -77,6 +97,11 @@ def parse_google_flights_payload_generic(
                 if len(elem) >= 1 and isinstance(elem[0], list) and len(elem[0]) >= 2:
                     if elem[0][0] is None and isinstance(elem[0][1], (int, float)):
                         price_val = float(elem[0][1])
+
+                if len(elem) > 1 and isinstance(elem[1], str) and elem[1].startswith("Cj"):
+                    token_str = elem[1]
+                elif len(elem) > 0 and isinstance(elem[0], list) and len(elem[0]) > 1 and isinstance(elem[0][1], str) and elem[0][1].startswith("Cj"):
+                    token_str = elem[0][1]
 
         if flight_info and price_val is not None and price_val > 0:
             raw_airlines = flight_info[1] if isinstance(flight_info[1], list) else []
@@ -115,6 +140,11 @@ def parse_google_flights_payload_generic(
             orig = orig_val if isinstance(orig_val, str) and len(orig_val) == 3 else default_origin
             dest = dest_val if isinstance(dest_val, str) and len(dest_val) == 3 else default_destination
 
+            if token_str and token_str.startswith("Cj"):
+                booking_url_val = f"https://www.google.com/travel/flights/search?tfs={urllib.parse.quote(token_str)}&curr={currency}"
+            else:
+                booking_url_val = build_google_flights_url(orig, dest, departure_date, currency=currency)
+
             if len(orig) == 3 and len(dest) == 3 and orig.isalpha() and dest.isalpha():
                 offers.append(
                     FlightOffer(
@@ -129,11 +159,9 @@ def parse_google_flights_payload_generic(
                         departure_time=dep_time,
                         arrival_time=arr_time,
                         day_offset=day_offset_val,
-                        booking_url=f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20{orig}%20on%20{departure_date}"
+                        booking_url=booking_url_val
                     )
                 )
-
-
 
         for child in obj:
             _walk(child)
