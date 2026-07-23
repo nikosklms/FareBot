@@ -35,6 +35,10 @@ def init_db(db_path: Optional[str] = None):
             cursor.execute("ALTER TABLE trackers ADD COLUMN direct_only INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        try:
+            cursor.execute("ALTER TABLE trackers ADD COLUMN departure_date_end TEXT")
+        except sqlite3.OperationalError:
+            pass
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +69,7 @@ class DatabaseManager:
                     destination_code TEXT NOT NULL,
                     destination_name TEXT NOT NULL,
                     departure_date TEXT NOT NULL,
+                    departure_date_end TEXT,
                     return_date TEXT,
                     max_budget REAL NOT NULL,
                     currency TEXT DEFAULT 'EUR',
@@ -79,6 +84,10 @@ class DatabaseManager:
             """)
             try:
                 await db.execute("ALTER TABLE trackers ADD COLUMN direct_only INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                await db.execute("ALTER TABLE trackers ADD COLUMN departure_date_end TEXT")
             except sqlite3.OperationalError:
                 pass
             await db.execute("""
@@ -105,17 +114,18 @@ class DatabaseManager:
         return_date: Optional[str] = None,
         frequency_hours: int = 6,
         currency: str = "EUR",
-        direct_only: int = 0
+        direct_only: int = 0,
+        departure_date_end: Optional[str] = None
     ) -> int:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO trackers (
                     user_id, origin_code, origin_name, destination_code, destination_name,
-                    departure_date, return_date, max_budget, frequency_hours, currency, direct_only
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    departure_date, departure_date_end, return_date, max_budget, frequency_hours, currency, direct_only
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user_id, origin_code, origin_name, destination_code, destination_name,
-                departure_date, return_date, max_budget, frequency_hours, currency, direct_only
+                departure_date, departure_date_end, return_date, max_budget, frequency_hours, currency, direct_only
             ))
             await db.commit()
             return cursor.lastrowid
