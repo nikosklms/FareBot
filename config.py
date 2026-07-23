@@ -13,6 +13,9 @@ load_dotenv(BASE_DIR / ".env")
 DB_PATH = os.getenv("FAREST_DB_PATH", str(BASE_DIR / "farebot.db"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+raw_users = os.getenv("ALLOWED_USERS", "")
+ALLOWED_USERS = [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
+
 # Polling configuration
 MIN_POLL_INTERVAL_HOURS = 6
 DEFAULT_POLL_INTERVAL_HOURS = 6

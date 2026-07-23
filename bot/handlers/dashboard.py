@@ -3,9 +3,11 @@ from telegram.ext import ContextTypes
 from config import DB_PATH
 from database.db import DatabaseManager
 from daemon import schedule_tracker_job, unschedule_tracker_job
+from bot.handlers.auth import restricted
 
 db_manager = DatabaseManager(DB_PATH)
 
+@restricted
 async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     trackers = await db_manager.get_user_trackers(user_id)
@@ -39,6 +41,7 @@ async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([buttons]))
 
+@restricted
 async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()

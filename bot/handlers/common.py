@@ -1,6 +1,8 @@
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
+from bot.handlers.auth import restricted
 
+@restricted
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_text = (
         "✈️ **Welcome to Fare Bot!**\n\n"
@@ -15,6 +17,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update.message:
         await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
+@restricted
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = (
         "📖 **Fare Bot User Guide**\n\n"
@@ -26,6 +29,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if update.message:
         await update.message.reply_text(help_text, parse_mode="Markdown")
 
+@restricted
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message:
         await update.message.reply_text("❌ Action cancelled.", parse_mode="Markdown")
