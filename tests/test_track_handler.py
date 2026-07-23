@@ -33,6 +33,39 @@ async def test_start_newtrack_under_limit():
 
 
 @pytest.mark.asyncio
+async def test_start_newtrack_one_line_command():
+    """One-line /track command should parse all arguments and create tracker immediately."""
+    update = MagicMock()
+    update.effective_user.id = 42
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.args = ["ATH", "LON", "2028-09-01..2028-09-15", "150"]
+    context.job_queue = MagicMock()
+
+    with patch("bot.handlers.track.db_manager") as db_mock, \
+         patch("bot.handlers.track.schedule_tracker_job") as sched_mock:
+        db_mock.get_active_trackers_count = AsyncMock(return_value=0)
+        db_mock.create_tracker = AsyncMock(return_value=99)
+
+        state = await start_newtrack(update, context)
+
+    assert state == ConversationHandler.END
+    db_mock.create_tracker.assert_called_once_with(
+        user_id=42,
+        origin_code="ATH",
+        origin_name="ATH",
+        destination_code="LON",
+        destination_name="LON",
+        departure_date="2028-09-01",
+        departure_date_end="2028-09-15",
+        max_budget=150.0,
+        frequency_hours=6,
+        direct_only=0
+    )
+    sched_mock.assert_called_once_with(context.job_queue, 99, 6)
+
+
+@pytest.mark.asyncio
 async def test_start_newtrack_at_limit():
     """New tracker creation should be rejected when user already has MAX_TRACKERS_PER_USER."""
     update = MagicMock()
