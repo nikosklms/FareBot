@@ -38,21 +38,32 @@ class TrackerDaemonScheduler:
             return
 
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if tracker["departure_date"] < today_str:
+        end_date = tracker.get("departure_date_end") or tracker["departure_date"]
+        if end_date < today_str:
             await self.db.update_tracker_status(tracker_id, "EXPIRED")
+            date_display = f"{tracker['departure_date']} ➔ {end_date}" if tracker.get("departure_date_end") else tracker["departure_date"]
             await self._safe_send_message(
                 bot, tracker_id, tracker["user_id"],
-                f"ℹ️ Your tracker for **{tracker['origin_code']} ✈️ {tracker['destination_code']}** on **{tracker['departure_date']}** has expired as the departure date has passed."
+                f"ℹ️ Your tracker for **{tracker['origin_code']} ✈️ {tracker['destination_code']}** on **{date_display}** has expired as the departure date has passed."
             )
             return
 
         direct_only = bool(tracker.get("direct_only", 0))
-        offers = await self.provider.search_flights(
-            origin=tracker["origin_code"],
-            destination=tracker["destination_code"],
-            departure_date=tracker["departure_date"],
-            direct_only=direct_only
-        )
+        if tracker.get("departure_date_end"):
+            offers = await self.provider.search_flights_range(
+                origin=tracker["origin_code"],
+                destination=tracker["destination_code"],
+                start_date=tracker["departure_date"],
+                end_date=tracker["departure_date_end"],
+                direct_only=direct_only
+            )
+        else:
+            offers = await self.provider.search_flights(
+                origin=tracker["origin_code"],
+                destination=tracker["destination_code"],
+                departure_date=tracker["departure_date"],
+                direct_only=direct_only
+            )
 
         if not offers:
             fails = await self.db.increment_failure_count(tracker_id)
@@ -65,30 +76,43 @@ class TrackerDaemonScheduler:
             return
 
         await self.db.reset_failure_count(tracker_id)
-        lowest = min(offers, key=lambda x: x.price)
+        # Sort offers by price ascending, take top 5
+        offers.sort(key=lambda x: x.price)
+        top_offers = offers[:5]
+        lowest = top_offers[0]
         await self.db.log_price(tracker_id, lowest.price, lowest.airline)
 
         if lowest.price <= tracker["max_budget"]:
             await self.db.update_tracker_status(tracker_id, "PAUSED")
             filter_badge = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
-            stop_badge = "Direct ✈️" if lowest.is_direct else "1+ Stops 🔄"
-            offset_str = f" (+{lowest.day_offset})" if getattr(lowest, "day_offset", 0) > 0 else ""
-            time_line = f"\n🕒 **Flight Times**: {lowest.departure_time} ➔ {lowest.arrival_time}{offset_str}" if (lowest.departure_time and lowest.arrival_time) else ""
-            alert_text = (
-
-                "🚨 **PRICE DROP ALERT!** 🚨\n\n"
-                f"📍 **Route**: {lowest.origin} ✈️ {lowest.destination}\n"
-                f"📅 **Date**: {lowest.departure_date}{time_line}\n"
-                f"🎯 **Target Budget**: €{tracker['max_budget']:.2f}\n"
-                f"💶 **Current Price**: **€{lowest.price:.2f}** ({stop_badge})\n"
-                f"🏢 **Airline**: {lowest.airline or 'Various'}\n"
-                f"⚙️ **Filter**: {filter_badge}"
-            )
 
             from providers.fast_flights import build_google_flights_url
+
+            date_display = f"{tracker['departure_date']} ➔ {tracker['departure_date_end']}" if tracker.get("departure_date_end") else tracker['departure_date']
+            alert_lines = [
+                "🚨 **PRICE DROP ALERT!** 🚨\n",
+                f"📍 **Route**: {lowest.origin} ✈️ {lowest.destination}",
+                f"📅 **Date**: {date_display}",
+                f"🎯 **Target Budget**: €{tracker['max_budget']:.2f}",
+                f"⚙️ **Filter**: {filter_badge}\n",
+                f"✈️ **Top {len(top_offers)} Matching Offers:**\n"
+            ]
+
+            emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+            for i, o in enumerate(top_offers):
+                stop_badge = "Direct ✈️" if o.is_direct else "1+ Stops 🔄"
+                offset_str = f" (+{o.day_offset})" if getattr(o, "day_offset", 0) > 0 else ""
+                time_info = f" | 🕒 {o.departure_time} ➔ {o.arrival_time}{offset_str}" if (o.departure_time and o.arrival_time) else ""
+                offer_url = o.booking_url or build_google_flights_url(o.origin, o.destination, o.departure_date, direct_only=direct_only)
+                date_badge = f" ({o.departure_date})" if tracker.get("departure_date_end") else ""
+                price_str = f"[**€{o.price:.2f}**]({offer_url})"
+                alert_lines.append(f"{emojis[i]} {price_str}{date_badge} — {o.airline or 'Various'} ({stop_badge}){time_info}")
+
+            alert_text = "\n".join(alert_lines)
+
             booking_link = lowest.booking_url or build_google_flights_url(lowest.origin, lowest.destination, lowest.departure_date, direct_only=direct_only)
             buttons = [
-                [InlineKeyboardButton("🔗 View & Book Flight", url=booking_link)],
+                [InlineKeyboardButton("🔗 View Best Offer on Google Flights", url=booking_link)],
                 [InlineKeyboardButton("⏸ Keep Paused", callback_data=f"dash_pause_{tracker_id}"), InlineKeyboardButton("🗑️ Delete", callback_data=f"dash_del_{tracker_id}")]
             ]
 

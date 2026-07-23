@@ -31,6 +31,35 @@ async def test_scheduler_check_price_match():
     bot_mock.send_message.assert_called_once()
 
 @pytest.mark.asyncio
+async def test_scheduler_polls_date_range():
+    db_mock = MagicMock()
+    db_mock.get_tracker_by_id = AsyncMock(return_value={
+        "id": 10, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
+        "departure_date": "2026-09-01", "departure_date_end": "2026-09-10",
+        "max_budget": 150.0, "status": "ACTIVE", "direct_only": 0, "consecutive_failures": 0
+    })
+    db_mock.log_price = AsyncMock()
+    db_mock.update_tracker_status = AsyncMock()
+    db_mock.reset_failure_count = AsyncMock()
+
+    provider_mock = MagicMock()
+    provider_mock.search_flights_range = AsyncMock(return_value=[
+        FlightOffer("ATH", "LON", "2026-09-05", price=120.0, airline="Aegean")
+    ])
+
+    bot_mock = MagicMock()
+    bot_mock.send_message = AsyncMock()
+
+    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
+    await scheduler.poll_tracker(tracker_id=10, bot=bot_mock)
+
+    provider_mock.search_flights_range.assert_called_once_with(
+        origin="ATH", destination="LON", start_date="2026-09-01", end_date="2026-09-10", direct_only=False
+    )
+    db_mock.log_price.assert_called_once_with(10, 120.0, "Aegean")
+    db_mock.update_tracker_status.assert_called_once_with(10, "PAUSED")
+
+@pytest.mark.asyncio
 async def test_scheduler_3_failures_triggers_pause():
     db_mock = MagicMock()
     db_mock.get_tracker_by_id = AsyncMock(return_value={
@@ -103,6 +132,7 @@ async def test_scheduler_notification_button_payloads():
     inline_keyboard = reply_markup.inline_keyboard
     assert len(inline_keyboard) == 2
     assert inline_keyboard[0][0].url == "http://test.url"
+    assert "View Best Offer" in inline_keyboard[0][0].text
     assert "dash_pause_4" in inline_keyboard[1][0].callback_data
     assert "dash_del_4" in inline_keyboard[1][1].callback_data
 
@@ -218,7 +248,61 @@ async def test_scheduler_alert_includes_flight_times():
     msg_text = bot_mock.send_message.call_args[1]["text"]
     assert "17:45" in msg_text
     assert "19:55" in msg_text
+    assert "Top" in msg_text
+    assert "Matching Offers" in msg_text
 
+@pytest.mark.asyncio
+async def test_scheduler_alert_shows_top_5_offers():
+    """Verify that tracker alerts show top 5 matching offers with per-result booking links."""
+    db_mock = MagicMock()
+    db_mock.get_tracker_by_id = AsyncMock(return_value={
+        "id": 70, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
+        "departure_date": "2026-08-15", "max_budget": 300.0, "direct_only": 0,
+        "consecutive_failures": 0, "status": "ACTIVE"
+    })
+    db_mock.log_price = AsyncMock()
+    db_mock.update_tracker_status = AsyncMock()
+    db_mock.reset_failure_count = AsyncMock()
 
+    offers = [
+        FlightOffer("ATH", "LON", "2026-08-15", price=180.0, airline="Aegean", is_direct=True, departure_time="08:00", arrival_time="10:30", booking_url="http://url1"),
+        FlightOffer("ATH", "LON", "2026-08-15", price=200.0, airline="BA", is_direct=False, departure_time="12:00", arrival_time="16:00", booking_url="http://url2"),
+        FlightOffer("ATH", "LON", "2026-08-15", price=220.0, airline="Ryanair", is_direct=True, departure_time="15:00", arrival_time="17:30", booking_url="http://url3"),
+    ]
 
+    provider_mock = MagicMock()
+    provider_mock.search_flights = AsyncMock(return_value=offers)
+
+    bot_mock = MagicMock()
+    bot_mock.send_message = AsyncMock()
+
+    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
+    await scheduler.poll_tracker(tracker_id=70, bot=bot_mock)
+
+    bot_mock.send_message.assert_called_once()
+    msg_text = bot_mock.send_message.call_args[1]["text"]
+
+    # All 3 offers should appear
+    assert "Aegean" in msg_text
+    assert "BA" in msg_text
+    assert "Ryanair" in msg_text
+
+    # Per-result booking URL hyperlinks
+    assert "http://url1" in msg_text
+    assert "http://url2" in msg_text
+    assert "http://url3" in msg_text
+
+    # Flight type badges
+    assert "Direct ✈️" in msg_text
+    assert "1+ Stops 🔄" in msg_text
+
+    # Times should be present
+    assert "08:00" in msg_text
+    assert "16:00" in msg_text
+
+    # Header should say top 3 (since only 3 offers)
+    assert "Top 3 Matching Offers" in msg_text
+
+    # Lowest price logged
+    db_mock.log_price.assert_called_once_with(70, 180.0, "Aegean")
 
