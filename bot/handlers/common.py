@@ -46,3 +46,12 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if update.message:
         await update.message.reply_text("❌ Action cancelled.", parse_mode="Markdown")
     return ConversationHandler.END
+
+@restricted
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        if query.message and hasattr(query.message, "edit_text"):
+            await query.message.edit_text("❌ Action cancelled.")
+    return ConversationHandler.END
