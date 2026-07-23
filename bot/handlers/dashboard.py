@@ -46,23 +46,35 @@ async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     data = query.data
+    user_id = update.effective_user.id
 
     if data.startswith("dash_pause_"):
         tracker_id = int(data.split("_")[2])
+        t = await db_manager.get_tracker_by_id(tracker_id)
+        if not t or t.get("user_id") != user_id:
+            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
+            return
         await db_manager.update_tracker_status(tracker_id, "PAUSED")
         if context.job_queue:
             unschedule_tracker_job(context.job_queue, tracker_id)
         await query.message.edit_text(f"⏸ Tracker #{tracker_id} paused.")
     elif data.startswith("dash_resume_"):
         tracker_id = int(data.split("_")[2])
-        await db_manager.update_tracker_status(tracker_id, "ACTIVE")
         t = await db_manager.get_tracker_by_id(tracker_id)
+        if not t or t.get("user_id") != user_id:
+            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
+            return
+        await db_manager.update_tracker_status(tracker_id, "ACTIVE")
         freq = t.get("frequency_hours", 6) if t else 6
         if context.job_queue:
             schedule_tracker_job(context.job_queue, tracker_id, freq)
         await query.message.edit_text(f"▶️ Tracker #{tracker_id} resumed.")
     elif data.startswith("dash_del_"):
         tracker_id = int(data.split("_")[2])
+        t = await db_manager.get_tracker_by_id(tracker_id)
+        if not t or t.get("user_id") != user_id:
+            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
+            return
         await db_manager.delete_tracker(tracker_id)
         if context.job_queue:
             unschedule_tracker_job(context.job_queue, tracker_id)
