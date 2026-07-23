@@ -21,6 +21,7 @@ from bot.handlers import (
     start_command,
     help_command,
     cancel_command,
+    cancel_callback,
     start_newtrack,
     handle_origin_input,
     select_origin_callback,
@@ -106,12 +107,14 @@ def main():
             SEARCH_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date)],
             SEARCH_FLIGHT_TYPE: [CallbackQueryHandler(select_search_flight_type_callback, pattern="^src_fl_type_")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_command)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_command),
+            CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
+        ],
         per_chat=True,
         per_user=True
     )
     app.add_handler(search_wizard)
-
 
     # Register track wizard
     track_wizard = ConversationHandler(
@@ -130,7 +133,10 @@ def main():
             BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_budget)],
             FREQUENCY: [CallbackQueryHandler(select_frequency_callback, pattern="^freq_")]
         },
-        fallbacks=[CommandHandler("cancel", cancel_command)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_command),
+            CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
+        ],
         per_chat=True,
         per_user=True
     )

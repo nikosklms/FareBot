@@ -93,7 +93,8 @@ async def start_newtrack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     context.user_data.clear()
-    await update.message.reply_text("🛫 **Step 1/6**: Where are you flying from? (e.g., 'Athens', 'ATH')", parse_mode="Markdown")
+    cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+    await update.message.reply_text("🛫 **Step 1/6**: Where are you flying from? (e.g., 'Athens', 'ATH')", reply_markup=cancel_keyboard, parse_mode="Markdown")
     return ORIGIN
 
 @restricted
@@ -110,6 +111,7 @@ async def handle_origin_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         for iata, name, country, score in matches[:4]
     ]
     buttons.append([InlineKeyboardButton("🔍 Search Again", callback_data="re_org")])
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")])
 
     await update.message.reply_text("Please confirm your origin airport:", reply_markup=InlineKeyboardMarkup(buttons))
     return ORIGIN
@@ -119,7 +121,8 @@ async def select_origin_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     if query.data == "re_org":
-        await query.message.edit_text("🛫 Enter origin city or airport code again:")
+        cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+        await query.message.edit_text("🛫 Enter origin city or airport code again:", reply_markup=cancel_keyboard)
         return ORIGIN
 
     parts = query.data.split("_", 3)
@@ -127,9 +130,11 @@ async def select_origin_callback(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data["origin_code"] = iata
     context.user_data["origin_name"] = name
 
+    cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
     await query.message.edit_text(
         f"✅ Origin set to: **{iata} - {name}**\n\n"
         "🛬 **Step 2/6**: Where are you flying to? (e.g., 'London', 'LON')",
+        reply_markup=cancel_keyboard,
         parse_mode="Markdown"
     )
     return DESTINATION
@@ -148,6 +153,7 @@ async def handle_destination_input(update: Update, context: ContextTypes.DEFAULT
         for iata, name, country, score in matches[:4]
     ]
     buttons.append([InlineKeyboardButton("🔍 Search Again", callback_data="re_dst")])
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")])
 
     await update.message.reply_text("Please confirm your destination airport:", reply_markup=InlineKeyboardMarkup(buttons))
     return DESTINATION
@@ -157,7 +163,8 @@ async def select_destination_callback(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
     if query.data == "re_dst":
-        await query.message.edit_text("🛬 Enter destination city or airport code again:")
+        cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+        await query.message.edit_text("🛬 Enter destination city or airport code again:", reply_markup=cancel_keyboard)
         return DESTINATION
 
     parts = query.data.split("_", 3)
@@ -168,7 +175,8 @@ async def select_destination_callback(update: Update, context: ContextTypes.DEFA
     date_buttons = [
         [InlineKeyboardButton("🗓️ Next 7 Days", callback_data="datepreset_next_7_days"),
          InlineKeyboardButton("✈️ Next 14 Days", callback_data="datepreset_next_14_days")],
-        [InlineKeyboardButton("📅 This Weekend", callback_data="datepreset_this_weekend")]
+        [InlineKeyboardButton("📅 This Weekend", callback_data="datepreset_this_weekend")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     await query.message.edit_text(
         f"✅ Destination set to: **{iata} - {name}**\n\n"
@@ -189,7 +197,8 @@ async def handle_date_preset_callback(update: Update, context: ContextTypes.DEFA
 
     buttons = [
         [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="fl_type_1")],
-        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")]
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     await query.message.edit_text(
         f"📅 **Date Range**: {start_date} ➔ {end_date}\n\n"
@@ -220,7 +229,8 @@ async def handle_departure_date(update: Update, context: ContextTypes.DEFAULT_TY
 
     buttons = [
         [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="fl_type_1")],
-        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")]
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     date_display = f"{start_date} ➔ {end_date}" if end_date else start_date
     await update.message.reply_text(
@@ -239,9 +249,11 @@ async def select_flight_type_callback(update: Update, context: ContextTypes.DEFA
     context.user_data["direct_only"] = direct_only
 
     type_label = "Direct Flights Only ✈️" if direct_only else "Any Flights (Direct & Layovers) 🔄"
+    cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
     await query.message.edit_text(
         f"✅ Flight type set to: **{type_label}**\n\n"
         "💶 **Step 5/6**: What is your maximum budget threshold in EUR? (e.g., `250`)",
+        reply_markup=cancel_keyboard,
         parse_mode="Markdown"
     )
     return BUDGET
@@ -261,7 +273,8 @@ async def handle_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     buttons = [
         [InlineKeyboardButton("6 Hours (Min)", callback_data="freq_6")],
         [InlineKeyboardButton("12 Hours", callback_data="freq_12")],
-        [InlineKeyboardButton("24 Hours (Daily)", callback_data="freq_24")]
+        [InlineKeyboardButton("24 Hours (Daily)", callback_data="freq_24")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     await update.message.reply_text(
         "⏰ **Step 6/6**: How often should Fare Bot check prices?",

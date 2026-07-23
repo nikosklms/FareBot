@@ -33,6 +33,27 @@ async def test_start_newtrack_under_limit():
 
 
 @pytest.mark.asyncio
+async def test_start_newtrack_shows_cancel_button():
+    """Track wizard start prompt should include inline cancel button."""
+    update = MagicMock()
+    update.effective_user.id = 42
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.args = []
+    context.user_data = {}
+
+    with patch("bot.handlers.track.db_manager") as db_mock:
+        db_mock.get_active_trackers_count = AsyncMock(return_value=0)
+        await start_newtrack(update, context)
+
+    reply_markup = update.message.reply_text.call_args[1].get("reply_markup")
+    assert reply_markup is not None
+    cancel_btn = reply_markup.inline_keyboard[-1][0]
+    assert cancel_btn.text == "❌ Cancel"
+    assert cancel_btn.callback_data == "cancel_wizard"
+
+
+@pytest.mark.asyncio
 async def test_start_newtrack_at_limit():
     """New tracker creation should be rejected when user already has MAX_TRACKERS_PER_USER."""
     update = MagicMock()
