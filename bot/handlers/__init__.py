@@ -1,7 +1,7 @@
 from .common import start_command, help_command, cancel_command, cancel_callback
 from .search import (
     search_command, handle_search_origin, select_search_origin_callback,
-    handle_search_destination, select_search_destination_callback, handle_search_date,
+    handle_search_destination, select_search_destination_callback, handle_search_date, handle_search_date_preset_callback,
     select_search_flight_type_callback, execute_search, search_track_callback_handler,
     SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE
 )
@@ -16,7 +16,7 @@ from .dashboard import mytracks_command, dashboard_callback_handler
 __all__ = [
     "start_command", "help_command", "cancel_command", "cancel_callback",
     "search_command", "handle_search_origin", "select_search_origin_callback",
-    "handle_search_destination", "select_search_destination_callback", "handle_search_date",
+    "handle_search_destination", "select_search_destination_callback", "handle_search_date", "handle_search_date_preset_callback",
     "select_search_flight_type_callback", "execute_search", "search_track_callback_handler",
     "SEARCH_ORIGIN", "SEARCH_DESTINATION", "SEARCH_DATE", "SEARCH_FLIGHT_TYPE",
     "start_newtrack", "handle_origin_input", "select_origin_callback",

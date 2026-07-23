@@ -39,6 +39,7 @@ from bot.handlers import (
     handle_search_destination,
     select_search_destination_callback,
     handle_search_date,
+    handle_search_date_preset_callback,
     select_search_flight_type_callback,
     search_track_callback_handler,
     ORIGIN,
@@ -104,7 +105,10 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_destination),
                 CallbackQueryHandler(select_search_destination_callback, pattern="^src_dst_|re_src_dst")
             ],
-            SEARCH_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date)],
+            SEARCH_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date),
+                CallbackQueryHandler(handle_search_date_preset_callback, pattern="^src_datepreset_")
+            ],
             SEARCH_FLIGHT_TYPE: [CallbackQueryHandler(select_search_flight_type_callback, pattern="^src_fl_type_")]
         },
         fallbacks=[

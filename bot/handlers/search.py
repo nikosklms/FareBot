@@ -10,7 +10,7 @@ from database.db import DatabaseManager
 from daemon import schedule_tracker_job
 from bot.handlers.auth import restricted
 
-from utils.date_parser import parse_date_or_range
+from utils.date_parser import parse_date_or_range, get_preset_range
 
 SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE = range(10, 14)
 resolver = LocationResolver()
@@ -131,21 +131,53 @@ async def select_search_destination_callback(update: Update, context: ContextTyp
     iata, name = parts[2], parts[3]
     context.user_data["search_destination_code"] = iata
 
-    cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
-    await query.message.edit_text(f"🛬 **Destination**: {iata} - {name}\n\n📅 **Step 3/4**: When do you want to depart? (e.g., '2026-08-15')", reply_markup=cancel_keyboard, parse_mode="Markdown")
+    date_buttons = [
+        [InlineKeyboardButton("🗓️ Next 7 Days", callback_data="src_datepreset_next_7_days"),
+         InlineKeyboardButton("✈️ Next 14 Days", callback_data="src_datepreset_next_14_days")],
+        [InlineKeyboardButton("📅 This Weekend", callback_data="src_datepreset_this_weekend")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+    await query.message.edit_text(
+        f"🛬 **Destination**: {iata} - {name}\n\n"
+        "📅 **Step 3/4**: Select a quick date preset or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
+        reply_markup=InlineKeyboardMarkup(date_buttons),
+        parse_mode="Markdown"
+    )
     return SEARCH_DATE
+
+@restricted
+async def handle_search_date_preset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    preset_key = query.data.replace("src_datepreset_", "")
+    start_date, end_date = get_preset_range(preset_key)
+    date_str = f"{start_date}..{end_date}" if end_date else start_date
+    context.user_data["search_departure_date"] = date_str
+
+    buttons = [
+        [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="src_fl_type_1")],
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="src_fl_type_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+    await query.message.edit_text(
+        f"📅 **Date Range**: {start_date} ➔ {end_date}\n\n"
+        "⚙️ **Step 4/4**: What type of flights do you want?",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+    return SEARCH_FLIGHT_TYPE
 
 @restricted
 async def handle_search_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     date_str = update.message.text.strip()
     try:
-        parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        today = datetime.now(timezone.utc).date()
-        if parsed_date < today:
+        start_date, end_date = parse_date_or_range(date_str)
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if start_date < today_str:
             await update.message.reply_text("❌ Departure date cannot be in the past. Please enter a valid future date (`YYYY-MM-DD`):", parse_mode="Markdown")
             return SEARCH_DATE
-    except ValueError:
-        await update.message.reply_text("❌ Invalid date format. Please enter date as `YYYY-MM-DD` (e.g. `2026-08-15`):", parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text("❌ Invalid date format. Please enter date as `YYYY-MM-DD` or range as `YYYY-MM-DD..YYYY-MM-DD`:", parse_mode="Markdown")
         return SEARCH_DATE
 
     context.user_data["search_departure_date"] = date_str
@@ -155,7 +187,8 @@ async def handle_search_date(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="src_fl_type_0")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
-    await update.message.reply_text(f"📅 **Date**: {date_str}\n\n⚙️ **Step 4/4**: What type of flights do you want?", reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+    date_display = f"{start_date} ➔ {end_date}" if end_date else start_date
+    await update.message.reply_text(f"📅 **Date**: {date_display}\n\n⚙️ **Step 4/4**: What type of flights do you want?", reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
     return SEARCH_FLIGHT_TYPE
 
 @restricted

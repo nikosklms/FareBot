@@ -117,6 +117,30 @@ async def test_search_wizard_shows_cancel_button():
     assert cancel_btn.callback_data == "cancel_wizard"
 
 @pytest.mark.asyncio
+async def test_select_search_destination_callback_shows_date_presets():
+    """Search wizard destination selection should render quick date preset buttons."""
+    from bot.handlers.search import select_search_destination_callback
+    update = MagicMock()
+    query = MagicMock()
+    query.data = "src_dst_LON_London"
+    query.answer = AsyncMock()
+    query.message.edit_text = AsyncMock()
+    update.callback_query = query
+    context = MagicMock()
+    context.user_data = {}
+
+    await select_search_destination_callback(update, context)
+
+    assert query.message.edit_text.called
+    kwargs = query.message.edit_text.call_args[1]
+    reply_markup = kwargs.get("reply_markup")
+    assert reply_markup is not None
+    labels = [btn.text for row in reply_markup.inline_keyboard for btn in row]
+    assert any("Next 7 Days" in label for label in labels)
+    assert any("Next 14 Days" in label for label in labels)
+    assert any("This Weekend" in label for label in labels)
+
+@pytest.mark.asyncio
 async def test_execute_search_departure_arrival_times_formatting():
     update = MagicMock()
     status_msg = AsyncMock()
