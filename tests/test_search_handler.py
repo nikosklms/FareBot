@@ -34,6 +34,27 @@ async def test_search_command_direct():
         assert res == -1
 
 @pytest.mark.asyncio
+async def test_search_command_with_date_range():
+    update = MagicMock()
+    status_msg = AsyncMock()
+    update.message.reply_text = AsyncMock(return_value=status_msg)
+    context = MagicMock()
+    context.args = ["ATH", "LON", "2026-09-01..2026-09-03"]
+
+    mock_offer = FlightOffer(
+        origin="ATH", destination="LON", departure_date="2026-09-02",
+        price=90.0, airline="Aegean", booking_url="http://example.com"
+    )
+
+    with patch("bot.handlers.search.provider.search_flights_range", new_callable=AsyncMock) as mock_range:
+        mock_range.return_value = [mock_offer]
+        res = await search_command(update, context)
+        assert res == -1
+        mock_range.assert_called_once_with(
+            origin="ATH", destination="LON", start_date="2026-09-01", end_date="2026-09-03", direct_only=False
+        )
+
+@pytest.mark.asyncio
 async def test_search_command_wizard_start():
     update = MagicMock()
     update.message.reply_text = AsyncMock()
@@ -61,7 +82,7 @@ async def test_search_wizard_flight_type_step():
     assert state == SEARCH_FLIGHT_TYPE
     assert context.user_data["search_departure_date"] == "2028-12-01"
     update.message.reply_text.assert_called_once()
-    assert "flight type preference" in update.message.reply_text.call_args[0][0].lower()
+    assert "type of flights" in update.message.reply_text.call_args[0][0].lower()
 
 
     # Test callback selection
