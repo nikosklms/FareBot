@@ -82,7 +82,6 @@ def parse_google_flights_payload_generic(
 
         flight_info = None
         price_val = None
-        token_str = None
 
         for elem in obj:
             if isinstance(elem, list):
@@ -97,11 +96,6 @@ def parse_google_flights_payload_generic(
                 if len(elem) >= 1 and isinstance(elem[0], list) and len(elem[0]) >= 2:
                     if elem[0][0] is None and isinstance(elem[0][1], (int, float)):
                         price_val = float(elem[0][1])
-
-                if len(elem) > 1 and isinstance(elem[1], str) and elem[1].startswith("Cj"):
-                    token_str = elem[1]
-                elif len(elem) > 0 and isinstance(elem[0], list) and len(elem[0]) > 1 and isinstance(elem[0][1], str) and elem[0][1].startswith("Cj"):
-                    token_str = elem[0][1]
 
         if flight_info and price_val is not None and price_val > 0:
             raw_airlines = flight_info[1] if isinstance(flight_info[1], list) else []
@@ -140,10 +134,7 @@ def parse_google_flights_payload_generic(
             orig = orig_val if isinstance(orig_val, str) and len(orig_val) == 3 else default_origin
             dest = dest_val if isinstance(dest_val, str) and len(dest_val) == 3 else default_destination
 
-            if token_str and token_str.startswith("Cj"):
-                booking_url_val = f"https://www.google.com/travel/flights/search?tfs={urllib.parse.quote(token_str)}&curr={currency}"
-            else:
-                booking_url_val = build_google_flights_url(orig, dest, departure_date, currency=currency)
+            booking_url_val = build_google_flights_url(orig, dest, departure_date, currency=currency)
 
             if len(orig) == 3 and len(dest) == 3 and orig.isalpha() and dest.isalpha():
                 offers.append(
@@ -249,4 +240,38 @@ class FastFlightsProvider(AbstractFlightProvider):
         # Sort strictly ascending by numerical float price so lowest price option is ALWAYS #1
         unique_offers.sort(key=lambda x: x.price)
         return unique_offers
+
+    async def search_flights_range(
+        self,
+        origin: str,
+        destination: str,
+        start_date: str,
+        end_date: str,
+        currency: str = "EUR",
+        direct_only: bool = False
+    ) -> List[FlightOffer]:
+        from utils.date_parser import generate_date_sequence
+        dates = generate_date_sequence(start_date, end_date, max_days=14)
+
+        tasks = [
+            self.search_flights(
+                origin=origin,
+                destination=destination,
+                departure_date=d,
+                currency=currency,
+                direct_only=direct_only
+            )
+            for d in dates
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_offers: List[FlightOffer] = []
+        for res in results:
+            if isinstance(res, list):
+                all_offers.extend(res)
+            elif isinstance(res, Exception):
+                logger.error(f"Error fetching flight range: {res}")
+
+        all_offers.sort(key=lambda x: x.price)
+        return all_offers
 

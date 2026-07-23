@@ -26,6 +26,21 @@ async def test_fast_flights_search_success():
         assert offers[0].airline == "Aegean Airlines"
 
 @pytest.mark.asyncio
+async def test_search_flights_range():
+    provider = FastFlightsProvider()
+    async def mock_search(origin, destination, departure_date, **kwargs):
+        price = 100.0 if departure_date == "2026-09-02" else 150.0
+        return [FlightOffer(origin=origin, destination=destination, departure_date=departure_date, price=price)]
+
+    with patch.object(provider, "search_flights", side_effect=mock_search):
+        offers = await provider.search_flights_range(
+            origin="ATH", destination="LON", start_date="2026-09-01", end_date="2026-09-03"
+        )
+        assert len(offers) == 3
+        assert offers[0].departure_date == "2026-09-02"
+        assert offers[0].price == 100.0
+
+@pytest.mark.asyncio
 async def test_skg_to_lon_returns_absolute_lowest_price_first():
     """Verify that searching SKG to LON finds low-cost carriers (e.g. Ryanair/easyJet) and sorts strictly ascending by price."""
     provider = FastFlightsProvider()
@@ -144,17 +159,17 @@ async def test_parse_google_flights_overnight_flight_day_offset():
     assert offers[0].day_offset == 1
 
 @pytest.mark.asyncio
-async def test_google_flights_url_generation_and_deep_link_extraction():
-    """Verify that generated booking URLs use Google Flights /search?tfs= format and extract offer tokens when available."""
+async def test_google_flights_url_generation_and_stateless_booking_links():
+    """Verify that generated booking URLs use Google Flights /search?tfs= format from stateless IATA+date encoding, not session-bound tokens."""
     from providers.fast_flights import build_google_flights_url
     url = build_google_flights_url("SKG", "BUD", "2027-01-09", direct_only=True)
     assert "google.com/travel/flights/search?tfs=" in url
-    assert "SKG" not in url or "tfs=" in url
     assert "?q=" not in url
 
-    # Test payload parsing with a valid offer token string starting with Cj
+    # Test that parsed offers always get a stateless tfs URL, even when payload contains Cj tokens
     leg = [None]*8 + [[22, 50], None, [23, 30]] + [None]*11 + [["flight_meta"]]
     flight_node = [None, ["Wizz Air"], [leg]]
+    # Include a Cj token in the payload — it should NOT be used for the booking URL
     price_node = [[None, 25.0], "CjRIdi1NelI5YmdfR1VBQUFXNGdCRy0tLS0tLS0tZWpja3gyMEFBQUFBR3BnQjh3SndXTU9BEgZXNjI0NDgaCgjDExACGgNFVVI4HXChFg=="]
     payload = [flight_node, price_node]
 
@@ -163,10 +178,8 @@ async def test_google_flights_url_generation_and_deep_link_extraction():
     offers = parse_google_flights_payload_generic(js_content, "SKG", "BUD", "2027-01-09")
     assert len(offers) == 1
     assert offers[0].booking_url is not None
-    assert "google.com/travel/flights/search?tfs=CjRIdi" in offers[0].booking_url
-
-
-
-
+    # URL should be a stateless tfs URL, NOT containing the Cj session token
+    assert "google.com/travel/flights/search?tfs=" in offers[0].booking_url
+    assert "CjRIdi" not in offers[0].booking_url
 
 

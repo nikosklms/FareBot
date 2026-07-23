@@ -36,3 +36,16 @@ class AbstractFlightProvider(ABC):
         """Fetch matching flight offers for the given criteria."""
         pass
 
+    @abstractmethod
+    async def search_flights_range(
+        self,
+        origin: str,
+        destination: str,
+        start_date: str,
+        end_date: str,
+        currency: str = "EUR",
+        direct_only: bool = False
+    ) -> List[FlightOffer]:
+        """Fetch flight offers across a range of departure dates."""
+        pass
+
