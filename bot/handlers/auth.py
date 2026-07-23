@@ -15,7 +15,34 @@ def restricted(func):
         user_id = user.id if user else None
 
         if user_id not in ALLOWED_USERS:
-            logger.warning(f"Unauthorized access attempt by user_id={user_id}")
+            username_str = f"@{user.username}" if user and user.username else "No username"
+            full_name = user.full_name if user else "Unknown"
+            input_text = ""
+            if update.message and update.message.text:
+                input_text = update.message.text
+            elif update.callback_query and update.callback_query.data:
+                input_text = f"Callback: {update.callback_query.data}"
+
+            logger.warning(
+                f"🚨 Unauthorized access attempt! ID={user_id}, User={username_str}, Name='{full_name}', Input='{input_text}'"
+            )
+
+            # Send instant Telegram security alert to bot owner
+            if ALLOWED_USERS and context and hasattr(context, "bot") and hasattr(context.bot, "send_message"):
+                try:
+                    admin_id = ALLOWED_USERS[0]
+                    alert_text = (
+                        "⚠️ **Security Alert: Unauthorized Access Attempt**\n\n"
+                        f"👤 **User**: {username_str} (ID: `{user_id}`)\n"
+                        f"📛 **Name**: {full_name}\n"
+                        f"💬 **Input**: `{input_text}`"
+                    )
+                    res = context.bot.send_message(chat_id=admin_id, text=alert_text, parse_mode="Markdown")
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception as e:
+                    logger.debug(f"Could not send unauthorized alert to admin: {e}")
+
             if update.message and hasattr(update.message, "reply_text"):
                 res = update.message.reply_text("⛔ **Access Denied**: You are not authorized to use this bot.")
                 if inspect.isawaitable(res):
