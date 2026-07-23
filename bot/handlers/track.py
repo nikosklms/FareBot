@@ -23,6 +23,75 @@ async def start_newtrack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return ConversationHandler.END
 
+    args = context.args
+    if args and len(args) >= 4:
+        origin_raw, dest_raw, raw_date, budget_str = args[0], args[1], args[2], args[3]
+        direct_only = 0
+        if len(args) >= 5 and args[4].lower() in ["direct", "direct_only", "--direct", "-d"]:
+            direct_only = 1
+
+        origin_matches = resolver.resolve(origin_raw)
+        dest_matches = resolver.resolve(dest_raw)
+
+        if not origin_matches:
+            await update.message.reply_text(f"❌ Origin location '{origin_raw}' not recognized.")
+            return ConversationHandler.END
+        if not dest_matches:
+            await update.message.reply_text(f"❌ Destination location '{dest_raw}' not recognized.")
+            return ConversationHandler.END
+
+        origin, origin_name = origin_matches[0][0], origin_matches[0][1]
+        destination, dest_name = dest_matches[0][0], dest_matches[0][1]
+
+        try:
+            budget = float(budget_str)
+            if budget <= 0:
+                await update.message.reply_text("❌ Budget must be a positive number greater than 0.")
+                return ConversationHandler.END
+        except ValueError:
+            await update.message.reply_text("❌ Invalid budget amount. Usage: `/track ATH LON 2026-09-01..2026-09-15 150`", parse_mode="Markdown")
+            return ConversationHandler.END
+
+        try:
+            start_date, end_date = parse_date_or_range(raw_date)
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if start_date < today_str:
+                await update.message.reply_text("❌ Departure date cannot be in the past.")
+                return ConversationHandler.END
+        except Exception:
+            await update.message.reply_text("❌ Invalid date format. Usage: `/track ATH LON 2026-09-01..2026-09-15 150`", parse_mode="Markdown")
+            return ConversationHandler.END
+
+        tracker_id = await db_manager.create_tracker(
+            user_id=user_id,
+            origin_code=origin,
+            origin_name=origin_name,
+            destination_code=destination,
+            destination_name=dest_name,
+            departure_date=start_date,
+            departure_date_end=end_date,
+            max_budget=budget,
+            frequency_hours=6,
+            direct_only=direct_only
+        )
+
+        if context.job_queue:
+            schedule_tracker_job(context.job_queue, tracker_id, 6)
+
+        flight_type_str = "Direct Flights Only ✈️" if direct_only else "Any Flights (Direct & Layovers) 🔄"
+        date_display = f"{start_date} ➔ {end_date}" if end_date else start_date
+        summary = (
+            "✅ **Tracking Daemon Initialized!**\n\n"
+            f"📍 **Route**: {origin} ({origin_name}) ✈️ {destination} ({dest_name})\n"
+            f"📅 **Date**: {date_display}\n"
+            f"✈️ **Flight Type**: {flight_type_str}\n"
+            f"🎯 **Target Budget**: €{budget:.2f}\n"
+            f"🔄 **Polling Frequency**: Every 6 hours\n\n"
+            "You will receive a push notification as soon as a price drops below your budget!"
+        )
+        await update.message.reply_text(summary, parse_mode="Markdown")
+        return ConversationHandler.END
+
     context.user_data.clear()
     await update.message.reply_text("🛫 **Step 1/6**: Where are you flying from? (e.g., 'Athens', 'ATH')", parse_mode="Markdown")
     return ORIGIN

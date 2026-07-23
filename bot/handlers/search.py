@@ -22,10 +22,23 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Entry point for /search command."""
     args = context.args
     if args and len(args) >= 3:
-        origin, destination, raw_date = args[0].upper(), args[1].upper(), args[2]
+        origin_raw, dest_raw, raw_date = args[0], args[1], args[2]
         direct_only = False
         if len(args) >= 4 and args[3].lower() in ["direct", "direct_only", "--direct", "-d"]:
             direct_only = True
+
+        origin_matches = resolver.resolve(origin_raw)
+        dest_matches = resolver.resolve(dest_raw)
+
+        if not origin_matches:
+            await update.message.reply_text(f"❌ Origin location '{origin_raw}' not recognized.")
+            return ConversationHandler.END
+        if not dest_matches:
+            await update.message.reply_text(f"❌ Destination location '{dest_raw}' not recognized.")
+            return ConversationHandler.END
+
+        origin = origin_matches[0][0]
+        destination = dest_matches[0][0]
 
         try:
             start_date, end_date = parse_date_or_range(raw_date)
