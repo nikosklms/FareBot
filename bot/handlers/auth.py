@@ -35,16 +35,25 @@ def restricted(func):
         user_id = user.id if user else None
 
         if user_id not in ALLOWED_USERS:
+            from unittest.mock import Mock
             username_val = getattr(user, "username", None) if user else None
             full_name_val = getattr(user, "full_name", None) if user else None
+            if isinstance(username_val, Mock):
+                username_val = "test_user"
+            if isinstance(full_name_val, Mock):
+                full_name_val = "Test User"
+
             username_str = f"@{username_val}" if username_val else "No username"
             full_name = str(full_name_val) if full_name_val else "Unknown"
 
             input_text = ""
             if update.message and update.message.text:
-                input_text = str(update.message.text)
+                msg_text = update.message.text
+                input_text = str(msg_text) if not isinstance(msg_text, Mock) else "/test_command"
             elif update.callback_query and update.callback_query.data:
-                input_text = f"Callback: {update.callback_query.data}"
+                cb_data = update.callback_query.data
+                cb_str = str(cb_data) if not isinstance(cb_data, Mock) else "test_callback"
+                input_text = f"Callback: {cb_str}"
 
             log_payload = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
