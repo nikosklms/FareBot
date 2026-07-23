@@ -23,7 +23,7 @@ def write_persistent_log(log_file: str, payload: dict):
         if "timestamp" not in payload:
             payload["timestamp"] = datetime.now(timezone.utc).isoformat()
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            f.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n\n")
     except Exception as e:
         logger.error(f"Failed to write persistent security log: {e}")
 

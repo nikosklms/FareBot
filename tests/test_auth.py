@@ -84,6 +84,7 @@ async def test_restricted_decorator_writes_persistent_log_file(tmp_path, monkeyp
 
     assert os.path.exists(str(log_file))
     content = log_file.read_text().strip()
+    assert "\n" in content
     import json
     data = json.loads(content)
     assert data["user_id"] == 77777
