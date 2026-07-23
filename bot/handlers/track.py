@@ -5,11 +5,14 @@ from services.resolver import LocationResolver
 from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
 from daemon import schedule_tracker_job
+from bot.handlers.auth import restricted
+from utils.date_parser import parse_date_or_range, get_preset_range
 
 ORIGIN, DESTINATION, DEPARTURE_DATE, FLIGHT_TYPE, BUDGET, FREQUENCY = range(6)
 resolver = LocationResolver()
 db_manager = DatabaseManager(DB_PATH)
 
+@restricted
 async def start_newtrack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     active_count = await db_manager.get_active_trackers_count(user_id)
@@ -24,6 +27,7 @@ async def start_newtrack(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("🛫 **Step 1/6**: Where are you flying from? (e.g., 'Athens', 'ATH')", parse_mode="Markdown")
     return ORIGIN
 
+@restricted
 async def handle_origin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     matches = resolver.resolve(text)
@@ -41,6 +45,7 @@ async def handle_origin_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Please confirm your origin airport:", reply_markup=InlineKeyboardMarkup(buttons))
     return ORIGIN
 
+@restricted
 async def select_origin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -60,6 +65,7 @@ async def select_origin_callback(update: Update, context: ContextTypes.DEFAULT_T
     )
     return DESTINATION
 
+@restricted
 async def handle_destination_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     matches = resolver.resolve(text)
@@ -77,6 +83,7 @@ async def handle_destination_input(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text("Please confirm your destination airport:", reply_markup=InlineKeyboardMarkup(buttons))
     return DESTINATION
 
+@restricted
 async def select_destination_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -89,38 +96,73 @@ async def select_destination_callback(update: Update, context: ContextTypes.DEFA
     context.user_data["destination_code"] = iata
     context.user_data["destination_name"] = name
 
+    date_buttons = [
+        [InlineKeyboardButton("🗓️ Next 7 Days", callback_data="datepreset_next_7_days"),
+         InlineKeyboardButton("✈️ Next 14 Days", callback_data="datepreset_next_14_days")],
+        [InlineKeyboardButton("📅 This Weekend", callback_data="datepreset_this_weekend")]
+    ]
     await query.message.edit_text(
         f"✅ Destination set to: **{iata} - {name}**\n\n"
-        "📅 **Step 3/6**: Enter departure date (`YYYY-MM-DD`):",
+        "📅 **Step 3/6**: Select a quick date preset or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
+        reply_markup=InlineKeyboardMarkup(date_buttons),
         parse_mode="Markdown"
     )
     return DEPARTURE_DATE
 
-async def handle_departure_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    date_str = update.message.text.strip()
-    try:
-        parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        today = datetime.now(timezone.utc).date()
-        if parsed_date < today:
-            await update.message.reply_text("❌ Departure date cannot be in the past. Please enter a valid future date (`YYYY-MM-DD`):", parse_mode="Markdown")
-            return DEPARTURE_DATE
-    except ValueError:
-        await update.message.reply_text("❌ Invalid date format. Please enter date as `YYYY-MM-DD` (e.g. `2026-08-15`):", parse_mode="Markdown")
-        return DEPARTURE_DATE
-
-    context.user_data["departure_date"] = date_str
+@restricted
+async def handle_date_preset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    preset_key = query.data.replace("datepreset_", "")
+    start_date, end_date = get_preset_range(preset_key)
+    context.user_data["departure_date"] = start_date
+    context.user_data["departure_date_end"] = end_date
 
     buttons = [
         [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="fl_type_1")],
         [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")]
     ]
-    await update.message.reply_text(
+    await query.message.edit_text(
+        f"📅 **Date Range**: {start_date} ➔ {end_date}\n\n"
         "✈️ **Step 4/6**: Select your flight type preference:",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown"
     )
     return FLIGHT_TYPE
 
+@restricted
+async def handle_departure_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    date_str = update.message.text.strip()
+    try:
+        start_date, end_date = parse_date_or_range(date_str)
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if start_date < today_str:
+            await update.message.reply_text("❌ Departure date cannot be in the past. Please enter a valid future date (`YYYY-MM-DD`):", parse_mode="Markdown")
+            return DEPARTURE_DATE
+    except Exception:
+        await update.message.reply_text("❌ Invalid date format. Please enter date as `YYYY-MM-DD` or range as `YYYY-MM-DD..YYYY-MM-DD`:", parse_mode="Markdown")
+        return DEPARTURE_DATE
+
+    context.user_data["departure_date"] = start_date
+    if end_date:
+        context.user_data["departure_date_end"] = end_date
+    else:
+        context.user_data.pop("departure_date_end", None)
+
+    buttons = [
+        [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="fl_type_1")],
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")]
+    ]
+    date_display = f"{start_date} ➔ {end_date}" if end_date else start_date
+    await update.message.reply_text(
+        f"📅 **Date**: {date_display}\n\n"
+        "✈️ **Step 4/6**: Select your flight type preference:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+    return FLIGHT_TYPE
+
+@restricted
 async def select_flight_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -135,6 +177,7 @@ async def select_flight_type_callback(update: Update, context: ContextTypes.DEFA
     )
     return BUDGET
 
+@restricted
 async def handle_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         budget = float(update.message.text.strip())
@@ -158,6 +201,7 @@ async def handle_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     )
     return FREQUENCY
 
+@restricted
 async def select_frequency_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -166,6 +210,7 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
     user_id = query.from_user.id
     ud = context.user_data
     direct_only = ud.get("direct_only", 0)
+    dep_end = ud.get("departure_date_end")
 
     tracker_id = await db_manager.create_tracker(
         user_id=user_id,
@@ -174,6 +219,7 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
         destination_code=ud["destination_code"],
         destination_name=ud["destination_name"],
         departure_date=ud["departure_date"],
+        departure_date_end=dep_end,
         max_budget=ud["max_budget"],
         frequency_hours=freq_hours,
         direct_only=direct_only
@@ -183,10 +229,11 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
         schedule_tracker_job(context.job_queue, tracker_id, freq_hours)
 
     flight_type_str = "Direct Flights Only ✈️" if direct_only else "Any Flights (Direct & Layovers) 🔄"
+    date_display = f"{ud['departure_date']} ➔ {dep_end}" if dep_end else ud["departure_date"]
     summary = (
         "✅ **Tracking Daemon Initialized!**\n\n"
         f"📍 **Route**: {ud['origin_code']} ✈️ {ud['destination_code']}\n"
-        f"📅 **Date**: {ud['departure_date']}\n"
+        f"📅 **Date**: {date_display}\n"
         f"✈️ **Flight Type**: {flight_type_str}\n"
         f"🎯 **Target Budget**: €{ud['max_budget']:.2f}\n"
         f"🔄 **Polling Frequency**: Every {freq_hours} hours\n\n"
