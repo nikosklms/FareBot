@@ -58,3 +58,33 @@ async def test_restricted_decorator_blocks_unauthorized_user_callback():
     assert result == ConversationHandler.END
     dummy_handler.assert_not_called()
     update.callback_query.answer.assert_called_once_with("⛔ Access Denied: Unauthorized user", show_alert=True)
+
+@pytest.mark.asyncio
+async def test_restricted_decorator_writes_persistent_log_file(tmp_path, monkeypatch):
+    """Unauthorized attempt should be appended to persistent log file logs/unauthorized_access.log."""
+    import os
+    log_file = tmp_path / "unauthorized_access.log"
+    monkeypatch.setattr("bot.handlers.auth.LOG_FILE_PATH", str(log_file))
+
+    dummy_handler = AsyncMock(return_value="should_not_be_called")
+    decorated = restricted(dummy_handler)
+
+    update = MagicMock()
+    user = MagicMock()
+    user.id = 77777
+    user.username = "intruder_joe"
+    user.full_name = "Joe Intruder"
+    update.effective_user = user
+    update.message = MagicMock()
+    update.message.text = "/search ATH PAR"
+    update.callback_query = None
+    context = MagicMock()
+
+    await decorated(update, context)
+
+    assert os.path.exists(str(log_file))
+    content = log_file.read_text()
+    assert "77777" in content
+    assert "@intruder_joe" in content
+    assert "Joe Intruder" in content
+    assert "/search ATH PAR" in content

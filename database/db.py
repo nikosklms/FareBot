@@ -49,6 +49,16 @@ def init_db(db_path: Optional[str] = None):
                 FOREIGN KEY(tracker_id) REFERENCES trackers(id) ON DELETE CASCADE
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS unauthorized_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                full_name TEXT,
+                input_text TEXT,
+                attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -98,6 +108,16 @@ class DatabaseManager:
                     airline TEXT,
                     checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(tracker_id) REFERENCES trackers(id) ON DELETE CASCADE
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS unauthorized_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    username TEXT,
+                    full_name TEXT,
+                    input_text TEXT,
+                    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             await db.commit()
@@ -225,3 +245,11 @@ class DatabaseManager:
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    async def log_unauthorized_attempt(self, user_id: int, username: Optional[str], full_name: Optional[str], input_text: Optional[str]):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO unauthorized_attempts (user_id, username, full_name, input_text) VALUES (?, ?, ?, ?)",
+                (user_id, username, full_name, input_text)
+            )
+            await db.commit()
