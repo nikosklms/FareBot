@@ -27,7 +27,6 @@ from bot.handlers import (
     handle_destination_input,
     select_destination_callback,
     handle_departure_date,
-    handle_date_preset_callback,
     select_flight_type_callback,
     handle_budget,
     select_frequency_callback,
@@ -66,8 +65,7 @@ async def post_init(application):
     try:
         commands = [
             ("search", "🔍 Search instant flight offers"),
-            ("track", "🔔 Track flight prices"),
-            ("newtrack", "🔔 Track flight prices (wizard)"),
+            ("newtrack", "🔔 Track flight prices"),
             ("mytracks", "📊 Manage price trackers"),
             ("help", "❓ Show help menu"),
             ("start", "🚀 Start bot menu"),
@@ -114,9 +112,10 @@ def main():
     )
     app.add_handler(search_wizard)
 
+
     # Register track wizard
     track_wizard = ConversationHandler(
-        entry_points=[CommandHandler("newtrack", start_newtrack), CommandHandler("track", start_newtrack)],
+        entry_points=[CommandHandler("newtrack", start_newtrack)],
         states={
             ORIGIN: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_origin_input),
@@ -126,10 +125,7 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_destination_input),
                 CallbackQueryHandler(select_destination_callback, pattern="^sel_dst_|re_dst")
             ],
-            DEPARTURE_DATE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date),
-                CallbackQueryHandler(handle_date_preset_callback, pattern="^datepreset_")
-            ],
+            DEPARTURE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date)],
             FLIGHT_TYPE: [CallbackQueryHandler(select_flight_type_callback, pattern="^fl_type_")],
             BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_budget)],
             FREQUENCY: [CallbackQueryHandler(select_frequency_callback, pattern="^freq_")]

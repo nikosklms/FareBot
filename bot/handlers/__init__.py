@@ -7,7 +7,7 @@ from .search import (
 )
 from .track import (
     start_newtrack, handle_origin_input, select_origin_callback,
-    handle_destination_input, select_destination_callback, handle_departure_date, handle_date_preset_callback,
+    handle_destination_input, select_destination_callback, handle_departure_date,
     select_flight_type_callback, handle_budget, select_frequency_callback,
     ORIGIN, DESTINATION, DEPARTURE_DATE, FLIGHT_TYPE, BUDGET, FREQUENCY
 )
@@ -20,7 +20,7 @@ __all__ = [
     "select_search_flight_type_callback", "execute_search", "search_track_callback_handler",
     "SEARCH_ORIGIN", "SEARCH_DESTINATION", "SEARCH_DATE", "SEARCH_FLIGHT_TYPE",
     "start_newtrack", "handle_origin_input", "select_origin_callback",
-    "handle_destination_input", "select_destination_callback", "handle_departure_date", "handle_date_preset_callback",
+    "handle_destination_input", "select_destination_callback", "handle_departure_date",
     "select_flight_type_callback", "handle_budget", "select_frequency_callback",
     "ORIGIN", "DESTINATION", "DEPARTURE_DATE", "FLIGHT_TYPE", "BUDGET", "FREQUENCY",
     "mytracks_command", "dashboard_callback_handler"
