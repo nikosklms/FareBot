@@ -20,8 +20,11 @@ async def test_restricted_decorator_allows_authorized_user():
 
 
 @pytest.mark.asyncio
-async def test_restricted_decorator_blocks_unauthorized_user_message():
+async def test_restricted_decorator_blocks_unauthorized_user_message(tmp_path, monkeypatch):
     """Unauthorized user sending a message should receive Access Denied and ConversationHandler.END."""
+    log_file = tmp_path / "unauthorized_access.log"
+    monkeypatch.setattr("bot.handlers.auth.LOG_FILE_PATH", str(log_file))
+
     dummy_handler = AsyncMock(return_value="should_not_be_called")
     decorated = restricted(dummy_handler)
 
@@ -41,8 +44,11 @@ async def test_restricted_decorator_blocks_unauthorized_user_message():
 
 
 @pytest.mark.asyncio
-async def test_restricted_decorator_blocks_unauthorized_user_callback():
+async def test_restricted_decorator_blocks_unauthorized_user_callback(tmp_path, monkeypatch):
     """Unauthorized user triggering a callback query should get an alert answer and ConversationHandler.END."""
+    log_file = tmp_path / "unauthorized_access.log"
+    monkeypatch.setattr("bot.handlers.auth.LOG_FILE_PATH", str(log_file))
+
     dummy_handler = AsyncMock(return_value="should_not_be_called")
     decorated = restricted(dummy_handler)
 
