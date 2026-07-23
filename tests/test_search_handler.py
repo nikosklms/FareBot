@@ -99,6 +99,24 @@ async def test_search_wizard_flight_type_step():
         )
 
 @pytest.mark.asyncio
+async def test_search_wizard_shows_cancel_button():
+    """Search wizard prompt should include inline cancel button."""
+    update = MagicMock()
+    update.effective_user.id = 42
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.args = []
+    context.user_data = {}
+
+    await search_command(update, context)
+
+    reply_markup = update.message.reply_text.call_args[1].get("reply_markup")
+    assert reply_markup is not None
+    cancel_btn = reply_markup.inline_keyboard[-1][0]
+    assert cancel_btn.text == "❌ Cancel"
+    assert cancel_btn.callback_data == "cancel_wizard"
+
+@pytest.mark.asyncio
 async def test_execute_search_departure_arrival_times_formatting():
     update = MagicMock()
     status_msg = AsyncMock()

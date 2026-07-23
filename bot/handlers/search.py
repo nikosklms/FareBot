@@ -54,9 +54,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
     context.user_data.clear()
+    cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
     await update.message.reply_text(
         "🔍 **Instant Flight Search**\n\n"
         "🛫 **Step 1/4**: Where are you flying from? (e.g., 'Athens', 'ATH')",
+        reply_markup=cancel_keyboard,
         parse_mode="Markdown"
     )
     return SEARCH_ORIGIN
@@ -75,6 +77,7 @@ async def handle_search_origin(update: Update, context: ContextTypes.DEFAULT_TYP
         for iata, name, country, score in matches[:4]
     ]
     buttons.append([InlineKeyboardButton("🔍 Search Again", callback_data="re_src_org")])
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")])
 
     await update.message.reply_text("Please confirm your origin airport:", reply_markup=InlineKeyboardMarkup(buttons))
     return SEARCH_ORIGIN
@@ -84,14 +87,16 @@ async def select_search_origin_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     await query.answer()
     if query.data == "re_src_org":
-        await query.message.edit_text("🛫 Enter origin city or airport code again:")
+        cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+        await query.message.edit_text("🛫 Enter origin city or airport code again:", reply_markup=cancel_keyboard)
         return SEARCH_ORIGIN
 
     parts = query.data.split("_", 3)
     iata, name = parts[2], parts[3]
     context.user_data["search_origin_code"] = iata
 
-    await query.message.edit_text(f"🛫 **Origin**: {iata} - {name}\n\n🛬 **Step 2/4**: Where are you flying to? (e.g., 'London', 'LON')", parse_mode="Markdown")
+    cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+    await query.message.edit_text(f"🛫 **Origin**: {iata} - {name}\n\n🛬 **Step 2/4**: Where are you flying to? (e.g., 'London', 'LON')", reply_markup=cancel_keyboard, parse_mode="Markdown")
     return SEARCH_DESTINATION
 
 @restricted
@@ -108,6 +113,7 @@ async def handle_search_destination(update: Update, context: ContextTypes.DEFAUL
         for iata, name, country, score in matches[:4]
     ]
     buttons.append([InlineKeyboardButton("🔍 Search Again", callback_data="re_src_dst")])
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")])
 
     await update.message.reply_text("Please confirm your destination airport:", reply_markup=InlineKeyboardMarkup(buttons))
     return SEARCH_DESTINATION
@@ -117,14 +123,16 @@ async def select_search_destination_callback(update: Update, context: ContextTyp
     query = update.callback_query
     await query.answer()
     if query.data == "re_src_dst":
-        await query.message.edit_text("🛬 Enter destination city or airport code again:")
+        cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+        await query.message.edit_text("🛬 Enter destination city or airport code again:", reply_markup=cancel_keyboard)
         return SEARCH_DESTINATION
 
     parts = query.data.split("_", 3)
     iata, name = parts[2], parts[3]
     context.user_data["search_destination_code"] = iata
 
-    await query.message.edit_text(f"🛬 **Destination**: {iata} - {name}\n\n📅 **Step 3/4**: When do you want to depart? (e.g., '2026-08-15')", parse_mode="Markdown")
+    cancel_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+    await query.message.edit_text(f"🛬 **Destination**: {iata} - {name}\n\n📅 **Step 3/4**: When do you want to depart? (e.g., '2026-08-15')", reply_markup=cancel_keyboard, parse_mode="Markdown")
     return SEARCH_DATE
 
 @restricted
@@ -144,7 +152,8 @@ async def handle_search_date(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     buttons = [
         [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="src_fl_type_1")],
-        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="src_fl_type_0")]
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="src_fl_type_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     await update.message.reply_text(f"📅 **Date**: {date_str}\n\n⚙️ **Step 4/4**: What type of flights do you want?", reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
     return SEARCH_FLIGHT_TYPE
