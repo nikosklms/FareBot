@@ -83,8 +83,11 @@ async def test_restricted_decorator_writes_persistent_log_file(tmp_path, monkeyp
     await decorated(update, context)
 
     assert os.path.exists(str(log_file))
-    content = log_file.read_text()
-    assert "77777" in content
-    assert "@intruder_joe" in content
-    assert "Joe Intruder" in content
-    assert "/search ATH PAR" in content
+    content = log_file.read_text().strip()
+    import json
+    data = json.loads(content)
+    assert data["user_id"] == 77777
+    assert data["username"] == "@intruder_joe"
+    assert data["full_name"] == "Joe Intruder"
+    assert data["input"] == "/search ATH PAR"
+    assert "timestamp" in data

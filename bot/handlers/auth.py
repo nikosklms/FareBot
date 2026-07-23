@@ -15,12 +15,15 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 LOG_FILE_PATH = os.path.join(LOGS_DIR, "unauthorized_access.log")
 
-def write_persistent_log(log_file: str, message: str):
+import json
+
+def write_persistent_log(log_file: str, payload: dict):
     try:
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if "timestamp" not in payload:
+            payload["timestamp"] = datetime.now(timezone.utc).isoformat()
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] {message}\n")
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.error(f"Failed to write persistent security log: {e}")
 
@@ -32,19 +35,29 @@ def restricted(func):
         user_id = user.id if user else None
 
         if user_id not in ALLOWED_USERS:
-            username_str = f"@{user.username}" if user and user.username else "No username"
-            full_name = user.full_name if user else "Unknown"
+            username_val = getattr(user, "username", None) if user else None
+            full_name_val = getattr(user, "full_name", None) if user else None
+            username_str = f"@{username_val}" if username_val else "No username"
+            full_name = str(full_name_val) if full_name_val else "Unknown"
+
             input_text = ""
             if update.message and update.message.text:
-                input_text = update.message.text
+                input_text = str(update.message.text)
             elif update.callback_query and update.callback_query.data:
                 input_text = f"Callback: {update.callback_query.data}"
 
-            log_entry = f"ID={user_id} | User={username_str} | Name='{full_name}' | Input='{input_text}'"
-            logger.warning(f"🚨 Unauthorized access attempt! {log_entry}")
+            log_payload = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "user_id": user_id,
+                "username": username_str,
+                "full_name": full_name,
+                "input": input_text
+            }
 
-            # 1. Write to persistent log file
-            write_persistent_log(LOG_FILE_PATH, log_entry)
+            logger.warning(f"🚨 Unauthorized access attempt! {json.dumps(log_payload)}")
+
+            # 1. Write to persistent JSON log file
+            write_persistent_log(LOG_FILE_PATH, log_payload)
 
             # 2. Write to SQLite database
             try:
