@@ -13,8 +13,13 @@ load_dotenv(BASE_DIR / ".env")
 DB_PATH = os.getenv("FAREST_DB_PATH", str(BASE_DIR / "farebot.db"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-raw_users = os.getenv("ALLOWED_USERS", "")
-ALLOWED_USERS = [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
+def get_allowed_users() -> list[int]:
+    """Dynamically load ALLOWED_USERS from .env file so additions take effect instantly."""
+    load_dotenv(BASE_DIR / ".env", override=True)
+    raw_users = os.getenv("ALLOWED_USERS", "")
+    return [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
+
+ALLOWED_USERS = get_allowed_users()
 
 # Polling configuration
 MIN_POLL_INTERVAL_HOURS = 6
