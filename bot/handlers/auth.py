@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timezone
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
-from config import ALLOWED_USERS, DB_PATH
+from config import get_allowed_users, ALLOWED_USERS, DB_PATH
 from database.db import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,8 @@ def restricted(func):
         user = update.effective_user
         user_id = user.id if user else None
 
-        if user_id not in ALLOWED_USERS:
+        allowed_users = get_allowed_users()
+        if user_id not in allowed_users:
             from unittest.mock import Mock
             username_val = getattr(user, "username", None) if user else None
             full_name_val = getattr(user, "full_name", None) if user else None
@@ -80,9 +81,9 @@ def restricted(func):
                 logger.error(f"Failed to log unauthorized attempt to DB: {e}")
 
             # 3. Send instant Telegram security alert to bot owner
-            if ALLOWED_USERS and context and hasattr(context, "bot") and hasattr(context.bot, "send_message"):
+            if allowed_users and context and hasattr(context, "bot") and hasattr(context.bot, "send_message"):
                 try:
-                    admin_id = ALLOWED_USERS[0]
+                    admin_id = allowed_users[0]
                     alert_text = (
                         "⚠️ **Security Alert: Unauthorized Access Attempt**\n\n"
                         f"👤 **User**: {username_str} (ID: `{user_id}`)\n"
