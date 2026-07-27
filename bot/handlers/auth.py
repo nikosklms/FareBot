@@ -54,8 +54,6 @@ def restricted(func):
             elif update.callback_query and update.callback_query.data:
                 cb_data = update.callback_query.data
                 cb_str = str(cb_data) if not isinstance(cb_data, Mock) else "test_callback"
-                input_text = f"Callback: {cb_str}"
-
             log_payload = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "user_id": user_id,
@@ -63,8 +61,6 @@ def restricted(func):
                 "full_name": full_name,
                 "input": input_text
             }
-
-            logger.warning(f"🚨 Unauthorized access attempt! {json.dumps(log_payload)}")
 
             # 1. Write to persistent JSON log file
             write_persistent_log(LOG_FILE_PATH, log_payload)
