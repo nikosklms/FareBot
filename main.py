@@ -82,9 +82,33 @@ async def post_init(application):
     except Exception as e:
         logging.warning(f"Failed to set Telegram Bot Commands Menu: {e}")
 
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        pass  # Silence HTTP server logs
+
+def start_health_check_server():
+    port = int(os.getenv("PORT", "10000"))
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        logger.info(f"Started HTTP health check server on port {port}")
+    except Exception as e:
+        logger.warning(f"Could not start health check server: {e}")
+
 def main():
     check_config()
     init_db()
+    start_health_check_server()
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
 
