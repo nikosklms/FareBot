@@ -91,63 +91,9 @@ Interact with FareBot using standard Telegram chat commands and interactive inli
 | `/dashboard` | View active trackers, delete trackers or trigger manual price checks |
 | `/cancel` | Cancel an ongoing wizard session |
 
-### Flight Search Wizard
+## Testing
 
-1. Send `/search ATH LON 2026-09-15` for a direct search, or send `/search` to open the interactive wizard.
-2. Select origin airport, destination airport and departure date or date range.
-3. Filter results by direct flights only or any number of stops.
-4. Review the top flight offers formatted with price, airline, flight duration and booking links.
-
-### Price Tracker Setup
-
-1. Send `/track` to launch the tracking wizard.
-2. Specify origin, destination, target departure date or date range, target price budget and polling interval.
-3. FareBot saves the tracker to SQLite and registers a recurring background job.
-4. When a search finds a flight price below your target budget, FareBot sends a Telegram alert with offer details.
-
-## Project Structure
-
-```text
-FareBot/
-├── main.py              # Application entry point and HTTP health server
-├── config.py            # Configuration loader and environment variables
-├── bot/
-│   ├── handlers/        # Telegram command and callback handlers
-│   │   ├── auth.py      # User authorization decorator and security logger
-│   │   ├── search.py    # Flight search wizard and inline handlers
-│   │   ├── track.py     # Price tracker creation wizard
-│   │   └── dashboard.py # Active tracker management dashboard
-├── daemon/
-│   └── scheduler.py     # Background job scheduler and price alert dispatcher
-├── database/
-│   └── db.py            # SQLite database schema, queries and migrations
-├── providers/
-│   ├── base.py          # Abstract flight provider interface
-│   └── fast_flights.py  # Google Flights fetcher integration
-├── services/
-│   ├── airports_data.py # Airport code dictionary and IATA lookups
-│   └── resolver.py      # Airport and city query resolver
-├── tests/               # Pytest unit and integration test suite
-└── logs/                # Persistent security access logs
-```
-
-## Development and Testing
-
-Run the test suite using pytest inside your virtual environment:
-
-```bash
-pytest -v
-```
-
-Run specific test files:
-
-```bash
-pytest tests/test_fast_flights.py -v
-pytest tests/test_scheduler.py -v
-pytest tests/test_auth.py -v
-```
-
-Test coverage includes unit tests for airport resolution, date parsing, database queries, authorization rules, search handlers and scheduler polling workflows.
+Run unit and integration tests located in `tests/` using `pytest -v`.
 
 ## Limitations and Known Gaps
 
@@ -160,10 +106,7 @@ Test coverage includes unit tests for airport resolution, date parsing, database
 
 This project is an independent open-source tool created strictly for personal and educational use. It is not affiliated with, authorized by, endorsed by or sponsored by Google LLC or Google Flights. Users are responsible for complying with applicable terms of service when running personal automated queries.
 
-## Contributing
-
-Contributions are welcome. Submit pull requests or open GitHub issues for bug reports and feature requests. Ensure all pytest tests pass before submitting changes.
-
 ## License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
+
