@@ -12,17 +12,18 @@ FareBot is an open-source Telegram bot for monitoring flight prices via Google F
 ## Requirements & Constraints
 
 1. **Git History Sanitization**:
-- Strip out hardcoded personal Telegram User ID (`<SENSITIVE_TELEGRAM_ID>`) from historical commits using `git rebase` / commit editing.
-- Preserve 100% of existing commit history, commit messages, author metadata, and timestamps.
+   - Strip out hardcoded personal Telegram User ID (`<SENSITIVE_TELEGRAM_ID>`) from historical commits using `git rebase` / commit editing.
+   - Preserve 100% of existing commit history, commit messages, author metadata, and timestamps.
+   - Ensure design and plan documents in `docs/superpowers/` use `<SENSITIVE_TELEGRAM_ID>` instead of the literal ID to prevent re-introducing it to Git history.
 
 2. **Codebase & Privacy Sanitization**:
-- Update default fallback of `ALLOWED_USERS` in `config.py` from `"<SENSITIVE_TELEGRAM_ID>"` to `""`.
-- Verify `.env.example` lists all required environment variables with dummy values.
-- Ensure `.env`, SQLite databases (`*.db`), log files (`*.log`), and virtual environments are excluded via `.gitignore`.
+   - Update default fallback of `ALLOWED_USERS` in `config.py` from `"<SENSITIVE_TELEGRAM_ID>"` to `""`.
+   - Verify `.env.example` lists all required environment variables with dummy values.
+   - Ensure `.env`, SQLite databases (`*.db`), log files (`*.log`), and virtual environments are excluded via `.gitignore`.
 
 3. **Licensing & Legal**:
-- Include a root `LICENSE` file containing the standard MIT License.
-- Include a clear educational/non-commercial disclaimer regarding Google Flights data scraping in the README.
+   - Include a root `LICENSE` file containing canonical MIT License text.
+   - Include a clear educational/non-commercial disclaimer regarding Google Flights data scraping in the README.
 
 4. **README Specification**:
 
@@ -68,27 +69,27 @@ FareBot is an open-source Telegram bot for monitoring flight prices via Google F
 ## Design Components
 
 ### Component 1: Git History Sanitization
-- Identify target commits containing `<SENSITIVE_TELEGRAM_ID>` (`c18205e` and `750c6be`).
+- Identify target commits containing the sensitive Telegram User ID.
 - Perform git rebase to update `config.py` and plan documents in those commits.
-- Verify `git log -S "<SENSITIVE_TELEGRAM_ID>"` returns 0 results across all branches.
+- Verify `git log -S "<SENSITIVE_TELEGRAM_ID_NUMERIC>"` returns 0 results across all branches.
 
 ### Component 2: Codebase Configuration Updates
 - Modify `config.py`:
 ```python
 def get_allowed_users() -> list[int]:
-  load_dotenv(BASE_DIR / ".env", override=True)
-  raw_users = os.getenv("ALLOWED_USERS", "")
-return [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
+    load_dotenv(BASE_DIR / ".env", override=True)
+    raw_users = os.getenv("ALLOWED_USERS", "")
+    return [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
 ```
 - Check `.env.example` content:
 ```env
-  TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-  ALLOWED_USERS=123456789,987654321
-  FAREST_DB_PATH=farebot.db
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+ALLOWED_USERS=123456789,987654321
+FAREST_DB_PATH=farebot.db
 ```
 
 ### Component 3: Licensing (`LICENSE`)
-- Add root `LICENSE` containing the MIT license text assigned to the repository owner.
+- Add root `LICENSE` containing canonical MIT license text assigned to copyright holder `nikosklms`.
 
 ### Component 4: README (`README.md`)
 - Read the codebase before drafting: entry point, command handlers, `config.py`, all `os.getenv` calls, CLI argument parsing, `requirements.txt` or `pyproject.toml`, and the test suite. Derive the feature list, requirements, environment variable table and CLI parameter table from these sources only.
@@ -100,13 +101,14 @@ return [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit(
 ## Verification Plan
 
 ### Manual & Automated Verification
-1. Run `git log -S "<SENSITIVE_TELEGRAM_ID>"` to confirm no occurrences exist in any commit.
+1. Run `git log -S "<SENSITIVE_TELEGRAM_ID_NUMERIC>"` to confirm zero occurrences exist across all historical commits.
 2. Run `pytest` to confirm all existing unit and integration tests pass cleanly after configuration changes.
 3. Validate `README.md`:
    - Clone the repository into a clean directory and run every command in Installation and Quick start in order. The bot must reach a running state with no undocumented step.
-   - Diff the environment variable table against every `os.getenv` call in the codebase. Names and defaults must match exactly, in both directions.
-   - Diff the CLI parameter table against the actual argument parser definitions.
+   - Diff the environment variable table against every `os.getenv` call in the codebase (`grep -rn "os.getenv" .`). Names and defaults must match exactly, in both directions.
+   - Diff the CLI parameter table against actual argument parser definitions.
    - Confirm no documented command, flag or default is absent from the code.
    - Confirm line count falls between 150 and 400.
-   - Confirm absence of emojis, badges, em dashes, Oxford commas and the banned adjective list.
+   - Confirm absence of emojis using unicode range check `python3 -c "import re, sys; text = sys.stdin.read(); sys.exit(0 if not re.search(r'[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf]', text) else 1)" < README.md`.
+   - Confirm absence of badges, em dashes, Oxford commas, and banned adjectives.
    - Confirm the Disclaimer and License sections are present.

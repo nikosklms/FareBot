@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Sanitize Git history, update codebase default configuration, create an MIT LICENSE file, and draft a high-accuracy, developer-focused README document for public GitHub release.
+**Goal:** Sanitize Git history, update codebase default configuration, create canonical MIT LICENSE file, and draft a high-accuracy, developer-focused README document for public GitHub release.
 
-**Architecture:** Perform git commit rebase/editing to sanitize past commits without losing history or timestamps; update config fallbacks; add an MIT License; draft a README adhering strictly to voice, formatting, structural, and accuracy constraints.
+**Architecture:** Perform git commit rebase/editing to sanitize past commits without losing history or timestamps; update config fallbacks; add canonical MIT License; draft a README adhering strictly to voice, formatting, structural, and accuracy constraints.
 
 **Tech Stack:** Python 3.10+, Git, pytest, python-telegram-bot, fast-flights, SQLite.
 
@@ -17,6 +17,7 @@
 - Banned adjectives: powerful, seamless, blazingly fast, robust, elegant, effortless.
 - All commands in README runnable as written.
 - Every documented parameter, default, and command derived strictly from the codebase.
+- No literal personal Telegram User IDs in repository documentation or plan files.
 
 ---
 
@@ -29,7 +30,7 @@
 
 **Interfaces:**
 - Consumes: Existing `config.get_allowed_users()` function and git history.
-- Produces: Sanitized git history with zero instances of Telegram User ID `<SENSITIVE_TELEGRAM_ID>`, and `config.py` defaulting to `""`.
+- Produces: Sanitized git history with zero instances of sensitive Telegram User ID, and `config.py` defaulting to `""`.
 
 - [ ] **Step 1: Write failing test in `tests/test_config.py`**
 
@@ -45,11 +46,11 @@ def test_get_allowed_users_default_empty(monkeypatch):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_config.py::test_get_allowed_users_default_empty -v`
-Expected: FAIL with `assert [<SENSITIVE_TELEGRAM_ID>] == []`
+Expected: FAIL with `assert [...] == []`
 
 - [ ] **Step 3: Modify `config.py` default fallback**
 
-In `config.py`, line 19, change `"<SENSITIVE_TELEGRAM_ID>"` to `""`:
+In `config.py`, line 19, change sensitive user ID string to `""`:
 
 ```python
 def get_allowed_users() -> list[int]:
@@ -66,11 +67,11 @@ Expected: PASS
 
 - [ ] **Step 5: Sanitize historical Git commits**
 
-Run `git rebase -i --root` or `git filter-repo` to replace `<SENSITIVE_TELEGRAM_ID>` with `""` in past commits (`750c6be` and `c18205e`).
+Run `git rebase -i --root` to edit past commits containing the sensitive Telegram User ID. In `config.py` and documentation plan commits, replace the sensitive Telegram User ID with `""` or `<SENSITIVE_TELEGRAM_ID>`.
 
 - [ ] **Step 6: Verify Git history sanitization**
 
-Run: `git log -S "<SENSITIVE_TELEGRAM_ID>" --oneline`
+Run: `git log -S "<SENSITIVE_TELEGRAM_ID_NUMERIC>" --oneline`
 Expected: Empty output (0 results found across all commits).
 
 - [ ] **Step 7: Commit changes**
@@ -82,27 +83,27 @@ git commit -m "fix: sanitize default allowed users config fallback"
 
 ---
 
-### Task 2: MIT License Creation
+### Task 2: Canonical MIT License Creation
 
 **Files:**
 - Create: `LICENSE`
 
 **Interfaces:**
-- Consumes: Standard MIT License template.
+- Consumes: Canonical MIT License template.
 - Produces: Root `LICENSE` file for open-source compliance.
 
 - [ ] **Step 1: Create `LICENSE` file**
 
-Create `/home/nkalamaris/Desktop/FareBot/LICENSE` with MIT License text:
+Create `/home/nkalamaris/Desktop/FareBot/LICENSE` with exact canonical MIT License text:
 
 ```text
 MIT License
 
-Copyright (a) 2026 nikosklms
+Copyright (c) 2026 nikosklms
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction handling, including without limitation the rights
+in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
@@ -119,10 +120,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-- [ ] **Step 2: Verify `LICENSE` file exists**
+- [ ] **Step 2: Verify `LICENSE` file canonical text**
 
 Run: `cat LICENSE`
-Expected: MIT License text displayed.
+Expected: Canonical MIT License text matching standard OSI definition.
 
 - [ ] **Step 3: Commit `LICENSE` file**
 
@@ -142,11 +143,13 @@ git commit -m "docs: add MIT license"
 - Consumes: Codebase inspection results (`main.py`, `config.py`, `bot/handlers/*.py`, `daemon/scheduler.py`, `services/resolver.py`, `requirements.txt`).
 - Produces: Complete, runnable, highly accurate `README.md` document (150-400 lines).
 
-- [ ] **Step 1: Codebase inspection for exact parameters & commands**
+- [ ] **Step 1: Codebase inspection & environment variable diffing**
 
-Verify all `os.getenv` environment variables (`TELEGRAM_BOT_TOKEN`, `ALLOWED_USERS`, `FAREST_DB_PATH`, `PORT`), default polling intervals (`DEFAULT_POLL_INTERVAL_HOURS = 6`), bot commands (`/start`, `/search`, `/track`, `/dashboard`, `/cancel`), and dependencies.
+Extract every `os.getenv` call across the codebase:
+Run: `grep -rn "os.getenv" .`
+Map out `TELEGRAM_BOT_TOKEN`, `ALLOWED_USERS`, `FAREST_DB_PATH`, `PORT`, and default polling intervals (`DEFAULT_POLL_INTERVAL_HOURS = 6`). Verify 100% two-way match between code definitions and the configuration table.
 
-- [ ] **Step 2: Write `README.md`**
+- [ ] **Step 2: Draft `README.md`**
 
 Draft `/home/nkalamaris/Desktop/FareBot/README.md` following all strict voice, structure, accuracy, and hard rules:
 - Name and one-line description
@@ -154,8 +157,8 @@ Draft `/home/nkalamaris/Desktop/FareBot/README.md` following all strict voice, s
 - Features list
 - Requirements (Python 3.10+)
 - Installation steps
-- Quick start (shortest path to a running bot)
-- Configuration table
+- Quick start (shortest path to a running bot in one copy-pasteable block)
+- Configuration table (derived strictly from `os.getenv` diffing)
 - Usage guide (Telegram bot commands)
 - Project structure
 - Development and testing instructions
@@ -167,15 +170,15 @@ Draft `/home/nkalamaris/Desktop/FareBot/README.md` following all strict voice, s
 - [ ] **Step 3: Verify formatting and rules compliance**
 
 Check line count: `wc -l README.md` (must be between 150 and 400).
-Check for prohibited items:
-- Search for emojis: `grep -P '[\x{1F600}-\x{1F64F}]' README.md` (0 results)
-- Search for em dashes: `grep '—' README.md` (0 results)
-- Search for badges: `grep '\!\[.*\]\(.*\)' README.md` (0 results)
-- Search for banned adjectives: `grep -iE 'powerful|seamless|blazingly fast|robust|elegant|effortless' README.md` (0 results)
+Run rule verification commands:
+- Unicode emoji check: `python3 -c "import re, sys; text = open('README.md').read(); sys.exit(0 if not re.search(r'[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf]', text) else 1)"`
+- Em dash check: `grep '—' README.md` (0 results)
+- Badge check: `grep '\!\[.*\]\(.*\)' README.md` (0 results)
+- Banned adjective check: `grep -iE 'powerful|seamless|blazingly fast|robust|elegant|effortless' README.md` (0 results)
 
-- [ ] **Step 4: Execute Quick start commands in shell**
+- [ ] **Step 4: Execute Quick start commands in a clean test execution**
 
-Run installation commands sequentially to verify clean execution.
+Run installation and setup commands sequentially to verify complete execution without undocumented steps.
 
 - [ ] **Step 5: Commit `README.md`**
 
