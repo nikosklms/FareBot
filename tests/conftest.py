@@ -10,11 +10,11 @@ def setup_test_allowed_users(monkeypatch):
                 return False
             if isinstance(item, MagicMock) or item is None:
                 return True
-            if item in (42, 55, 100, 999, 123456789, 6848822744):
+            if item in (42, 55, 100, 999, 123456789, 987654321):
                 return True
             return super().__contains__(item)
 
-    test_users = TestAllowedUsers([123456789, 6848822744])
+    test_users = TestAllowedUsers([123456789, 987654321])
     monkeypatch.setattr("config.get_allowed_users", lambda: test_users)
     monkeypatch.setattr("config.ALLOWED_USERS", test_users)
     monkeypatch.setattr("bot.handlers.auth.get_allowed_users", lambda: test_users)

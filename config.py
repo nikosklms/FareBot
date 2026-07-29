@@ -19,6 +19,7 @@ def get_allowed_users() -> list[int]:
     raw_users = os.getenv("ALLOWED_USERS", "")
     return [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
 
+_real_get_allowed_users = get_allowed_users
 ALLOWED_USERS = get_allowed_users()
 
 # Polling configuration
