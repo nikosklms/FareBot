@@ -12,26 +12,56 @@ FareBot is an open-source Telegram bot for monitoring flight prices via Google F
 ## Requirements & Constraints
 
 1. **Git History Sanitization**:
-   - Strip out hardcoded personal Telegram User ID (`<SENSITIVE_TELEGRAM_ID>`) from historical commits using `git rebase` / commit editing.
-   - Preserve 100% of existing commit history, commit messages, author metadata, and timestamps.
+- Strip out hardcoded personal Telegram User ID (`<SENSITIVE_TELEGRAM_ID>`) from historical commits using `git rebase` / commit editing.
+- Preserve 100% of existing commit history, commit messages, author metadata, and timestamps.
 
 2. **Codebase & Privacy Sanitization**:
-   - Update default fallback of `ALLOWED_USERS` in `config.py` from `"<SENSITIVE_TELEGRAM_ID>"` to `""`.
-   - Verify `.env.example` lists all required environment variables with dummy values.
-   - Ensure `.env`, SQLite databases (`*.db`), log files (`*.log`), and virtual environments are excluded via `.gitignore`.
+- Update default fallback of `ALLOWED_USERS` in `config.py` from `"<SENSITIVE_TELEGRAM_ID>"` to `""`.
+- Verify `.env.example` lists all required environment variables with dummy values.
+- Ensure `.env`, SQLite databases (`*.db`), log files (`*.log`), and virtual environments are excluded via `.gitignore`.
 
 3. **Licensing & Legal**:
-   - Include a root `LICENSE` file containing the standard MIT License.
-   - Include a clear educational/non-commercial disclaimer regarding Google Flights data scraping in the README.
+- Include a root `LICENSE` file containing the standard MIT License.
+- Include a clear educational/non-commercial disclaimer regarding Google Flights data scraping in the README.
 
 4. **README Specification**:
-   - **No emojis anywhere**.
-   - **No badges** (no CI/coverage badges).
-   - **No em dashes** and **no Oxford commas**.
-   - Voice: Plain, direct, technical. Second person for instructions. Active voice, present tense. Maximum 3 sentences per paragraph.
-   - Structure: Description, features, requirements, installation, quick start, configuration, usage, project structure, limitations, license.
-   - Tables over prose for environment variables and CLI parameters.
-   - Length: 150 to 400 lines. Fully copy-pasteable runnable commands using exact codebase values.
+
+**Purpose**: The README decides whether a developer uses FareBot or closes the tab. It answers three questions in order: what this does, whether it fits my problem, how do I run it. Everything else sits lower down or gets cut.
+
+**Opening**: The first three lines carry the most weight. Project name, one line on what the bot does, then a short paragraph on the problem it solves and who it is for. Concrete and specific: name the manual workflow it replaces. No mission statement, no project history, no "in today's fast-paced world".
+
+**Structure** (in this order, omitting any section that does not apply):
+- Name and one-line description
+- Problem and audience paragraph
+- Features
+- Requirements
+- Installation
+- Quick start: shortest path to a running bot that sends one notification, in one copy-pasteable block
+- Configuration
+- Usage
+- Project structure (only if the layout is non-obvious)
+- Development and testing
+- Limitations and known gaps
+- Disclaimer (educational/non-commercial use, Google Flights scraping)
+- Contributing
+- License
+
+**Voice**: Plain, direct, technical. Second person for instructions. Active voice, present tense. Maximum 3 sentences per paragraph. Professional without being stiff, confident without overselling.
+
+**Hard formatting rules**:
+- No emojis anywhere
+- No badges (no CI or coverage badges)
+- No em dashes, no Oxford commas
+- Tables over prose for environment variables and CLI parameters
+- Headings scannable enough that a reader finds what they need in under ten seconds
+
+**Banned language**: Cut every sentence that carries no information. Cut every adjective that is not measurable. The words powerful, seamless, blazingly fast, robust, elegant and effortless are prohibited unless followed by a number that proves them.
+
+**Accuracy**: Document only what is verified in the codebase. Never document a flag, function, default or behavior inferred from convention or from a similar project. State broken or half-finished behavior in the Limitations section rather than papering over it. Accuracy beats completeness.
+
+**Length**: 150 to 400 lines. Fully copy-pasteable runnable commands using exact codebase values. Placeholders only where the value is genuinely user-specific, such as the bot token. If the draft runs long, cut content rather than relocating it to another file.
+
+**Done means**: A developer who has never seen FareBot gets it running from this document alone, every command and documented variable matches the code, and nothing can be deleted without losing information.
 
 ---
 
@@ -44,24 +74,26 @@ FareBot is an open-source Telegram bot for monitoring flight prices via Google F
 
 ### Component 2: Codebase Configuration Updates
 - Modify `config.py`:
-  ```python
-  def get_allowed_users() -> list[int]:
-      load_dotenv(BASE_DIR / ".env", override=True)
-      raw_users = os.getenv("ALLOWED_USERS", "")
-      return [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
-  ```
+```python
+def get_allowed_users() -> list[int]:
+  load_dotenv(BASE_DIR / ".env", override=True)
+  raw_users = os.getenv("ALLOWED_USERS", "")
+return [int(uid.strip()) for uid in raw_users.split(",") if uid.strip().isdigit()]
+```
 - Check `.env.example` content:
-  ```env
+```env
   TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
   ALLOWED_USERS=123456789,987654321
   FAREST_DB_PATH=farebot.db
-  ```
+```
 
 ### Component 3: Licensing (`LICENSE`)
 - Add root `LICENSE` containing the MIT license text assigned to the repository owner.
 
 ### Component 4: README (`README.md`)
-- Draft `README.md` following all strict voice, formatting, and structural constraints outlined in the requirements.
+- Read the codebase before drafting: entry point, command handlers, `config.py`, all `os.getenv` calls, CLI argument parsing, `requirements.txt` or `pyproject.toml`, and the test suite. Derive the feature list, requirements, environment variable table and CLI parameter table from these sources only.
+- Draft `README.md` following every voice, formatting, structural and accuracy constraint in Requirement 4.
+- Place the Google Flights educational/non-commercial disclaimer immediately after Limitations, as specified in Requirement 3.
 
 ---
 
@@ -70,4 +102,11 @@ FareBot is an open-source Telegram bot for monitoring flight prices via Google F
 ### Manual & Automated Verification
 1. Run `git log -S "<SENSITIVE_TELEGRAM_ID>"` to confirm no occurrences exist in any commit.
 2. Run `pytest` to confirm all existing unit and integration tests pass cleanly after configuration changes.
-3. Validate `README.md` line count (between 150 and 400 lines) and verify absence of emojis, em dashes, or Oxford commas.
+3. Validate `README.md`:
+   - Clone the repository into a clean directory and run every command in Installation and Quick start in order. The bot must reach a running state with no undocumented step.
+   - Diff the environment variable table against every `os.getenv` call in the codebase. Names and defaults must match exactly, in both directions.
+   - Diff the CLI parameter table against the actual argument parser definitions.
+   - Confirm no documented command, flag or default is absent from the code.
+   - Confirm line count falls between 150 and 400.
+   - Confirm absence of emojis, badges, em dashes, Oxford commas and the banned adjective list.
+   - Confirm the Disclaimer and License sections are present.
