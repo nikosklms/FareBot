@@ -4,7 +4,7 @@ FareBot is an asynchronous Telegram bot that tracks Google Flights prices and no
 
 Searching flight prices manually across multiple dates requires checking Google Flights repeatedly and recording price changes by hand. FareBot replaces this workflow by automating recurring price searches in the background, storing historical offers in a local SQLite database and sending instant Telegram alerts when a matching fare is found. It is built for developers and self-hosters who want automated flight price monitoring without third-party subscriptions.
 
-![FareBot Telegram Interface](assets/demo.png)
+![FareBot Telegram Interface](assets/image.png)
 
 ## Features
 
