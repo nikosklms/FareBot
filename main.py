@@ -46,6 +46,7 @@ from bot.handlers import (
     EXPLORE_ORIGIN,
     EXPLORE_REGION,
     EXPLORE_BUDGET,
+    EXPLORE_LIMIT,
     start_digest_wizard,
     handle_digest_origin_input,
     select_digest_origin_callback,
