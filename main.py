@@ -34,6 +34,7 @@ from bot.handlers import (
     select_frequency_callback,
     mytracks_command,
     dashboard_callback_handler,
+    handle_edit_budget_input,
     explore_command,
     digest_command,
     track_deal_callback,
@@ -134,6 +135,7 @@ def main():
     app.add_handler(CallbackQueryHandler(dashboard_callback_handler, pattern="^dash_"))
     app.add_handler(CallbackQueryHandler(track_deal_callback, pattern="^track_deal_"))
     app.add_handler(CallbackQueryHandler(search_track_callback_handler, pattern="^track_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_budget_input))
 
     # Register search wizard
     search_wizard = ConversationHandler(

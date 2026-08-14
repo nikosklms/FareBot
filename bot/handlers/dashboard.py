@@ -76,6 +76,7 @@ async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAU
         if not t or t.get("user_id") != user_id:
             await query.message.reply_text("⛔ Unauthorized or tracker not found.")
             return
+        context.user_data["edit_tracker_id"] = tracker_id
         await query.message.reply_text(f"✏️ **Edit Target Budget for Tracker #{tracker_id}**\n\nSend new target budget in EUR (e.g., `45`):", parse_mode="Markdown")
     elif data.startswith("dash_del_"):
         tracker_id = int(data.split("_")[2])
@@ -87,4 +88,28 @@ async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAU
         if context.job_queue:
             unschedule_tracker_job(context.job_queue, tracker_id)
         await query.message.edit_text(f"🗑️ Tracker #{tracker_id} deleted.")
+
+@restricted
+async def handle_edit_budget_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if "edit_tracker_id" not in context.user_data:
+        return
+
+    tracker_id = context.user_data.pop("edit_tracker_id")
+    text = update.message.text.strip() if update.message and update.message.text else ""
+
+    try:
+        new_budget = float(text)
+        if new_budget <= 0:
+            await update.message.reply_text("❌ Budget must be a positive number greater than 0.")
+            return
+    except ValueError:
+        await update.message.reply_text("❌ Invalid budget amount. Please send a valid number (e.g. `45`).", parse_mode="Markdown")
+        return
+
+    await db_manager.update_budget(tracker_id, new_budget)
+    await update.message.reply_text(
+        f"✅ **Target Budget Updated!**\n\n"
+        f"Tracker #{tracker_id} target budget updated to **€{new_budget:.2f}**.",
+        parse_mode="Markdown"
+    )
 

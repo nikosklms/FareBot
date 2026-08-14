@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from bot.handlers.dashboard import mytracks_command, dashboard_callback_handler
+from bot.handlers.dashboard import mytracks_command, dashboard_callback_handler, handle_edit_budget_input
 
 @pytest.mark.asyncio
 async def test_mytracks_shows_edit_button_and_handles_edit():
@@ -8,6 +8,7 @@ async def test_mytracks_shows_edit_button_and_handles_edit():
     update.effective_user.id = 123
     update.message.reply_text = AsyncMock()
     context = MagicMock()
+    context.user_data = {}
 
     mock_tracker = {
         "id": 1, "status": "ACTIVE", "user_id": 123, "origin_code": "ATH",
@@ -36,3 +37,22 @@ async def test_mytracks_shows_edit_button_and_handles_edit():
             await dashboard_callback_handler(cb_update, context)
             cb_update.callback_query.message.reply_text.assert_called_once()
             assert "Send new target budget" in cb_update.callback_query.message.reply_text.call_args[0][0]
+            assert context.user_data.get("edit_tracker_id") == 1
+
+@pytest.mark.asyncio
+async def test_handle_edit_budget_input_updates_db():
+    update = MagicMock()
+    update.effective_user.id = 123
+    update.message.text = "58"
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.user_data = {"edit_tracker_id": 19}
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        with patch("bot.handlers.dashboard.db_manager") as db_mock:
+            db_mock.update_budget = AsyncMock()
+            await handle_edit_budget_input(update, context)
+            db_mock.update_budget.assert_called_once_with(19, 58.0)
+            update.message.reply_text.assert_called_once()
+            assert "€58.00" in update.message.reply_text.call_args[0][0]
+            assert "edit_tracker_id" not in context.user_data
