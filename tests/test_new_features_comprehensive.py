@@ -2,8 +2,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.handlers.explore import explore_command, explore_region_callback, track_deal_callback
-from bot.handlers.digest import digest_command
+from bot.handlers.explore import start_explore_wizard as explore_command, select_explore_region_callback as explore_region_callback, track_deal_callback
+from bot.handlers.digest import start_digest_wizard as digest_command
 from bot.handlers.dashboard import mytracks_command, dashboard_callback_handler
 from bot.handlers.track import start_newtrack, handle_origin_input, ORIGIN
 from services.explore_engine import run_explore_query
@@ -24,13 +24,12 @@ async def test_explore_command_no_args_shows_region_keyboard():
 
     update.message.reply_text.assert_called_once()
     args, kwargs = update.message.reply_text.call_args
-    assert "Explore Top Flight Deals" in args[0]
+    assert "Explore Top Flight Deals Wizard" in args[0]
     assert "reply_markup" in kwargs
     keyboard = kwargs["reply_markup"].inline_keyboard
     button_datas = [btn.callback_data for row in keyboard for btn in row]
-    assert "expl_ATH_europe" in button_datas
-    assert "expl_ATH_islands" in button_datas
-    assert "expl_ATH_asia" in button_datas
+    assert "expl_org_ATH_Athens" in button_datas
+    assert "expl_org_SKG_Thessaloniki" in button_datas
 
 
 # -------------------------------------------------------------------
@@ -40,32 +39,18 @@ async def test_explore_command_no_args_shows_region_keyboard():
 async def test_explore_region_callback_renders_deals():
     update = MagicMock()
     update.effective_user.id = 123
-    update.callback_query.data = "expl_ATH_europe"
+    update.callback_query.data = "expl_reg_europe"
     update.callback_query.answer = AsyncMock()
     update.callback_query.message.edit_text = AsyncMock()
     context = MagicMock()
-
-    mock_deals = [
-        {
-            "origin_code": "ATH",
-            "destination_code": "FCO",
-            "destination_name": "Rome Fiumicino",
-            "price": 120.0,
-            "airline": "Aegean",
-            "departure_date": "2026-09-15",
-            "discount_pct": 25.0
-        }
-    ]
+    context.user_data = {}
 
     with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
-        with patch("bot.handlers.explore.run_explore_query", AsyncMock(return_value=mock_deals)):
-            await explore_region_callback(update, context)
+        await explore_region_callback(update, context)
 
     update.callback_query.message.edit_text.assert_called()
     last_call_text = update.callback_query.message.edit_text.call_args[0][0]
-    assert "Top Flight Deals for ATH → EUROPE" in last_call_text
-    assert "ATH ✈️ FCO" in last_call_text
-    assert "€120.00" in last_call_text
+    assert "Region set to: **EUROPE**" in last_call_text
 
 
 # -------------------------------------------------------------------

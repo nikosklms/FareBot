@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from bot.handlers.explore import explore_command, track_deal_callback
+from bot.handlers.explore import start_explore_wizard as explore_command, track_deal_callback
 
 @pytest.mark.asyncio
 async def test_track_deal_callback_success_and_dedup():

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from bot.handlers.digest import digest_command
+from bot.handlers.digest import start_digest_wizard as digest_command
 from daemon.scheduler import schedule_digest_job, run_digest_weekly_job
 
 @pytest.mark.asyncio
@@ -19,7 +19,7 @@ async def test_digest_command_registration_and_schedule_job():
             db_mock.create_tracker = AsyncMock(return_value=1)
             await digest_command(update, context)
             update.message.reply_text.assert_called_once()
-            assert "Sunday at 15:00" in update.message.reply_text.call_args[0][0]
+            assert "Sunday@15:00" in update.message.reply_text.call_args[0][0]
 
     # 2. Test schedule_digest_job registers with job_queue
     jq_mock = MagicMock()
