@@ -239,4 +239,15 @@ async def run_digest_weekly_job(context):
     except Exception as e:
         logger.error(f"Failed to send digest report to user {user_id}: {e}")
 
+db_manager = DatabaseManager(DB_PATH)
+
+async def run_daily_cleanup_job(context):
+    """Daily midnight UTC cleanup job for stale, expired, and paused trackers."""
+    try:
+        stats = await db_manager.purge_stale_trackers()
+        logger.info(f"Daily cleanup job completed. Expired: {stats.get('expired', 0)}, Purged: {stats.get('purged', 0)}")
+    except Exception as e:
+        logger.error(f"Error during daily cleanup job: {e}")
+
+
 
