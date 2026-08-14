@@ -36,6 +36,7 @@ from bot.handlers import (
     dashboard_callback_handler,
     handle_edit_budget_input,
     explore_command,
+    explore_region_callback,
     digest_command,
     track_deal_callback,
     search_command,
@@ -132,10 +133,10 @@ def main():
     app.add_handler(CommandHandler("explore", explore_command))
     app.add_handler(CommandHandler("digest", digest_command))
     app.add_handler(CommandHandler("mytracks", mytracks_command))
+    app.add_handler(CallbackQueryHandler(explore_region_callback, pattern="^expl_"))
     app.add_handler(CallbackQueryHandler(dashboard_callback_handler, pattern="^dash_"))
     app.add_handler(CallbackQueryHandler(track_deal_callback, pattern="^track_deal_"))
     app.add_handler(CallbackQueryHandler(search_track_callback_handler, pattern="^track_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_budget_input))
 
     # Register search wizard
     search_wizard = ConversationHandler(
@@ -164,9 +165,9 @@ def main():
     )
     app.add_handler(search_wizard)
 
-    # Register track wizard
+    # Register track wizard (support both /track and /newtrack)
     track_wizard = ConversationHandler(
-        entry_points=[CommandHandler("newtrack", start_newtrack)],
+        entry_points=[CommandHandler("track", start_newtrack), CommandHandler("newtrack", start_newtrack)],
         states={
             ORIGIN: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_origin_input),
@@ -189,6 +190,9 @@ def main():
         per_user=True
     )
     app.add_handler(track_wizard)
+
+    # Register general text input handler (after ConversationHandlers so wizards take priority)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_budget_input))
 
 
     print("🤖 Fare Bot is starting...")

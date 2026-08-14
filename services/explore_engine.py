@@ -107,11 +107,21 @@ async def run_explore_query(
     else:
         all_deals.sort(key=lambda x: x["discount_pct"], reverse=True)
 
+    # Deduplicate by destination_code (keep single best deal per destination)
+    seen_destinations = set()
+    unique_deals = []
+    for deal in all_deals:
+        dst = deal["destination_code"]
+        if dst in seen_destinations:
+            continue
+        seen_destinations.add(dst)
+        unique_deals.append(deal)
+
     # Regional Diversity Cap (Max 2 per country)
     country_counts: Dict[str, int] = {}
     capped_deals: List[Dict[str, Any]] = []
 
-    for deal in all_deals:
+    for deal in unique_deals:
         c = deal["country"]
         if c:
             current_count = country_counts.get(c, 0)

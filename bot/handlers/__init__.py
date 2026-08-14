@@ -12,7 +12,7 @@ from .track import (
     ORIGIN, DESTINATION, DEPARTURE_DATE, FLIGHT_TYPE, BUDGET, FREQUENCY
 )
 from .dashboard import mytracks_command, dashboard_callback_handler, handle_edit_budget_input
-from .explore import explore_command, track_deal_callback
+from .explore import explore_command, track_deal_callback, explore_region_callback
 from .digest import digest_command
 
 __all__ = [
@@ -26,7 +26,7 @@ __all__ = [
     "select_flight_type_callback", "handle_budget", "select_frequency_callback", "handle_calendar_date_selection",
     "ORIGIN", "DESTINATION", "DEPARTURE_DATE", "FLIGHT_TYPE", "BUDGET", "FREQUENCY",
     "mytracks_command", "dashboard_callback_handler", "handle_edit_budget_input",
-    "explore_command", "track_deal_callback", "digest_command"
+    "explore_command", "track_deal_callback", "explore_region_callback", "digest_command"
 ]
 
 

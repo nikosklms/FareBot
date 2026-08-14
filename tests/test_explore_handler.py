@@ -7,6 +7,7 @@ async def test_track_deal_callback_success_and_dedup():
     update = MagicMock()
     update.callback_query.data = "track_deal_ATH_MJT_2026-09-15_36.0"
     update.callback_query.answer = AsyncMock()
+    update.callback_query.message.reply_text = AsyncMock()
     update.callback_query.edit_message_reply_markup = AsyncMock()
     context = MagicMock()
 

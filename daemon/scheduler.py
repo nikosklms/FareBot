@@ -151,14 +151,15 @@ def schedule_tracker_job(
     )
 
 def unschedule_tracker_job(job_queue, tracker_id: int):
-    """Remove a scheduled tracker job from JobQueue if present."""
+    """Remove a scheduled tracker or digest job from JobQueue if present."""
     if not job_queue:
         return
 
-    jobs = job_queue.get_jobs_by_name(f"tracker_job_{tracker_id}")
-    if jobs:
-        for job in jobs:
-            job.schedule_removal()
+    for job_name in [f"tracker_job_{tracker_id}", f"digest_job_{tracker_id}"]:
+        jobs = job_queue.get_jobs_by_name(job_name)
+        if jobs:
+            for job in jobs:
+                job.schedule_removal()
 
 async def register_active_trackers_on_startup(app, db: DatabaseManager, provider: AbstractFlightProvider) -> int:
     """Reload all ACTIVE trackers from SQLite into JobQueue on startup."""
@@ -188,12 +189,13 @@ def register_active_trackers(application):
     except RuntimeError:
         asyncio.run(_do_register())
 
-def schedule_digest_job(job_queue, user_id: int, origin: str, region: str, budget: float, schedule_str: str = "Sunday@15:00"):
+def schedule_digest_job(job_queue, tracker_id: int, user_id: int, origin: str, region: str, budget: float, schedule_str: str = "Sunday@15:00"):
     """Schedule weekly recurring digest execution for user."""
     if not job_queue:
         return
 
     job_data = {
+        "tracker_id": tracker_id,
         "user_id": user_id,
         "origin": origin,
         "region": region,
@@ -207,7 +209,7 @@ def schedule_digest_job(job_queue, user_id: int, origin: str, region: str, budge
         interval=interval,
         first=interval,
         data=job_data,
-        name=f"digest_job_{user_id}_{origin}_{region}"
+        name=f"digest_job_{tracker_id}"
     )
 
 async def run_digest_weekly_job(context):
