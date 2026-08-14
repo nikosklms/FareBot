@@ -290,7 +290,7 @@ async def track_deal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     origin, dest, dep_date, deal_price = parts[2], parts[3], parts[4], float(parts[5])
     target_budget = round(deal_price * 0.90, 2)
 
-    active_count = await db_manager.get_active_tracker_count(user_id)
+    active_count = await db_manager.get_active_trackers_count(user_id)
     if active_count >= MAX_TRACKERS_PER_USER:
         await query.answer(f"⚠️ Limit reached ({MAX_TRACKERS_PER_USER} active trackers max).", show_alert=True)
         return

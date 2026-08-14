@@ -92,14 +92,15 @@ async def test_track_deal_callback_sends_chat_confirmation():
     update.effective_user.id = 123
     context = MagicMock()
 
-    with patch("bot.handlers.explore.db_manager") as db_mock:
-        db_mock.has_active_tracker = AsyncMock(return_value=False)
-        db_mock.get_active_trackers_count = AsyncMock(return_value=1)
-        db_mock.create_tracker = AsyncMock(return_value=42)
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        with patch("bot.handlers.explore.db_manager") as db_mock:
+            db_mock.has_active_tracker = AsyncMock(return_value=False)
+            db_mock.get_active_trackers_count = AsyncMock(return_value=1)
+            db_mock.create_tracker = AsyncMock(return_value=42)
 
-        await track_deal_callback(update, context)
+            await track_deal_callback(update, context)
 
-        update.callback_query.message.reply_text.assert_called_once()
+            update.callback_query.message.reply_text.assert_called_once()
         reply_msg = update.callback_query.message.reply_text.call_args[0][0]
         assert "✅ **Deal Tracked!**" in reply_msg
         assert "Tracker #42" in reply_msg

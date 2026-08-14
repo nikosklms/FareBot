@@ -250,6 +250,9 @@ async def run_digest_weekly_job(context):
     """Execute weekly digest query for user and send formatted deal report."""
     job_data = getattr(context.job, "data", {}) if hasattr(context, "job") else {}
     user_id = job_data.get("user_id")
+    origin = job_data.get("origin", "ATH")
+    region = job_data.get("region", "europe")
+    budget = job_data.get("budget")
     schedule_str = job_data.get("schedule_str", "30d|Sunday@15:00")
     offset_days = 30
     if "|" in schedule_str:
