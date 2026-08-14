@@ -31,6 +31,8 @@ from bot.handlers import (
     handle_departure_date,
     handle_date_preset_callback,
     handle_calendar_date_selection,
+    open_calendar_track_callback,
+    calendar_nav_callback,
     select_flight_type_callback,
     handle_budget,
     select_frequency_callback,
@@ -80,6 +82,8 @@ from bot.handlers import (
     select_search_destination_callback,
     handle_search_date,
     handle_search_date_preset_callback,
+    open_calendar_search_callback,
+    handle_search_calendar_date_selection,
     select_search_flight_type_callback,
     search_track_callback_handler,
     ORIGIN,
@@ -256,7 +260,10 @@ def main():
             ],
             SEARCH_DATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date),
-                CallbackQueryHandler(handle_search_date_preset_callback, pattern="^src_datepreset_")
+                CallbackQueryHandler(open_calendar_search_callback, pattern="^open_cal_search$"),
+                CallbackQueryHandler(handle_search_date_preset_callback, pattern="^src_datepreset_"),
+                CallbackQueryHandler(calendar_nav_callback, pattern="^cal_nav_"),
+                CallbackQueryHandler(handle_search_calendar_date_selection, pattern="^cal_day_")
             ],
             SEARCH_FLIGHT_TYPE: [CallbackQueryHandler(select_search_flight_type_callback, pattern="^src_fl_type_")]
         },
@@ -283,7 +290,9 @@ def main():
             ],
             DEPARTURE_DATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date),
+                CallbackQueryHandler(open_calendar_track_callback, pattern="^open_cal_track$"),
                 CallbackQueryHandler(handle_date_preset_callback, pattern="^datepreset_"),
+                CallbackQueryHandler(calendar_nav_callback, pattern="^cal_nav_"),
                 CallbackQueryHandler(handle_calendar_date_selection, pattern="^cal_day_")
             ],
             FLIGHT_TYPE: [CallbackQueryHandler(select_flight_type_callback, pattern="^fl_type_")],

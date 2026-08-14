@@ -175,15 +175,41 @@ async def select_destination_callback(update: Update, context: ContextTypes.DEFA
     date_buttons = [
         [InlineKeyboardButton("🗓️ Next 7 Days", callback_data="datepreset_next_7_days"),
          InlineKeyboardButton("✈️ Next 14 Days", callback_data="datepreset_next_14_days")],
-        [InlineKeyboardButton("📅 This Weekend", callback_data="datepreset_this_weekend")],
+        [InlineKeyboardButton("📅 This Weekend", callback_data="datepreset_this_weekend"),
+         InlineKeyboardButton("📆 Custom Calendar", callback_data="open_cal_track")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     await query.message.edit_text(
         f"✅ Destination set to: **{iata} - {name}**\n\n"
-        "📅 **Step 3/6**: Select a quick date preset or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
+        "📅 **Step 3/6**: Select a quick date preset, open the calendar, or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
         reply_markup=InlineKeyboardMarkup(date_buttons),
         parse_mode="Markdown"
     )
+    return DEPARTURE_DATE
+
+@restricted
+async def open_calendar_track_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    from bot.inline_calendar import create_calendar
+    now = datetime.now(timezone.utc)
+    calendar_markup = create_calendar(now.year, now.month)
+    await query.message.edit_text(
+        "📆 **Interactive Date Picker**\nSelect departure date on calendar below:",
+        reply_markup=calendar_markup,
+        parse_mode="Markdown"
+    )
+    return DEPARTURE_DATE
+
+@restricted
+async def calendar_nav_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    from bot.inline_calendar import create_calendar
+    target = query.data.replace("cal_nav_", "")
+    year, month = map(int, target.split("-"))
+    calendar_markup = create_calendar(year, month)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
     return DEPARTURE_DATE
 
 @restricted

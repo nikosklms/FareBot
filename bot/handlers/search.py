@@ -134,16 +134,51 @@ async def select_search_destination_callback(update: Update, context: ContextTyp
     date_buttons = [
         [InlineKeyboardButton("🗓️ Next 7 Days", callback_data="src_datepreset_next_7_days"),
          InlineKeyboardButton("✈️ Next 14 Days", callback_data="src_datepreset_next_14_days")],
-        [InlineKeyboardButton("📅 This Weekend", callback_data="src_datepreset_this_weekend")],
+        [InlineKeyboardButton("📅 This Weekend", callback_data="src_datepreset_this_weekend"),
+         InlineKeyboardButton("📆 Custom Calendar", callback_data="open_cal_search")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     await query.message.edit_text(
         f"🛬 **Destination**: {iata} - {name}\n\n"
-        "📅 **Step 3/4**: Select a quick date preset or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
+        "📅 **Step 3/4**: Select a quick date preset, open the calendar, or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
         reply_markup=InlineKeyboardMarkup(date_buttons),
         parse_mode="Markdown"
     )
     return SEARCH_DATE
+
+@restricted
+async def open_calendar_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    from bot.inline_calendar import create_calendar
+    now = datetime.now(timezone.utc)
+    calendar_markup = create_calendar(now.year, now.month)
+    await query.message.edit_text(
+        "📆 **Interactive Date Picker**\nSelect departure date on calendar below:",
+        reply_markup=calendar_markup,
+        parse_mode="Markdown"
+    )
+    return SEARCH_DATE
+
+@restricted
+async def handle_search_calendar_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    dep_date = query.data.replace("cal_day_", "")
+    context.user_data["search_departure_date"] = dep_date
+
+    buttons = [
+        [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="src_fl_type_1")],
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="src_fl_type_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+    await query.message.edit_text(
+        f"📅 **Departure Date**: {dep_date}\n\n"
+        "⚙️ **Step 4/4**: What type of flights do you want?",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+    return SEARCH_FLIGHT_TYPE
 
 @restricted
 async def handle_search_date_preset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

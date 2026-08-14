@@ -139,6 +139,35 @@ async def test_select_search_destination_callback_shows_date_presets():
     assert any("Next 7 Days" in label for label in labels)
     assert any("Next 14 Days" in label for label in labels)
     assert any("This Weekend" in label for label in labels)
+    assert any("Custom Calendar" in label for label in labels)
+
+@pytest.mark.asyncio
+async def test_open_calendar_search_callback():
+    from bot.handlers.search import open_calendar_search_callback, handle_search_calendar_date_selection, SEARCH_DATE, SEARCH_FLIGHT_TYPE
+    update = MagicMock()
+    update.effective_user.id = 123
+    update.callback_query.data = "open_cal_search"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.message.edit_text = AsyncMock()
+    context = MagicMock()
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        state = await open_calendar_search_callback(update, context)
+        assert state == SEARCH_DATE
+        update.callback_query.message.edit_text.assert_called_once()
+
+    update2 = MagicMock()
+    update2.effective_user.id = 123
+    update2.callback_query.data = "cal_day_2026-11-20"
+    update2.callback_query.answer = AsyncMock()
+    update2.callback_query.message.edit_text = AsyncMock()
+    context2 = MagicMock()
+    context2.user_data = {}
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        state2 = await handle_search_calendar_date_selection(update2, context2)
+        assert state2 == SEARCH_FLIGHT_TYPE
+        assert context2.user_data["search_departure_date"] == "2026-11-20"
 
 @pytest.mark.asyncio
 async def test_execute_search_departure_arrival_times_formatting():
