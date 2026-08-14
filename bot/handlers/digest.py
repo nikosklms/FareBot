@@ -219,8 +219,8 @@ async def _ask_digest_timeframe(message, context: ContextTypes.DEFAULT_TYPE, is_
 @restricted
 async def handle_digest_timeframe_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
-    if not text.isdigit() or int(text) < 1:
-        await update.message.reply_text("❌ Please enter a positive number of days ahead (e.g. '30') or tap a button below.")
+    if not text.isdigit() or not (1 <= int(text) <= 330):
+        await update.message.reply_text("❌ Please enter a number between 1 and 330 days ahead (e.g. '30') or tap a button below.")
         return DIGEST_TIMEFRAME
 
     context.user_data["digest_timeframe"] = int(text)
