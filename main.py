@@ -35,8 +35,18 @@ from bot.handlers import (
     mytracks_command,
     dashboard_callback_handler,
     handle_edit_budget_input,
-    explore_command,
-    explore_region_callback,
+    start_explore_wizard,
+    handle_explore_origin_input,
+    select_explore_origin_callback,
+    select_explore_region_callback,
+    handle_explore_budget_input,
+    select_explore_budget_callback,
+    handle_explore_limit_input,
+    select_explore_limit_callback,
+    EXPLORE_ORIGIN,
+    EXPLORE_REGION,
+    EXPLORE_BUDGET,
+    EXPLORE_LIMIT,
     digest_command,
     track_deal_callback,
     search_command,
@@ -130,13 +140,40 @@ def main():
     # Register command handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("explore", explore_command))
     app.add_handler(CommandHandler("digest", digest_command))
     app.add_handler(CommandHandler("mytracks", mytracks_command))
-    app.add_handler(CallbackQueryHandler(explore_region_callback, pattern="^expl_"))
     app.add_handler(CallbackQueryHandler(dashboard_callback_handler, pattern="^dash_"))
     app.add_handler(CallbackQueryHandler(track_deal_callback, pattern="^track_deal_"))
     app.add_handler(CallbackQueryHandler(search_track_callback_handler, pattern="^track_"))
+
+    # Register explore wizard
+    explore_wizard = ConversationHandler(
+        entry_points=[CommandHandler("explore", start_explore_wizard)],
+        states={
+            EXPLORE_ORIGIN: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_origin_input),
+                CallbackQueryHandler(select_explore_origin_callback, pattern="^expl_org_")
+            ],
+            EXPLORE_REGION: [
+                CallbackQueryHandler(select_explore_region_callback, pattern="^expl_reg_")
+            ],
+            EXPLORE_BUDGET: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_budget_input),
+                CallbackQueryHandler(select_explore_budget_callback, pattern="^expl_bud_")
+            ],
+            EXPLORE_LIMIT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_limit_input),
+                CallbackQueryHandler(select_explore_limit_callback, pattern="^expl_lim_")
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_command),
+            CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
+        ],
+        per_chat=True,
+        per_user=True
+    )
+    app.add_handler(explore_wizard)
 
     # Register search wizard
     search_wizard = ConversationHandler(
