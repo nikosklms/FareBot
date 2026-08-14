@@ -32,7 +32,8 @@ async def run_explore_query(
     region: str,
     departure_date: str,
     max_budget: Optional[float] = None,
-    sort_by: str = "discount"
+    sort_by: str = "discount",
+    max_results: int = 10
 ) -> List[Dict[str, Any]]:
     """Query primary country airports in a region and score deal opportunities."""
     airports = get_region_airports(region)
@@ -130,4 +131,4 @@ async def run_explore_query(
             country_counts[c] = current_count + 1
         capped_deals.append(deal)
 
-    return capped_deals
+    return capped_deals[:max_results]

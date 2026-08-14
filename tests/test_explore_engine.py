@@ -58,6 +58,20 @@ async def test_run_explore_query_excludes_cyprus_for_greece_origin():
         assert "FCO" in returned_codes      # FCO (Italy) included!
 
 @pytest.mark.asyncio
+async def test_run_explore_query_respects_custom_max_results():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            return [AsyncMock(price=40.0, airline="Airline", typical_min=90.0, typical_max=110.0, country=f"Country_{dst}")]
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15", max_results=3)
+        assert len(deals) <= 3
+
+@pytest.mark.asyncio
 async def test_run_explore_query_handles_provider_error_gracefully():
     with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
         provider = AsyncMock()
