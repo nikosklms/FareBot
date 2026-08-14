@@ -13,6 +13,7 @@ from .track import (
 )
 from .dashboard import mytracks_command, dashboard_callback_handler
 from .explore import explore_command, track_deal_callback
+from .digest import digest_command
 
 __all__ = [
     "start_command", "help_command", "cancel_command", "cancel_callback",
@@ -25,7 +26,7 @@ __all__ = [
     "select_flight_type_callback", "handle_budget", "select_frequency_callback",
     "ORIGIN", "DESTINATION", "DEPARTURE_DATE", "FLIGHT_TYPE", "BUDGET", "FREQUENCY",
     "mytracks_command", "dashboard_callback_handler",
-    "explore_command", "track_deal_callback"
+    "explore_command", "track_deal_callback", "digest_command"
 ]
 
 

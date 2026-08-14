@@ -188,3 +188,55 @@ def register_active_trackers(application):
     except RuntimeError:
         asyncio.run(_do_register())
 
+def schedule_digest_job(job_queue, user_id: int, origin: str, region: str, budget: float, schedule_str: str = "Sunday@15:00"):
+    """Schedule weekly recurring digest execution for user."""
+    if not job_queue:
+        return
+
+    job_data = {
+        "user_id": user_id,
+        "origin": origin,
+        "region": region,
+        "budget": budget
+    }
+
+    interval = 7 * 24 * 3600  # 7 days
+
+    job_queue.run_repeating(
+        run_digest_weekly_job,
+        interval=interval,
+        first=60,
+        data=job_data,
+        name=f"digest_job_{user_id}_{origin}_{region}"
+    )
+
+async def run_digest_weekly_job(context):
+    """Execute weekly digest query for user and send formatted deal report."""
+    job_data = getattr(context.job, "data", {}) if hasattr(context, "job") else {}
+    user_id = job_data.get("user_id")
+    origin = job_data.get("origin", "ATH")
+    region = job_data.get("region", "europe")
+    budget = job_data.get("budget")
+
+    from services.explore_engine import run_explore_query
+    from datetime import datetime, timedelta, timezone
+    dep_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    deals = await run_explore_query(origin, region, dep_date, max_budget=budget)
+    if not deals or not user_id:
+        return
+
+    msg_lines = [f"🗞️ **Weekly Flight Digest for {origin} → {region.upper()}**\n"]
+    for idx, d in enumerate(deals[:5], start=1):
+        disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)" if d.get("discount_pct", 0) > 15 else ""
+        msg_lines.append(
+            f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
+            f"💶 **€{d['price']:.2f}**{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+        )
+
+    try:
+        await context.bot.send_message(chat_id=user_id, text="\n".join(msg_lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Failed to send digest report to user {user_id}: {e}")
+
+
