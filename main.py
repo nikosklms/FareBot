@@ -46,8 +46,23 @@ from bot.handlers import (
     EXPLORE_ORIGIN,
     EXPLORE_REGION,
     EXPLORE_BUDGET,
-    EXPLORE_LIMIT,
-    digest_command,
+    start_digest_wizard,
+    handle_digest_origin_input,
+    select_digest_origin_callback,
+    select_digest_region_callback,
+    handle_digest_budget_input,
+    select_digest_budget_callback,
+    select_digest_day_callback,
+    handle_digest_time_input,
+    select_digest_time_callback,
+    handle_digest_limit_input,
+    select_digest_limit_callback,
+    DIGEST_ORIGIN,
+    DIGEST_REGION,
+    DIGEST_BUDGET,
+    DIGEST_DAY,
+    DIGEST_TIME,
+    DIGEST_LIMIT,
     track_deal_callback,
     search_command,
     handle_search_origin,
@@ -140,11 +155,46 @@ def main():
     # Register command handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("digest", digest_command))
     app.add_handler(CommandHandler("mytracks", mytracks_command))
     app.add_handler(CallbackQueryHandler(dashboard_callback_handler, pattern="^dash_"))
     app.add_handler(CallbackQueryHandler(track_deal_callback, pattern="^track_deal_"))
     app.add_handler(CallbackQueryHandler(search_track_callback_handler, pattern="^track_"))
+
+    # Register digest wizard
+    digest_wizard = ConversationHandler(
+        entry_points=[CommandHandler("digest", start_digest_wizard)],
+        states={
+            DIGEST_ORIGIN: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_digest_origin_input),
+                CallbackQueryHandler(select_digest_origin_callback, pattern="^dig_org_")
+            ],
+            DIGEST_REGION: [
+                CallbackQueryHandler(select_digest_region_callback, pattern="^dig_reg_")
+            ],
+            DIGEST_BUDGET: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_digest_budget_input),
+                CallbackQueryHandler(select_digest_budget_callback, pattern="^dig_bud_")
+            ],
+            DIGEST_DAY: [
+                CallbackQueryHandler(select_digest_day_callback, pattern="^dig_day_")
+            ],
+            DIGEST_TIME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_digest_time_input),
+                CallbackQueryHandler(select_digest_time_callback, pattern="^dig_time_")
+            ],
+            DIGEST_LIMIT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_digest_limit_input),
+                CallbackQueryHandler(select_digest_limit_callback, pattern="^dig_lim_")
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_command),
+            CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
+        ],
+        per_chat=True,
+        per_user=True
+    )
+    app.add_handler(digest_wizard)
 
     # Register explore wizard
     explore_wizard = ConversationHandler(

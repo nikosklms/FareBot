@@ -189,6 +189,35 @@ def register_active_trackers(application):
     except RuntimeError:
         asyncio.run(_do_register())
 
+def calculate_next_digest_delay(schedule_str: str = "Sunday@15:00") -> float:
+    """Calculate the number of seconds from now until the next occurrence of the requested weekday and time."""
+    from datetime import datetime, timedelta, timezone
+    weekdays = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6}
+
+    target_day = "sunday"
+    target_hour = 15
+    target_minute = 0
+
+    if "@" in schedule_str:
+        day_part, time_part = schedule_str.split("@", 1)
+        target_day = day_part.strip().lower()
+        if ":" in time_part:
+            h_str, m_str = time_part.split(":", 1)
+            if h_str.isdigit() and m_str.isdigit():
+                target_hour = int(h_str)
+                target_minute = int(m_str)
+
+    target_weekday = weekdays.get(target_day, 6)
+    now = datetime.now(timezone.utc)
+
+    days_ahead = target_weekday - now.weekday()
+    if days_ahead < 0 or (days_ahead == 0 and (now.hour > target_hour or (now.hour == target_hour and now.minute >= target_minute))):
+        days_ahead += 7
+
+    next_run = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0) + timedelta(days=days_ahead)
+    delay = (next_run - now).total_seconds()
+    return max(60.0, delay)
+
 def schedule_digest_job(job_queue, tracker_id: int, user_id: int, origin: str, region: str, budget: float, schedule_str: str = "Sunday@15:00"):
     """Schedule weekly recurring digest execution for user."""
     if not job_queue:
@@ -199,15 +228,17 @@ def schedule_digest_job(job_queue, tracker_id: int, user_id: int, origin: str, r
         "user_id": user_id,
         "origin": origin,
         "region": region,
-        "budget": budget
+        "budget": budget,
+        "schedule_str": schedule_str
     }
 
     interval = 7 * 24 * 3600  # 7 days
+    first_delay = calculate_next_digest_delay(schedule_str)
 
     job_queue.run_repeating(
         run_digest_weekly_job,
         interval=interval,
-        first=interval,
+        first=first_delay,
         data=job_data,
         name=f"digest_job_{tracker_id}"
     )
