@@ -158,7 +158,21 @@ def start_health_check_server():
     except Exception as e:
         logger.warning(f"Could not start health check server: {e}")
 
+import fcntl
+import sys
+
+def ensure_single_instance():
+    lock_file_path = os.path.join(os.path.dirname(__file__), "farebot.lock")
+    try:
+        lock_file = open(lock_file_path, "w")
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        globals()["_instance_lock_file"] = lock_file
+    except IOError:
+        logger.error("❌ Another instance of FareBot is already running. Exiting.")
+        sys.exit(1)
+
 def main():
+    ensure_single_instance()
     check_config()
     init_db()
     start_health_check_server()
