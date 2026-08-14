@@ -37,6 +37,7 @@ async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif t["status"] == "PAUSED":
             buttons.append(InlineKeyboardButton("▶️ Resume", callback_data=f"dash_resume_{t['id']}"))
 
+        buttons.append(InlineKeyboardButton("✏️ Edit Budget", callback_data=f"dash_editbudget_{t['id']}"))
         buttons.append(InlineKeyboardButton("🗑️ Delete", callback_data=f"dash_del_{t['id']}"))
 
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([buttons]))
@@ -69,6 +70,13 @@ async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAU
         if context.job_queue:
             schedule_tracker_job(context.job_queue, tracker_id, freq)
         await query.message.edit_text(f"▶️ Tracker #{tracker_id} resumed.")
+    elif data.startswith("dash_editbudget_"):
+        tracker_id = int(data.split("_")[2])
+        t = await db_manager.get_tracker_by_id(tracker_id)
+        if not t or t.get("user_id") != user_id:
+            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
+            return
+        await query.message.reply_text(f"✏️ **Edit Target Budget for Tracker #{tracker_id}**\n\nSend new target budget in EUR (e.g., `45`):", parse_mode="Markdown")
     elif data.startswith("dash_del_"):
         tracker_id = int(data.split("_")[2])
         t = await db_manager.get_tracker_by_id(tracker_id)
