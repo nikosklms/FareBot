@@ -12,6 +12,7 @@ from .track import (
     ORIGIN, DESTINATION, DEPARTURE_DATE, FLIGHT_TYPE, BUDGET, FREQUENCY
 )
 from .dashboard import mytracks_command, dashboard_callback_handler
+from .explore import explore_command, track_deal_callback
 
 __all__ = [
     "start_command", "help_command", "cancel_command", "cancel_callback",
@@ -23,7 +24,8 @@ __all__ = [
     "handle_destination_input", "select_destination_callback", "handle_departure_date", "handle_date_preset_callback",
     "select_flight_type_callback", "handle_budget", "select_frequency_callback",
     "ORIGIN", "DESTINATION", "DEPARTURE_DATE", "FLIGHT_TYPE", "BUDGET", "FREQUENCY",
-    "mytracks_command", "dashboard_callback_handler"
+    "mytracks_command", "dashboard_callback_handler",
+    "explore_command", "track_deal_callback"
 ]
 
 
