@@ -52,8 +52,13 @@ async def run_explore_query(
         if dst_code.upper() == origin.upper():
             return []
 
-        if normalized_region != "islands" and origin_country and country.strip().lower() == origin_country.strip().lower():
-            return []
+        if normalized_region != "islands" and origin_country:
+            o_c = origin_country.strip().lower()
+            d_c = country.strip().lower()
+            if o_c == d_c:
+                return []
+            if o_c == "greece" and d_c == "cyprus":
+                return []
 
         try:
             offers = await provider.search_flights(origin, dst_code, departure_date, currency="EUR")
