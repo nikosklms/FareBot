@@ -84,8 +84,9 @@ async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAU
         if context.job_queue:
             if t.get("destination_code", "").startswith("REGION:"):
                 reg = t["destination_code"].replace("REGION:", "").lower()
+                sched_str = t.get("departure_date", "Sunday@15:00")
                 from daemon.scheduler import schedule_digest_job
-                schedule_digest_job(context.job_queue, tracker_id, user_id, t["origin_code"], reg, t.get("max_budget", 0.0))
+                schedule_digest_job(context.job_queue, tracker_id, user_id, t["origin_code"], reg, t.get("max_budget", 0.0), sched_str)
             else:
                 freq = t.get("frequency_hours", 6) if t else 6
                 schedule_tracker_job(context.job_queue, tracker_id, freq)

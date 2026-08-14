@@ -20,7 +20,7 @@ async def test_mytracks_shows_edit_button_and_handles_edit():
         with patch("bot.handlers.dashboard.db_manager") as db_mock:
             db_mock.get_user_trackers = AsyncMock(return_value=[mock_tracker])
             await mytracks_command(update, context)
-            
+
             reply_markup = update.message.reply_text.call_args[1]["reply_markup"]
             button_labels = [b.text for row in reply_markup.inline_keyboard for b in row]
             assert any("Edit" in label for label in button_labels)
@@ -56,3 +56,31 @@ async def test_handle_edit_budget_input_updates_db():
             update.message.reply_text.assert_called_once()
             assert "€58.00" in update.message.reply_text.call_args[0][0]
             assert "edit_tracker_id" not in context.user_data
+
+@pytest.mark.asyncio
+async def test_dashboard_resume_digest_preserves_custom_schedule():
+    update = MagicMock()
+    update.callback_query.data = "dash_resume_101"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.message.edit_text = AsyncMock()
+    update.effective_user.id = 123
+    context = MagicMock()
+    context.job_queue = MagicMock()
+
+    digest_tracker_row = {
+        "id": 101,
+        "user_id": 123,
+        "origin_code": "ATH",
+        "destination_code": "REGION:EUROPE",
+        "departure_date": "Friday@18:00",
+        "max_budget": 80.0,
+        "status": "PAUSED"
+    }
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        with patch("bot.handlers.dashboard.db_manager") as db_mock:
+            db_mock.get_tracker_by_id = AsyncMock(return_value=digest_tracker_row)
+            db_mock.update_tracker_status = AsyncMock()
+            with patch("daemon.scheduler.schedule_digest_job") as sched_digest_mock:
+                await dashboard_callback_handler(update, context)
+                sched_digest_mock.assert_called_once_with(context.job_queue, 101, 123, "ATH", "europe", 80.0, "Friday@18:00")

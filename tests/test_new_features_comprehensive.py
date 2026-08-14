@@ -202,4 +202,4 @@ async def test_digest_dashboard_pause_and_resume():
             db_mock.update_tracker_status = AsyncMock()
             with patch("daemon.scheduler.schedule_digest_job") as sched_digest_mock:
                 await dashboard_callback_handler(update_resume, context)
-                sched_digest_mock.assert_called_once_with(context.job_queue, 101, 123, "ATH", "europe", 80.0)
+                sched_digest_mock.assert_called_once_with(context.job_queue, 101, 123, "ATH", "europe", 80.0, "Sunday@15:00")
