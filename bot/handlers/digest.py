@@ -289,6 +289,7 @@ async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, us
             await message.edit_text(warn_text, parse_mode="Markdown")
         else:
             await message.reply_text(warn_text, parse_mode="Markdown")
+        context.user_data.clear()
         return ConversationHandler.END
 
     digest_tracker_id = await db_manager.create_tracker(
@@ -327,4 +328,5 @@ async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, us
     else:
         await message.reply_text(success_text, parse_mode="Markdown")
 
+    context.user_data.clear()
     return ConversationHandler.END

@@ -194,6 +194,7 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
 
     deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, max_results=limit)
     await _render_explore_deals(message, origin, region, deals)
+    context.user_data.clear()
     return ConversationHandler.END
 
 async def _render_explore_deals(message, origin: str, region: str, deals: List[Dict[str, Any]]) -> None:
