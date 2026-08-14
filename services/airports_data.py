@@ -3,6 +3,7 @@
 GLOBAL_REGIONS_AIRPORTS = {
     "europe": [
         {"code": "CDG", "name": "Paris Charles de Gaulle", "country": "France"},
+        {"code": "ORY", "name": "Paris Orly", "country": "France"},
         {"code": "FCO", "name": "Rome Fiumicino", "country": "Italy"},
         {"code": "MAD", "name": "Madrid Barajas", "country": "Spain"},
         {"code": "BCN", "name": "Barcelona El Prat", "country": "Spain"},
