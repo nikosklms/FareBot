@@ -7,6 +7,36 @@ def test_calculate_discount_score():
     score = calculate_discount_score(current_price=50.0, baseline_min=190.0, baseline_max=210.0)
     assert abs(score - 75.0) < 0.1
 
+def test_discount_score_zero_when_price_above_baseline():
+    # Current price 220 EUR, baseline 200 EUR -> 0% discount
+    score = calculate_discount_score(current_price=220.0, baseline_min=190.0, baseline_max=210.0)
+    assert score == 0.0
+
+@pytest.mark.asyncio
+async def test_run_explore_query_invalid_region_returns_empty():
+    deals = await run_explore_query("ATH", "non_existent_region", "2026-09-15")
+    assert deals == []
+
+@pytest.mark.asyncio
+async def test_run_explore_query_handles_provider_error_gracefully():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "CDG":
+                raise RuntimeError("Google Flights connection timeout")
+            elif dst == "FCO":
+                return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15")
+        # CDG failed, but FCO succeeded! Explore query should return FCO without throwing an exception.
+        assert len(deals) >= 1
+        assert deals[0]["destination_code"] == "FCO"
+
 @pytest.mark.asyncio
 async def test_run_explore_query_ranking_diversity_cap_and_sort_by_price():
     with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
