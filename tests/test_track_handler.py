@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from bot.handlers.track import handle_calendar_date_selection
+from bot.handlers.track import handle_calendar_date_selection, handle_date_preset_callback, FLIGHT_TYPE
 
 @pytest.mark.asyncio
 async def test_handle_track_dedup_prompt_on_duplicate():
@@ -23,3 +23,19 @@ async def test_handle_track_dedup_prompt_on_duplicate():
             reply_markup = update.callback_query.message.reply_text.call_args[1]["reply_markup"]
             button_labels = [b.text for row in reply_markup.inline_keyboard for b in row]
             assert any("Update Existing Budget" in label for label in button_labels)
+
+@pytest.mark.asyncio
+async def test_handle_date_preset_callback():
+    update = MagicMock()
+    update.callback_query.data = "datepreset_next_7_days"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.message.edit_text = AsyncMock()
+    context = MagicMock()
+    context.user_data = {}
+    update.effective_user.id = 123
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        next_state = await handle_date_preset_callback(update, context)
+        assert next_state == FLIGHT_TYPE
+        assert "departure_date" in context.user_data
+        assert "departure_date_end" in context.user_data

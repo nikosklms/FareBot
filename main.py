@@ -29,6 +29,8 @@ from bot.handlers import (
     handle_destination_input,
     select_destination_callback,
     handle_departure_date,
+    handle_date_preset_callback,
+    handle_calendar_date_selection,
     select_flight_type_callback,
     handle_budget,
     select_frequency_callback,
@@ -279,7 +281,11 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_destination_input),
                 CallbackQueryHandler(select_destination_callback, pattern="^sel_dst_|re_dst")
             ],
-            DEPARTURE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date)],
+            DEPARTURE_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date),
+                CallbackQueryHandler(handle_date_preset_callback, pattern="^datepreset_"),
+                CallbackQueryHandler(handle_calendar_date_selection, pattern="^cal_day_")
+            ],
             FLIGHT_TYPE: [CallbackQueryHandler(select_flight_type_callback, pattern="^fl_type_")],
             BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_budget)],
             FREQUENCY: [CallbackQueryHandler(select_frequency_callback, pattern="^freq_")]
