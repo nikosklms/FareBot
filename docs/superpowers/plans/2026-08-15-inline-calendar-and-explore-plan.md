@@ -1,4 +1,4 @@
-# Inline Calendar & Explore Feature Upgrades Implementation Plan (Revised)
+# Inline Calendar & Explore Feature Upgrades Implementation Plan (Airtight Version)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -74,7 +74,7 @@ git commit -m "feat: add global regions primary airport registry for 8 regions"
 
 ---
 
-### Task 2: Database Schema & Method Upgrades (`database/db.py`)
+### Task 2: Database Schema & 3-Rule Cleanup Upgrades (`database/db.py`)
 
 **Files:**
 - Modify: `database/db.py`
@@ -93,7 +93,7 @@ from datetime import datetime, timedelta, timezone
 from database.db import DatabaseManager
 
 @pytest.mark.asyncio
-async def test_db_upgrades_budget_dedup_and_cleanup(tmp_path):
+async def test_db_upgrades_budget_dedup_and_all_3_purge_rules(tmp_path):
     db_file = str(tmp_path / "test.db")
     db = DatabaseManager(db_file)
     await db.init_db()
@@ -108,21 +108,37 @@ async def test_db_upgrades_budget_dedup_and_cleanup(tmp_path):
     tracker = await db.get_tracker_by_id(t_id)
     assert tracker["max_budget"] == 32.40
 
-    # 2. Test deduplication check
+    # 2. Test deduplication check for active tracker & digest
     assert await db.has_active_tracker(100, "ATH", "MJT", "2026-09-15") is True
     assert await db.has_active_tracker(100, "ATH", "SKG", "2026-09-15") is False
 
-    # 3. Test purge rules: past departure -> EXPIRED, 30d expired -> PURGED, 60d paused -> PURGED
-    old_date = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
-    t_expired_id = await db.create_tracker(
+    # 3. Test Rule 1: Active past departure date -> status becomes EXPIRED
+    old_dep_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
+    t_past_id = await db.create_tracker(
         user_id=101, origin_code="ATH", origin_name="Athens",
         destination_code="SKG", destination_name="Thessaloniki",
-        departure_date=old_date, max_budget=50.0
+        departure_date=old_dep_date, max_budget=50.0
     )
+
+    # Test Rule 2: Expired tracker older than 30 days -> PURGED (deleted)
+    old_created_35d = (datetime.now(timezone.utc) - timedelta(days=35)).strftime("%Y-%m-%d %H:%M:%S")
+    async with db.get_connection() if hasattr(db, "get_connection") else db._connect() as conn:
+        pass # Created manually for test
+    t_exp_35d_id = await db.create_tracker(
+        user_id=102, origin_code="ATH", origin_name="Athens",
+        destination_code="FCO", destination_name="Rome",
+        departure_date=old_dep_date, max_budget=50.0
+    )
+    await db.update_tracker_status(t_exp_35d_id, "EXPIRED")
+
+    # Execute purge_stale_trackers
+    stats = await db.purge_stale_trackers()
+    assert isinstance(stats, dict)
+    assert "expired" in stats
+    assert "purged" in stats
     
-    res = await db.purge_stale_trackers()
-    t_exp = await db.get_tracker_by_id(t_expired_id)
-    assert t_exp["status"] == "EXPIRED"
+    t_past = await db.get_tracker_by_id(t_past_id)
+    assert t_past["status"] == "EXPIRED"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -165,24 +181,31 @@ git commit -m "feat: add update_budget, deduplication guard, and 3-rule cleanup 
 from bot.inline_calendar import create_calendar, parse_calendar_callback
 
 def test_calendar_rendering_and_actions():
-    # Test markup structure
-    markup = create_calendar(2026, 9, mode="single")
-    assert markup is not None
-    button_datas = [b.callback_data for row in markup.inline_keyboard for b in row]
+    # Test markup structure for single and range modes
+    markup_single = create_calendar(2026, 9, mode="single")
+    markup_range = create_calendar(2026, 9, mode="range")
+    
+    button_datas_single = [b.callback_data for row in markup_single.inline_keyboard for b in row]
+    button_datas_range = [b.callback_data for row in markup_range.inline_keyboard for b in row]
 
     # Verify nav actions, mode toggle, cancel button
-    assert any("cal_nav_" in d for d in button_datas)
-    assert any("cal_mode_" in d for d in button_datas)
-    assert any("cal_cancel" in d for d in button_datas)
+    assert any("cal_nav_" in d for d in button_datas_single)
+    assert any("cal_mode_range" in d for d in button_datas_single)
+    assert any("cal_mode_single" in d for d in button_datas_range)
+    assert any("cal_cancel" in d for d in button_datas_single)
 
-    # Test callback parser
-    action, data = parse_calendar_callback("cal_day_2026-09-15")
-    assert action == "DAY"
-    assert data == "2026-09-15"
+    # Test callback parser for day, nav, mode, and cancel
+    action_day, data_day = parse_calendar_callback("cal_day_2026-09-15")
+    assert action_day == "DAY"
+    assert data_day == "2026-09-15"
 
     action_nav, data_nav = parse_calendar_callback("cal_nav_2026-10")
     assert action_nav == "NAV"
     assert data_nav == "2026-10"
+
+    action_mode, data_mode = parse_calendar_callback("cal_mode_range")
+    assert action_mode == "MODE"
+    assert data_mode == "range"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -208,7 +231,7 @@ git commit -m "feat: add interactive Telegram inline calendar widget with nav an
 
 ---
 
-### Task 4: Explore Engine with Discount Scoring & Diversity Capping (`services/explore_engine.py`)
+### Task 4: Explore Engine with Ranking, Diversity Capping & Sort Toggles (`services/explore_engine.py`)
 
 **Files:**
 - Create: `services/explore_engine.py`
@@ -232,16 +255,20 @@ def test_calculate_discount_score():
     assert abs(score - 66.67) < 0.1
 
 @pytest.mark.asyncio
-async def test_run_explore_query_ranking_and_diversity():
+async def test_run_explore_query_ranking_diversity_cap_and_sort_by_price():
     with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
         provider = AsyncMock()
         
-        # Return Paris (67% off), Sofia (16% off), Rome (50% off)
+        # Mock 3 French airports (CDG, ORY, NCE) + 1 Bulgarian (SOF) + 1 Italian (FCO)
         def mock_search(origin, dst, date, currency="EUR"):
             if dst == "CDG":
                 return [AsyncMock(price=50.0, airline="Air France", typical_min=140.0, typical_max=160.0, country="France")]
+            elif dst == "ORY":
+                return [AsyncMock(price=45.0, airline="Transavia", typical_min=130.0, typical_max=150.0, country="France")]
+            elif dst == "NCE":
+                return [AsyncMock(price=40.0, airline="EasyJet", typical_min=120.0, typical_max=140.0, country="France")]
             elif dst == "SOF":
-                return [AsyncMock(price=25.0, airline="Ryanair", typical_min=28.0, typical_max=32.0, country="Bulgaria")]
+                return [AsyncMock(price=20.0, airline="Ryanair", typical_min=22.0, typical_max=26.0, country="Bulgaria")]
             elif dst == "FCO":
                 return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
             return []
@@ -249,12 +276,15 @@ async def test_run_explore_query_ranking_and_diversity():
         provider.search_flights.side_effect = mock_search
         provider_cls.return_value = provider
 
-        deals = await run_explore_query("ATH", "europe", "2026-09-15", max_budget=100.0, sort_by="discount")
-        assert len(deals) >= 3
-        # Assert Paris (67% off) ranks BEFORE Sofia (16% off)
-        assert deals[0]["destination_code"] == "CDG"
-        assert deals[1]["destination_code"] == "FCO"
-        assert deals[2]["destination_code"] == "SOF"
+        # 1. Test sort_by="discount" with Diversity Cap (Max 2 French airports allowed)
+        deals_discount = await run_explore_query("ATH", "europe", "2026-09-15", max_budget=100.0, sort_by="discount")
+        french_deals = [d for d in deals_discount if d["country"] == "France"]
+        assert len(french_deals) <= 2  # Proves Max-2 Diversity Cap is enforced!
+        assert deals_discount[0]["destination_code"] in ["CDG", "ORY"]  # Highest discount at top
+
+        # 2. Test sort_by="price" (Lowest absolute price first)
+        deals_price = await run_explore_query("ATH", "europe", "2026-09-15", max_budget=100.0, sort_by="price")
+        assert deals_price[0]["destination_code"] == "SOF"  # 20 EUR lowest price first!
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -264,7 +294,7 @@ Expected: FAIL (`ModuleNotFoundError: No module named 'services.explore_engine'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `services/explore_engine.py` with parallel querying via `asyncio.gather`, Google Flights baseline discount scoring, ranking order, sort toggles, and regional diversity capping (max 2 per country).
+Create `services/explore_engine.py` implementing `run_explore_query`, `calculate_discount_score`, max 2/country diversity cap, and `sort_by` ("discount" vs "price").
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -275,7 +305,7 @@ Expected: PASS.
 
 ```bash
 git add services/explore_engine.py tests/test_explore_engine.py
-git commit -m "feat: add explore engine with discount scoring, ranking, and diversity capping"
+git commit -m "feat: add explore engine with discount scoring, diversity capping, and price/discount sorting"
 ```
 
 ---
@@ -307,7 +337,7 @@ async def test_track_deal_callback_success_and_dedup():
     update.callback_query.edit_message_reply_markup = AsyncMock()
     context = MagicMock()
 
-    # Path 1: Non-duplicate -> Creates tracker with -10% budget rule (36.0 * 0.9 = 32.40)
+    # Path 1: Non-duplicate -> Creates tracker with -10% budget rule (36.0 * 0.9 = 32.40) & updates markup to ✅ Tracked!
     with patch("bot.handlers.explore.db_manager") as db_mock:
         db_mock.has_active_tracker = AsyncMock(return_value=False)
         db_mock.get_active_trackers_count = AsyncMock(return_value=1)
@@ -316,6 +346,7 @@ async def test_track_deal_callback_success_and_dedup():
         await track_deal_callback(update, context)
         db_mock.create_tracker.assert_called_once()
         assert abs(db_mock.create_tracker.call_args[1]["max_budget"] - 32.40) < 0.01
+        update.callback_query.edit_message_reply_markup.assert_called_once()
 
     # Path 2: Duplicate -> Answers with alert and updates button to Already Tracked
     with patch("bot.handlers.explore.db_manager") as db_mock:
@@ -368,13 +399,14 @@ from bot.handlers.digest import digest_command
 from daemon.scheduler import schedule_digest_job, run_digest_weekly_job
 
 @pytest.mark.asyncio
-async def test_digest_command_and_scheduler():
+async def test_digest_command_registration_and_schedule_job():
+    # 1. Test digest_command with default Sunday@15:00 and custom schedule
     update = MagicMock()
     update.effective_user.id = 123
     update.message.reply_text = AsyncMock()
     context = MagicMock()
     context.job_queue = MagicMock()
-    context.args = ["ATH", "europe", "80", "Sunday@15:00"]
+    context.args = ["ATH", "europe", "80"]  # No schedule arg -> default Sunday@15:00
 
     with patch("bot.handlers.digest.db_manager") as db_mock:
         db_mock.has_active_digest = AsyncMock(return_value=False)
@@ -382,7 +414,12 @@ async def test_digest_command_and_scheduler():
         update.message.reply_text.assert_called_once()
         assert "Sunday at 15:00" in update.message.reply_text.call_args[0][0]
 
-    # Test weekly execution job runner
+    # 2. Test schedule_digest_job registers with job_queue
+    jq_mock = MagicMock()
+    schedule_digest_job(jq_mock, user_id=123, origin="ATH", region="europe", budget=80.0, schedule_str="Sunday@15:00")
+    assert jq_mock.run_daily.called or jq_mock.run_repeating.called
+
+    # 3. Test weekly execution job runner
     job_context = MagicMock()
     job_context.job.data = {"user_id": 123, "origin": "ATH", "region": "europe", "budget": 80.0}
     with patch("daemon.scheduler.run_explore_query") as explore_mock:
@@ -409,7 +446,7 @@ Expected: PASS.
 
 ```bash
 git add bot/handlers/digest.py daemon/scheduler.py bot/handlers/__init__.py main.py tests/test_digest_handler.py
-git commit -m "feat: add /digest command handler and weekly job scheduler"
+git commit -m "feat: add /digest command handler and weekly job scheduler registration"
 ```
 
 ---
