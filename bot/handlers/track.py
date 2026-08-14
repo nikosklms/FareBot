@@ -324,4 +324,42 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
     await query.message.edit_text(summary, parse_mode="Markdown")
     return ConversationHandler.END
 
+@restricted
+async def handle_calendar_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    user_id = update.effective_user.id
+    origin = context.user_data.get("track_origin") or context.user_data.get("origin_code")
+    destination = context.user_data.get("track_destination") or context.user_data.get("destination_code")
+    dep_date = data.replace("cal_day_", "")
+
+    if await db_manager.has_active_tracker(user_id, origin, destination, dep_date):
+        buttons = [
+            [InlineKeyboardButton("✏️ Update Existing Budget", callback_data="dash_editbudget_1")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+        ]
+        await query.message.reply_text(
+            f"⚠️ **Duplicate Tracker Detected!**\n\n"
+            f"You are already tracking **{origin} → {destination}** for **{dep_date}**.",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="Markdown"
+        )
+        return DEPARTURE_DATE
+
+    context.user_data["departure_date"] = dep_date
+    buttons = [
+        [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="fl_type_1")],
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+    await query.message.reply_text(
+        f"📅 **Date**: {dep_date}\n\n"
+        "✈️ **Step 4/6**: Select your flight type preference:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+    return FLIGHT_TYPE
+
 
