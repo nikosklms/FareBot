@@ -30,24 +30,25 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
         schedule_str = "Sunday@15:00"
         limit = 10
 
-        if len(args) > 2:
+        if len(args) == 3:
+            try:
+                budget = float(args[2])
+            except ValueError:
+                pass
+        elif len(args) >= 4:
             if args[2].isdigit():
                 tf = int(args[2])
-            else:
-                try:
-                    budget = float(args[2])
-                except ValueError:
-                    pass
-
-        if len(args) > 3 and budget is None and args[3].isdigit():
-            budget = float(args[3])
-        elif len(args) > 3 and "@" in args[3]:
-            schedule_str = args[3]
-
-        if len(args) > 4 and "@" in args[4]:
-            schedule_str = args[4]
-        elif len(args) > 4 and args[4].isdigit():
-            limit = int(args[4])
+            try:
+                budget = float(args[3])
+            except ValueError:
+                pass
+            if len(args) > 4:
+                if "@" in args[4]:
+                    schedule_str = args[4]
+                elif args[4].isdigit():
+                    limit = int(args[4])
+            if len(args) > 5 and args[5].isdigit():
+                limit = int(args[5])
 
         full_schedule_str = f"{tf}d|{schedule_str}"
 
