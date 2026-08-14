@@ -56,6 +56,8 @@ from bot.handlers import (
     select_digest_region_callback,
     handle_digest_budget_input,
     select_digest_budget_callback,
+    handle_digest_timeframe_input,
+    select_digest_timeframe_callback,
     select_digest_day_callback,
     handle_digest_time_input,
     select_digest_time_callback,
@@ -64,6 +66,7 @@ from bot.handlers import (
     DIGEST_ORIGIN,
     DIGEST_REGION,
     DIGEST_BUDGET,
+    DIGEST_TIMEFRAME,
     DIGEST_DAY,
     DIGEST_TIME,
     DIGEST_LIMIT,
@@ -178,6 +181,10 @@ def main():
             DIGEST_BUDGET: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_digest_budget_input),
                 CallbackQueryHandler(select_digest_budget_callback, pattern="^dig_bud_")
+            ],
+            DIGEST_TIMEFRAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_digest_timeframe_input),
+                CallbackQueryHandler(select_digest_timeframe_callback, pattern="^dig_tf_")
             ],
             DIGEST_DAY: [
                 CallbackQueryHandler(select_digest_day_callback, pattern="^dig_day_")

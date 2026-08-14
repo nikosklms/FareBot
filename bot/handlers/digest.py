@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 db_manager = DatabaseManager(DB_PATH)
 resolver = LocationResolver()
 
-DIGEST_ORIGIN, DIGEST_REGION, DIGEST_BUDGET, DIGEST_DAY, DIGEST_TIME, DIGEST_LIMIT = range(6)
+DIGEST_ORIGIN, DIGEST_REGION, DIGEST_BUDGET, DIGEST_TIMEFRAME, DIGEST_DAY, DIGEST_TIME, DIGEST_LIMIT = range(7)
 
 @restricted
 async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -25,12 +25,34 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
     if len(args) >= 2:
         origin = args[0].upper()
         region = args[1].lower()
-        budget = float(args[2]) if len(args) > 2 and args[2].isdigit() else None
-        schedule_str = args[3] if len(args) > 3 else "Sunday@15:00"
-        limit = int(args[4]) if len(args) > 4 and args[4].isdigit() else 10
+        tf = 30
+        budget = None
+        schedule_str = "Sunday@15:00"
+        limit = 10
+
+        if len(args) > 2:
+            if args[2].isdigit():
+                tf = int(args[2])
+            else:
+                try:
+                    budget = float(args[2])
+                except ValueError:
+                    pass
+
+        if len(args) > 3 and budget is None and args[3].isdigit():
+            budget = float(args[3])
+        elif len(args) > 3 and "@" in args[3]:
+            schedule_str = args[3]
+
+        if len(args) > 4 and "@" in args[4]:
+            schedule_str = args[4]
+        elif len(args) > 4 and args[4].isdigit():
+            limit = int(args[4])
+
+        full_schedule_str = f"{tf}d|{schedule_str}"
 
         user_id = update.effective_user.id
-        dep_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+        dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
 
         if await db_manager.has_active_digest(user_id, origin, f"REGION:{region.upper()}", dep_date):
             await update.message.reply_text(f"⚠️ You already have an active digest for **{origin} → {region.upper()}**!", parse_mode="Markdown")
@@ -42,7 +64,7 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
             origin_name=origin,
             destination_code=f"REGION:{region.upper()}",
             destination_name=f"{region.capitalize()} Digest",
-            departure_date=schedule_str,
+            departure_date=full_schedule_str,
             max_budget=budget or 0.0,
             frequency_hours=168
         )
@@ -54,7 +76,7 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
             origin=origin,
             region=region,
             budget=budget or 0.0,
-            schedule_str=schedule_str
+            schedule_str=full_schedule_str
         )
 
         budget_str = f"€{budget:.2f}" if budget else "Any Budget"
@@ -62,6 +84,7 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"✅ **Weekly Digest Scheduled!**\n\n"
             f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper()}\n"
             f"🎯 **Target Budget**: {budget_str}\n"
+            f"📅 **Departure Horizon**: {tf} Days Ahead\n"
             f"⏰ **Delivery Schedule**: Every {schedule_str}\n"
             f"📊 **Max Deals Limit**: {limit}\n\n"
             f"You can view or manage your scheduled digest anytime in `/mytracks`!",
@@ -79,7 +102,7 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await update.message.reply_text(
         "🗞️ **Weekly Flight Deal Digest Wizard**\n\n"
-        "🛫 **Step 1/6**: Select origin airport for weekly digest:\n"
+        "🛫 **Step 1/7**: Select origin airport for weekly digest:\n"
         "Select a quick origin airport below or type city/airport name (e.g., 'Athens', 'ATH'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
@@ -122,7 +145,7 @@ async def select_digest_origin_callback(update: Update, context: ContextTypes.DE
 
     await query.message.edit_text(
         f"✅ Origin set to: **{iata} - {name}**\n\n"
-        "🌍 **Step 2/6**: Select a destination region for weekly digest:",
+        "🌍 **Step 2/7**: Select a destination region for weekly digest:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -143,7 +166,7 @@ async def select_digest_region_callback(update: Update, context: ContextTypes.DE
 
     await query.message.edit_text(
         f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
-        "🎯 **Step 3/6**: Select maximum target budget threshold (or type amount in EUR, e.g. '80'):",
+        "🎯 **Step 3/7**: Select maximum target budget threshold (or type amount in EUR, e.g. '80'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -160,7 +183,7 @@ async def handle_digest_budget_input(update: Update, context: ContextTypes.DEFAU
         return DIGEST_BUDGET
 
     context.user_data["digest_budget"] = budget
-    return await _ask_digest_day(update.message, context)
+    return await _ask_digest_timeframe(update.message, context)
 
 @restricted
 async def select_digest_budget_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -168,11 +191,50 @@ async def select_digest_budget_callback(update: Update, context: ContextTypes.DE
     await query.answer()
     val = float(query.data.split("_")[2])
     context.user_data["digest_budget"] = val if val > 0 else None
+    return await _ask_digest_timeframe(query.message, context, is_callback=True)
+
+async def _ask_digest_timeframe(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:
+    budget = context.user_data.get("digest_budget")
+    bud_str = f"€{budget:.2f}" if budget else "Any Budget"
+
+    buttons = [
+        [InlineKeyboardButton("📅 14 Days", callback_data="dig_tf_14"), InlineKeyboardButton("🗓️ 30 Days (Default)", callback_data="dig_tf_30")],
+        [InlineKeyboardButton("✈️ 60 Days", callback_data="dig_tf_60"), InlineKeyboardButton("🌍 90 Days", callback_data="dig_tf_90")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+
+    msg_text = (
+        f"✅ Target Budget set to: **{bud_str}**\n\n"
+        "📅 **Step 4/7**: Select target departure timeframe horizon (or type days ahead, e.g. '30'):"
+    )
+
+    if is_callback:
+        await message.edit_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        await message.reply_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+
+    return DIGEST_TIMEFRAME
+
+@restricted
+async def handle_digest_timeframe_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    if not text.isdigit() or int(text) < 1:
+        await update.message.reply_text("❌ Please enter a positive number of days ahead (e.g. '30') or tap a button below.")
+        return DIGEST_TIMEFRAME
+
+    context.user_data["digest_timeframe"] = int(text)
+    return await _ask_digest_day(update.message, context)
+
+@restricted
+async def select_digest_timeframe_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    days = int(query.data.split("_")[2])
+    context.user_data["digest_timeframe"] = days
     return await _ask_digest_day(query.message, context, is_callback=True)
 
 async def _ask_digest_day(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:
-    budget = context.user_data.get("digest_budget")
-    bud_str = f"€{budget:.2f}" if budget else "Any Budget"
+    tf = context.user_data.get("digest_timeframe", 30)
 
     buttons = [
         [InlineKeyboardButton("Sunday (Default)", callback_data="dig_day_Sunday"), InlineKeyboardButton("Monday", callback_data="dig_day_Monday")],
@@ -182,8 +244,8 @@ async def _ask_digest_day(message, context: ContextTypes.DEFAULT_TYPE, is_callba
     ]
 
     msg_text = (
-        f"✅ Target Budget set to: **{bud_str}**\n\n"
-        "📅 **Step 4/6**: Select weekly delivery day of week:"
+        f"✅ Departure Timeframe set to: **{tf} Days Ahead**\n\n"
+        "📅 **Step 5/7**: Select weekly delivery day of week:"
     )
 
     if is_callback:
@@ -209,7 +271,7 @@ async def select_digest_day_callback(update: Update, context: ContextTypes.DEFAU
 
     await query.message.edit_text(
         f"✅ Delivery Day set to: **{day}**\n\n"
-        "⏰ **Step 5/6**: Select weekly delivery time of day (or type HH:MM format, e.g. '15:00'):",
+        "⏰ **Step 6/7**: Select weekly delivery time of day (or type HH:MM format, e.g. '15:00'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -244,7 +306,7 @@ async def _ask_digest_limit(message, context: ContextTypes.DEFAULT_TYPE, is_call
 
     msg_text = (
         f"✅ Delivery Time set to: **{time_str}**\n\n"
-        "📊 **Step 6/6**: How many top flight deal results would you like in each weekly digest? (1 to 20, default 10):"
+        "📊 **Step 7/7**: How many top flight deal results would you like in each weekly digest? (1 to 20, default 10):"
     )
 
     if is_callback:
@@ -277,11 +339,12 @@ async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, us
     origin = context.user_data.get("digest_origin", "ATH")
     region = context.user_data.get("digest_region", "europe")
     budget = context.user_data.get("digest_budget")
+    tf = context.user_data.get("digest_timeframe", 30)
     day = context.user_data.get("digest_day", "Sunday")
     time_str = context.user_data.get("digest_time", "15:00")
-    schedule_str = f"{day}@{time_str}"
+    schedule_str = f"{tf}d|{day}@{time_str}"
 
-    dep_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+    dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
 
     if await db_manager.has_active_digest(user_id, origin, f"REGION:{region.upper()}", dep_date):
         warn_text = f"⚠️ You already have an active digest for **{origin} → {region.upper()}**!"
@@ -318,7 +381,8 @@ async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, us
         f"✅ **Weekly Digest Scheduled!**\n\n"
         f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper()}\n"
         f"🎯 **Target Budget**: {budget_str}\n"
-        f"📅 **Delivery Schedule**: Every {day} at {time_str}\n"
+        f"📅 **Departure Horizon**: {tf} Days Ahead\n"
+        f"⏰ **Delivery Schedule**: Every {day} at {time_str}\n"
         f"📊 **Max Deals Limit**: {limit}\n\n"
         f"You can view, edit budget, pause, or delete your scheduled digest anytime in `/mytracks`!"
     )

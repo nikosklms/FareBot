@@ -198,6 +198,9 @@ def calculate_next_digest_delay(schedule_str: str = "Sunday@15:00") -> float:
     target_hour = 15
     target_minute = 0
 
+    if "|" in schedule_str:
+        schedule_str = schedule_str.split("|", 1)[1]
+
     if "@" in schedule_str:
         day_part, time_part = schedule_str.split("@", 1)
         target_day = day_part.strip().lower()
@@ -247,13 +250,16 @@ async def run_digest_weekly_job(context):
     """Execute weekly digest query for user and send formatted deal report."""
     job_data = getattr(context.job, "data", {}) if hasattr(context, "job") else {}
     user_id = job_data.get("user_id")
-    origin = job_data.get("origin", "ATH")
-    region = job_data.get("region", "europe")
-    budget = job_data.get("budget")
+    schedule_str = job_data.get("schedule_str", "30d|Sunday@15:00")
+    offset_days = 30
+    if "|" in schedule_str:
+        tf_part = schedule_str.split("|")[0]
+        if tf_part.endswith("d") and tf_part[:-1].isdigit():
+            offset_days = int(tf_part[:-1])
 
     from services.explore_engine import run_explore_query
     from datetime import datetime, timedelta, timezone
-    dep_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+    dep_date = (datetime.now(timezone.utc) + timedelta(days=offset_days)).strftime("%Y-%m-%d")
 
     deals = await run_explore_query(origin, region, dep_date, max_budget=budget)
     if not deals or not user_id:
