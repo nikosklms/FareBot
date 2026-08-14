@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 from providers.fast_flights import FastFlightsProvider
-from services.airports_data import get_region_airports
+from services.airports_data import get_region_airports, get_airport_country
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,8 @@ async def run_explore_query(
         logger.warning(f"No airports registered for region: {region}")
         return []
 
+    origin_country = get_airport_country(origin)
+    normalized_region = region.lower().strip()
     provider = FastFlightsProvider()
 
     async def fetch_airport_deals(target_airport: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -48,6 +50,9 @@ async def run_explore_query(
         country = target_airport.get("country", "")
 
         if dst_code.upper() == origin.upper():
+            return []
+
+        if normalized_region != "islands" and origin_country and country.strip().lower() == origin_country.strip().lower():
             return []
 
         try:

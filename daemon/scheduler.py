@@ -205,7 +205,7 @@ def schedule_digest_job(job_queue, user_id: int, origin: str, region: str, budge
     job_queue.run_repeating(
         run_digest_weekly_job,
         interval=interval,
-        first=60,
+        first=interval,
         data=job_data,
         name=f"digest_job_{user_id}_{origin}_{region}"
     )

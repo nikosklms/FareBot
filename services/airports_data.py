@@ -1,4 +1,4 @@
-# Comprehensive Global Airport and City Database (~500+ Commercial Airports Worldwide)
+from typing import Optional
 
 GLOBAL_REGIONS_AIRPORTS = {
     "europe": [
@@ -135,6 +135,18 @@ def get_region_airports(region_name: str) -> list[dict[str, str]]:
     """Return the list of primary gateway airports for a given region."""
     normalized = region_name.lower().strip()
     return GLOBAL_REGIONS_AIRPORTS.get(normalized, [])
+
+def get_airport_country(airport_code: str) -> Optional[str]:
+    """Return the country name for a given airport IATA code."""
+    code_upper = airport_code.strip().upper()
+    for item in AIRPORT_DATA:
+        if item[0] == code_upper:
+            return item[2]
+    for region_airports in GLOBAL_REGIONS_AIRPORTS.values():
+        for airport in region_airports:
+            if airport["code"] == code_upper:
+                return airport.get("country")
+    return None
 
 # Mapping multi-airport city codes to constituent airport codes for complete LCC coverage
 MULTI_AIRPORT_CITIES = {
