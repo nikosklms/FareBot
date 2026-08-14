@@ -75,7 +75,7 @@ Internal operational limits configured in `config.py`:
 | --- | --- | --- |
 | MIN_POLL_INTERVAL_HOURS | 6 | Minimum allowed background polling interval in hours |
 | DEFAULT_POLL_INTERVAL_HOURS | 6 | Default polling frequency for new price trackers |
-| MAX_TRACKERS_PER_USER | 5 | Maximum active trackers permitted per user |
+| MAX_TRACKERS_PER_USER | 20 | Maximum active trackers permitted per user |
 | MAX_CONSECUTIVE_FAILURES | 3 | Failed search attempts before a tracker is paused |
 
 ## Usage

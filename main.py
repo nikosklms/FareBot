@@ -33,6 +33,9 @@ from bot.handlers import (
     select_frequency_callback,
     mytracks_command,
     dashboard_callback_handler,
+    explore_command,
+    digest_command,
+    track_deal_callback,
     search_command,
     handle_search_origin,
     select_search_origin_callback,
@@ -53,7 +56,7 @@ from bot.handlers import (
     SEARCH_DATE,
     SEARCH_FLIGHT_TYPE
 )
-from daemon import register_active_trackers
+from daemon import register_active_trackers, run_daily_cleanup_job
 
 # Enable logging
 logging.basicConfig(
@@ -69,6 +72,8 @@ async def post_init(application):
     try:
         commands = [
             ("search", "🔍 Search instant flight offers"),
+            ("explore", "🌟 Discover top discount flight deals"),
+            ("digest", "🗞️ Weekly flight deal digest"),
             ("newtrack", "🔔 Track flight prices"),
             ("mytracks", "📊 Manage price trackers"),
             ("help", "❓ Show help menu"),
@@ -79,6 +84,13 @@ async def post_init(application):
         logger.info("Successfully registered Telegram Bot Commands Menu.")
 
         register_active_trackers(application)
+
+        if application.job_queue:
+            application.job_queue.run_daily(
+                run_daily_cleanup_job,
+                time=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).time(),
+                name="daily_cleanup_daemon"
+            )
     except Exception as e:
         logging.warning(f"Failed to set Telegram Bot Commands Menu: {e}")
 
@@ -115,8 +127,11 @@ def main():
     # Register command handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("explore", explore_command))
+    app.add_handler(CommandHandler("digest", digest_command))
     app.add_handler(CommandHandler("mytracks", mytracks_command))
     app.add_handler(CallbackQueryHandler(dashboard_callback_handler, pattern="^dash_"))
+    app.add_handler(CallbackQueryHandler(track_deal_callback, pattern="^track_deal_"))
     app.add_handler(CallbackQueryHandler(search_track_callback_handler, pattern="^track_"))
 
     # Register search wizard
