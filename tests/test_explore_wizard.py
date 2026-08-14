@@ -6,10 +6,12 @@ from bot.handlers.explore import (
     handle_explore_origin_input,
     select_explore_origin_callback,
     select_explore_region_callback,
+    select_explore_timeframe_callback,
     select_explore_budget_callback,
     select_explore_limit_callback,
     EXPLORE_ORIGIN,
     EXPLORE_REGION,
+    EXPLORE_TIMEFRAME,
     EXPLORE_BUDGET,
     EXPLORE_LIMIT
 )
@@ -20,7 +22,7 @@ async def test_explore_wizard_one_line_shortcut():
     update.effective_user.id = 123
     update.message.reply_text = AsyncMock()
     context = MagicMock()
-    context.args = ["ATH", "europe", "100", "5"]
+    context.args = ["ATH", "europe", "30", "100", "5"]
 
     mock_deals = [
         {
@@ -67,7 +69,7 @@ async def test_explore_wizard_step_by_step_flow():
         assert state2 == EXPLORE_REGION
         assert context.user_data["explore_origin"] == "ATH"
 
-    # Select Region Europe -> prompts Budget selection
+    # Select Region Europe -> prompts Timeframe selection
     query3 = MagicMock()
     query3.data = "expl_reg_europe"
     query3.answer = AsyncMock()
@@ -78,12 +80,12 @@ async def test_explore_wizard_step_by_step_flow():
 
     with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
         state3 = await select_explore_region_callback(update3, context)
-        assert state3 == EXPLORE_BUDGET
+        assert state3 == EXPLORE_TIMEFRAME
         assert context.user_data["explore_region"] == "europe"
 
-    # Select Budget 100 EUR -> prompts Limit selection
+    # Select Timeframe 30d -> prompts Budget selection
     query4 = MagicMock()
-    query4.data = "expl_bud_100"
+    query4.data = "expl_tf_30"
     query4.answer = AsyncMock()
     query4.message.edit_text = AsyncMock()
     update4 = MagicMock()
@@ -91,19 +93,33 @@ async def test_explore_wizard_step_by_step_flow():
     update4.callback_query = query4
 
     with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
-        state4 = await select_explore_budget_callback(update4, context)
-        assert state4 == EXPLORE_LIMIT
-        assert context.user_data["explore_budget"] == 100.0
+        state4 = await select_explore_timeframe_callback(update4, context)
+        assert state4 == EXPLORE_BUDGET
+        assert context.user_data["explore_timeframe"] == 30
 
-    # Select Limit 10 -> executes query and returns ConversationHandler.END
+    # Select Budget 100 EUR -> prompts Limit selection
     query5 = MagicMock()
-    query5.data = "expl_lim_10"
+    query5.data = "expl_bud_100"
     query5.answer = AsyncMock()
     query5.message.edit_text = AsyncMock()
-    query5.message.reply_text = AsyncMock()
     update5 = MagicMock()
     update5.effective_user.id = 123
     update5.callback_query = query5
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        state5 = await select_explore_budget_callback(update5, context)
+        assert state5 == EXPLORE_LIMIT
+        assert context.user_data["explore_budget"] == 100.0
+
+    # Select Limit 10 -> executes query and returns ConversationHandler.END
+    query6 = MagicMock()
+    query6.data = "expl_lim_10"
+    query6.answer = AsyncMock()
+    query6.message.edit_text = AsyncMock()
+    query6.message.reply_text = AsyncMock()
+    update6 = MagicMock()
+    update6.effective_user.id = 123
+    update6.callback_query = query6
 
     mock_deals = [
         {
@@ -119,5 +135,5 @@ async def test_explore_wizard_step_by_step_flow():
 
     with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
         with patch("bot.handlers.explore.run_explore_query", AsyncMock(return_value=mock_deals)):
-            state5 = await select_explore_limit_callback(update5, context)
-            assert state5 == ConversationHandler.END
+            state6 = await select_explore_limit_callback(update6, context)
+            assert state6 == ConversationHandler.END

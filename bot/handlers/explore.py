@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 db_manager = DatabaseManager(DB_PATH)
 resolver = LocationResolver()
 
-EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_BUDGET, EXPLORE_LIMIT = range(4)
+EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_TIMEFRAME, EXPLORE_BUDGET, EXPLORE_LIMIT = range(5)
 
 @restricted
 async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -26,16 +26,34 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
     if len(args) >= 2:
         origin = args[0].upper()
         region = args[1].lower()
-        max_budget = float(args[2]) if len(args) > 2 and args[2].isdigit() else None
-        max_results = int(args[3]) if len(args) > 3 and args[3].isdigit() else 10
-        max_results = max(1, min(20, max_results))
 
-        dep_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
-        await update.message.reply_text(
-            f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}**...",
-            parse_mode="Markdown"
-        )
-        deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, max_results=max_results)
+        tf = 30
+        max_budget = None
+        limit = 10
+
+        if len(args) > 2:
+            if args[2].isdigit():
+                tf = int(args[2])
+            elif len(args) > 3 and args[3].isdigit():
+                tf = int(args[2])
+                max_budget = float(args[3])
+            else:
+                try:
+                    max_budget = float(args[2])
+                except ValueError:
+                    pass
+
+        if len(args) > 3 and max_budget is None and args[3].isdigit():
+            max_budget = float(args[3])
+
+        if len(args) > 4 and args[4].isdigit():
+            limit = int(args[4])
+
+        dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
+        status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({tf}d out)..."
+        await update.message.reply_text(status_msg, parse_mode="Markdown")
+
+        deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, max_results=limit)
         await _render_explore_deals(update.message, origin, region, deals)
         return ConversationHandler.END
 
@@ -48,8 +66,8 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
 
     await update.message.reply_text(
-        "🌍 **Explore Top Flight Deals Wizard**\n\n"
-        "🛫 **Step 1/4**: Where are you flying from?\n"
+        "🌟 **Explore Top Flight Deals Wizard**\n\n"
+        "🛫 **Step 1/5**: Select origin airport:\n"
         "Select a quick origin airport below or type city/airport name (e.g., 'Athens', 'ATH'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
@@ -92,7 +110,7 @@ async def select_explore_origin_callback(update: Update, context: ContextTypes.D
 
     await query.message.edit_text(
         f"✅ Origin set to: **{iata} - {name}**\n\n"
-        "🌍 **Step 2/4**: Select a destination region to explore:",
+        "🌍 **Step 2/5**: Select a destination region to explore:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -106,17 +124,57 @@ async def select_explore_region_callback(update: Update, context: ContextTypes.D
     context.user_data["explore_region"] = region
 
     buttons = [
-        [InlineKeyboardButton("€50", callback_data="expl_bud_50"), InlineKeyboardButton("€100", callback_data="expl_bud_100"), InlineKeyboardButton("€150", callback_data="expl_bud_150")],
-        [InlineKeyboardButton("€200", callback_data="expl_bud_200"), InlineKeyboardButton("Any Budget 💶", callback_data="expl_bud_0")],
+        [InlineKeyboardButton("⚡ Next Weekend (7d)", callback_data="expl_tf_7"), InlineKeyboardButton("📅 14 Days", callback_data="expl_tf_14")],
+        [InlineKeyboardButton("🗓️ 30 Days (Default)", callback_data="expl_tf_30"), InlineKeyboardButton("✈️ 60 Days", callback_data="expl_tf_60")],
+        [InlineKeyboardButton("🌍 90 Days", callback_data="expl_tf_90")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
 
     await query.message.edit_text(
         f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
-        "🎯 **Step 3/4**: Select maximum target budget (or type amount in EUR, e.g. '80'):",
+        "📅 **Step 3/5**: Select departure timeframe horizon (or type days ahead, e.g. '45'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+    return EXPLORE_TIMEFRAME
+
+@restricted
+async def handle_explore_timeframe_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    if not text.isdigit() or int(text) < 1:
+        await update.message.reply_text("❌ Please enter a positive number of days ahead (e.g. '30') or tap a button below.")
+        return EXPLORE_TIMEFRAME
+
+    context.user_data["explore_timeframe"] = int(text)
+    return await _ask_explore_budget(update.message, context)
+
+@restricted
+async def select_explore_timeframe_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    days = int(query.data.split("_")[2])
+    context.user_data["explore_timeframe"] = days
+    return await _ask_explore_budget(query.message, context, is_callback=True)
+
+async def _ask_explore_budget(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:
+    tf = context.user_data.get("explore_timeframe", 30)
+
+    buttons = [
+        [InlineKeyboardButton("€50", callback_data="expl_bud_50"), InlineKeyboardButton("€100", callback_data="expl_bud_100"), InlineKeyboardButton("€150", callback_data="expl_bud_150")],
+        [InlineKeyboardButton("€200", callback_data="expl_bud_200"), InlineKeyboardButton("Any Budget 💶", callback_data="expl_bud_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+
+    msg_text = (
+        f"✅ Departure Timeframe set to: **{tf} Days Ahead**\n\n"
+        "🎯 **Step 4/5**: Select maximum target budget (or type amount in EUR, e.g. '80'):"
+    )
+
+    if is_callback:
+        await message.edit_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        await message.reply_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+
     return EXPLORE_BUDGET
 
 @restricted
@@ -151,8 +209,8 @@ async def _ask_explore_limit(message, context: ContextTypes.DEFAULT_TYPE, is_cal
     ]
 
     msg_text = (
-        f"✅ Budget set to: **{bud_str}**\n\n"
-        "📊 **Step 4/4**: How many top flight deal results would you like to see? (1 to 20, default 10):"
+        f"✅ Target Budget set to: **{bud_str}**\n\n"
+        "📊 **Step 5/5**: How many top flight deal results would you like to view? (1 to 20, default 10):"
     )
 
     if is_callback:
@@ -182,10 +240,11 @@ async def select_explore_limit_callback(update: Update, context: ContextTypes.DE
 async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, limit: int, is_callback: bool = False) -> int:
     origin = context.user_data.get("explore_origin", "ATH")
     region = context.user_data.get("explore_region", "europe")
+    tf = context.user_data.get("explore_timeframe", 30)
     max_budget = context.user_data.get("explore_budget")
 
-    dep_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
-    status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}**..."
+    dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
+    status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({tf}d out)..."
 
     if is_callback:
         await message.edit_text(status_msg, parse_mode="Markdown")
@@ -216,68 +275,54 @@ async def _render_explore_deals(message, origin: str, region: str, deals: List[D
 
     await message.reply_text("\n".join(msg_lines), parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
 
+@restricted
 async def track_deal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback query handler for 1-tap deal tracking."""
+    """1-Tap Callback button handler to quickly track an explored flight deal."""
     query = update.callback_query
-    data = query.data
+    await query.answer()
+
     user_id = update.effective_user.id
-
-    if not data.startswith("track_deal_"):
+    parts = query.data.split("_")
+    if len(parts) < 6:
+        await query.answer("❌ Invalid deal tracking data.", show_alert=True)
         return
 
-    parts = data.split("_")
-    if len(parts) < 5:
-        await query.answer("❌ Invalid deal parameters.")
-        return
+    origin, dest, dep_date, deal_price = parts[2], parts[3], parts[4], float(parts[5])
+    target_budget = round(deal_price * 0.90, 2)
 
-    origin = parts[2]
-    destination = parts[3]
-    dep_date = parts[4]
-    price = float(parts[5])
-
-    # Check deduplication guard
-    if await db_manager.has_active_tracker(user_id, origin, destination, dep_date):
-        await query.answer(f"⚠️ You are already tracking {origin} → {destination} for {dep_date}!", show_alert=True)
-        return
-
-    # Check active trackers limit
-    active_count = await db_manager.get_active_trackers_count(user_id)
+    active_count = await db_manager.get_active_tracker_count(user_id)
     if active_count >= MAX_TRACKERS_PER_USER:
-        await query.answer(f"⚠️ Limit reached ({MAX_TRACKERS_PER_USER} active trackers).", show_alert=True)
+        await query.answer(f"⚠️ Limit reached ({MAX_TRACKERS_PER_USER} active trackers max).", show_alert=True)
         return
 
-    # Target price rule: -10% buffer below deal price
-    target_budget = round(price * 0.9, 2)
+    if await db_manager.has_active_tracker(user_id, origin, dest, dep_date):
+        await query.answer(f"ℹ️ You are already tracking {origin} → {dest} on {dep_date}!", show_alert=True)
+        return
 
-    t_id = await db_manager.create_tracker(
+    tracker_id = await db_manager.create_tracker(
         user_id=user_id,
         origin_code=origin,
         origin_name=origin,
-        destination_code=destination,
-        destination_name=destination,
+        destination_code=dest,
+        destination_name=dest,
         departure_date=dep_date,
-        max_budget=target_budget
+        max_budget=target_budget,
+        frequency_hours=6
     )
 
-    await query.answer("✅ Tracker created!")
-    await query.message.reply_text(
-        f"✅ **Deal Tracked!**\n\n"
-        f"Created Tracker #{t_id} for **{origin} ✈️ {destination}**\n"
-        f"📅 **Departure**: {dep_date}\n"
-        f"🎯 **Target Budget**: **€{target_budget:.2f}** (-10% below deal price)",
-        parse_mode="Markdown"
-    )
+    from daemon.scheduler import schedule_tracker_job
+    schedule_tracker_job(context.job_queue, tracker_id, frequency_hours=6)
 
-    # Update button markup state to ✅ Tracked!
-    reply_markup = query.message.reply_markup
-    if reply_markup:
-        new_keyboard = []
-        for row in reply_markup.inline_keyboard:
-            new_row = []
-            for btn in row:
-                if btn.callback_data == data:
-                    new_row.append(InlineKeyboardButton("✅ Tracked!", callback_data="cal_ignore"))
-                else:
-                    new_row.append(btn)
-            new_keyboard.append(new_row)
-        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(new_keyboard))
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    if query.message:
+        await query.message.reply_text(
+            f"✅ **Deal Tracked!**\n\n"
+            f"🔔 Created Tracker #{tracker_id} for **{origin} ✈️ {dest}** on **{dep_date}**\n"
+            f"🎯 Target Budget: **€{target_budget:.2f}** (10% below deal price €{deal_price:.2f})\n"
+            f"⏰ Polling frequency: Every 6 hours",
+            parse_mode="Markdown"
+        )

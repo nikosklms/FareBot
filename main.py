@@ -39,12 +39,15 @@ from bot.handlers import (
     handle_explore_origin_input,
     select_explore_origin_callback,
     select_explore_region_callback,
+    handle_explore_timeframe_input,
+    select_explore_timeframe_callback,
     handle_explore_budget_input,
     select_explore_budget_callback,
     handle_explore_limit_input,
     select_explore_limit_callback,
     EXPLORE_ORIGIN,
     EXPLORE_REGION,
+    EXPLORE_TIMEFRAME,
     EXPLORE_BUDGET,
     EXPLORE_LIMIT,
     start_digest_wizard,
@@ -207,6 +210,10 @@ def main():
             ],
             EXPLORE_REGION: [
                 CallbackQueryHandler(select_explore_region_callback, pattern="^expl_reg_")
+            ],
+            EXPLORE_TIMEFRAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_timeframe_input),
+                CallbackQueryHandler(select_explore_timeframe_callback, pattern="^expl_tf_")
             ],
             EXPLORE_BUDGET: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_budget_input),
