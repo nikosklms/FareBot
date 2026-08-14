@@ -42,7 +42,7 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
             origin_name=origin,
             destination_code=f"REGION:{region.upper()}",
             destination_name=f"{region.capitalize()} Digest",
-            departure_date=dep_date,
+            departure_date=schedule_str,
             max_budget=budget or 0.0,
             frequency_hours=168
         )
@@ -201,9 +201,9 @@ async def select_digest_day_callback(update: Update, context: ContextTypes.DEFAU
     context.user_data["digest_day"] = day
 
     buttons = [
-        [InlineKeyboardButton("09:00 AM", callback_data="dig_time_09:00"), InlineKeyboardButton("12:00 PM", callback_data="dig_time_12:00")],
-        [InlineKeyboardButton("15:00 PM (Default)", callback_data="dig_time_15:00"), InlineKeyboardButton("18:00 PM", callback_data="dig_time_18:00")],
-        [InlineKeyboardButton("21:00 PM", callback_data="dig_time_21:00")],
+        [InlineKeyboardButton("09:00", callback_data="dig_time_09:00"), InlineKeyboardButton("12:00", callback_data="dig_time_12:00")],
+        [InlineKeyboardButton("15:00 (Default)", callback_data="dig_time_15:00"), InlineKeyboardButton("18:00", callback_data="dig_time_18:00")],
+        [InlineKeyboardButton("21:00", callback_data="dig_time_21:00")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
 
@@ -298,7 +298,7 @@ async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, us
         origin_name=origin,
         destination_code=f"REGION:{region.upper()}",
         destination_name=f"{region.capitalize()} Digest",
-        departure_date=dep_date,
+        departure_date=schedule_str,
         max_budget=budget or 0.0,
         frequency_hours=168
     )

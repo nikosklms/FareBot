@@ -127,4 +127,29 @@ async def test_digest_wizard_full_step_by_step_flow():
                 state7 = await select_digest_limit_callback(update7, context)
                 assert state7 == ConversationHandler.END
                 db_mock.create_tracker.assert_called_once()
+                kw = db_mock.create_tracker.call_args[1]
+                assert kw["departure_date"] == "Sunday@15:00"
                 sched_mock.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_digest_wizard_stores_custom_schedule_str():
+    query = MagicMock()
+    query.data = "dig_lim_10"
+    query.answer = AsyncMock()
+    query.message.edit_text = AsyncMock()
+    update = MagicMock()
+    update.effective_user.id = 123
+    update.callback_query = query
+    context = MagicMock()
+    context.job_queue = MagicMock()
+    context.user_data = {"digest_origin": "ATH", "digest_region": "europe", "digest_day": "Friday", "digest_time": "18:00"}
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        with patch("bot.handlers.digest.db_manager") as db_mock:
+            db_mock.has_active_digest = AsyncMock(return_value=False)
+            db_mock.create_tracker = AsyncMock(return_value=88)
+            with patch("bot.handlers.digest.schedule_digest_job") as sched_mock:
+                await select_digest_limit_callback(update, context)
+                db_mock.create_tracker.assert_called_once()
+                kw = db_mock.create_tracker.call_args[1]
+                assert kw["departure_date"] == "Friday@18:00"
