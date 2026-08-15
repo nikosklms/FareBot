@@ -263,7 +263,7 @@ async def handle_explore_calendar_date_selection(update: Update, context: Contex
     days_diff = max(1, (start_dt - today).days)
     context.user_data["explore_timeframe"] = days_diff
 
-    return await _ask_explore_budget(query.message, context, is_callback=True)
+    return await _ask_explore_limit(query.message, context, is_callback=True)
 
 @restricted
 async def handle_explore_timeframe_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -273,7 +273,7 @@ async def handle_explore_timeframe_input(update: Update, context: ContextTypes.D
         return EXPLORE_TIMEFRAME
 
     context.user_data["explore_timeframe"] = int(text)
-    return await _ask_explore_budget(update.message, context)
+    return await _ask_explore_limit(update.message, context)
 
 @restricted
 async def select_explore_timeframe_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -281,53 +281,10 @@ async def select_explore_timeframe_callback(update: Update, context: ContextType
     await query.answer()
     days = int(query.data.split("_")[2])
     context.user_data["explore_timeframe"] = days
-    return await _ask_explore_budget(query.message, context, is_callback=True)
-
-async def _ask_explore_budget(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:
-    tf = context.user_data.get("explore_timeframe", 30)
-
-    buttons = [
-        [InlineKeyboardButton("€50", callback_data="expl_bud_50"), InlineKeyboardButton("€100", callback_data="expl_bud_100"), InlineKeyboardButton("€150", callback_data="expl_bud_150")],
-        [InlineKeyboardButton("€200", callback_data="expl_bud_200"), InlineKeyboardButton("Any Budget 💶", callback_data="expl_bud_0")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
-    ]
-
-    msg_text = (
-        f"✅ Departure Timeframe set to: **{tf} Days Ahead**\n\n"
-        "🎯 **Step 4/5**: Select maximum target budget (or type amount in EUR, e.g. '80'):"
-    )
-
-    if is_callback:
-        await message.edit_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
-    else:
-        await message.reply_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
-
-    return EXPLORE_BUDGET
-
-@restricted
-async def handle_explore_budget_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
-    try:
-        val = float(text)
-        budget = val if val > 0 else None
-    except ValueError:
-        await update.message.reply_text("❌ Invalid budget amount. Please type a positive number (e.g. '80') or tap a button below.")
-        return EXPLORE_BUDGET
-
-    context.user_data["explore_budget"] = budget
-    return await _ask_explore_limit(update.message, context)
-
-@restricted
-async def select_explore_budget_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    val = float(query.data.split("_")[2])
-    context.user_data["explore_budget"] = val if val > 0 else None
     return await _ask_explore_limit(query.message, context, is_callback=True)
 
 async def _ask_explore_limit(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:
-    budget = context.user_data.get("explore_budget")
-    bud_str = f"€{budget:.2f}" if budget else "Any Budget"
+    tf = context.user_data.get("explore_timeframe", 30)
 
     buttons = [
         [InlineKeyboardButton("5", callback_data="expl_lim_5"), InlineKeyboardButton("10 (Default)", callback_data="expl_lim_10")],
@@ -336,7 +293,7 @@ async def _ask_explore_limit(message, context: ContextTypes.DEFAULT_TYPE, is_cal
     ]
 
     msg_text = (
-        f"✅ Target Budget set to: **{bud_str}**\n\n"
+        f"✅ Departure Timeframe set to: **{tf} Days Ahead**\n\n"
         "📊 **Step 5/5**: How many top flight deal results would you like to view? (1 to 20, default 10):"
     )
 
@@ -369,7 +326,6 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     region = context.user_data.get("explore_region", "europe")
     sort_mode = context.user_data.get("explore_sort", "both")
     tf = context.user_data.get("explore_timeframe", 30)
-    max_budget = context.user_data.get("explore_budget")
     custom_dep_date = context.user_data.get("explore_departure_date")
 
     if custom_dep_date:
@@ -384,7 +340,7 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     else:
         await message.reply_text(status_msg, parse_mode="Markdown")
 
-    deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, sort_by=sort_mode, max_results=limit)
+    deals = await run_explore_query(origin, region, dep_date, sort_by=sort_mode, max_results=limit)
     await _render_explore_deals(message, origin, region, deals)
     context.user_data.clear()
     return ConversationHandler.END
@@ -421,20 +377,27 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
     buttons = []
 
     if isinstance(deals, dict):
-        discount_deals = deals.get("discount_deals", [])
+        raw_discount_deals = deals.get("discount_deals", [])
+        valid_discount_deals = [d for d in raw_discount_deals if d.get("discount_pct", 0) > 0]
         cheapest_deals = deals.get("cheapest_deals", [])
 
         button_idx = 1
-        if discount_deals:
+        if valid_discount_deals:
             msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
-            for d in discount_deals:
+            for d in valid_discount_deals:
                 line, btn = _format_deal_item(d, button_idx)
                 msg_lines.append(line)
                 buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
                 button_idx += 1
 
-        if cheapest_deals:
-            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
+            if cheapest_deals:
+                msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
+                for d in cheapest_deals:
+                    line, btn = _format_deal_item(d, button_idx)
+                    msg_lines.append(line)
+                    buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
+                    button_idx += 1
+        else:
             for d in cheapest_deals:
                 line, btn = _format_deal_item(d, button_idx)
                 msg_lines.append(line)

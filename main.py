@@ -53,15 +53,12 @@ from bot.handlers import (
     explore_calendar_mode_callback,
     explore_calendar_ignore_callback,
     handle_explore_calendar_date_selection,
-    handle_explore_budget_input,
-    select_explore_budget_callback,
     handle_explore_limit_input,
     select_explore_limit_callback,
     EXPLORE_ORIGIN,
     EXPLORE_REGION,
     EXPLORE_SORT,
     EXPLORE_TIMEFRAME,
-    EXPLORE_BUDGET,
     EXPLORE_LIMIT,
     start_digest_wizard,
     handle_digest_origin_input,
@@ -262,10 +259,6 @@ def main():
                 CallbackQueryHandler(explore_calendar_ignore_callback, pattern="^cal_ignore$"),
                 CallbackQueryHandler(handle_explore_calendar_date_selection, pattern="^cal_day_"),
                 CallbackQueryHandler(select_explore_timeframe_callback, pattern="^expl_tf_")
-            ],
-            EXPLORE_BUDGET: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_budget_input),
-                CallbackQueryHandler(select_explore_budget_callback, pattern="^expl_bud_")
             ],
             EXPLORE_LIMIT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_limit_input),
