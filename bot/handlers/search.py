@@ -308,35 +308,12 @@ async def select_search_flight_type_callback(update: Update, context: ContextTyp
     query = update.callback_query
     await query.answer()
     direct_only = bool(int(query.data.split("_")[3]))
-    context.user_data["search_direct_only"] = direct_only
-
-    type_label = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
-    buttons = [
-        [InlineKeyboardButton("💶 Cheapest Price", callback_data="src_sort_price"), InlineKeyboardButton("💥 Highest Discount %", callback_data="src_sort_discount")],
-        [InlineKeyboardButton("🔀 Show Both Lists", callback_data="src_sort_both")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
-    ]
-
-    await query.message.edit_text(
-        f"✅ Flight type set to: **{type_label}**\n\n"
-        "📊 **Step 5/5**: How would you like search results sorted?",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    return SEARCH_SORT
-
-@restricted
-async def select_search_sort_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    sort_mode = query.data.replace("src_sort_", "")
 
     origin = context.user_data["search_origin_code"]
     destination = context.user_data["search_destination_code"]
     date = context.user_data["search_departure_date"]
-    direct_only = context.user_data.get("search_direct_only", False)
 
-    await execute_search(update, origin, destination, date, direct_only=direct_only, sort_by=sort_mode)
+    await execute_search(update, origin, destination, date, direct_only=direct_only)
     return ConversationHandler.END
 
 def _format_search_offer(o: Any, idx_emoji: str, has_end_date: bool) -> str:
@@ -366,7 +343,7 @@ def _format_search_offer(o: Any, idx_emoji: str, has_end_date: bool) -> str:
     return f"{idx_emoji} {price_str}{disc_badge}{date_badge} — {airline_name} ({stop_badge}){time_info}"
 
 async def execute_search(
-    update: Update, origin: str, destination: str, date: str, direct_only: bool = False, sort_by: str = "both"
+    update: Update, origin: str, destination: str, date: str, direct_only: bool = False
 ) -> None:
     message = update.message or (update.callback_query.message if update.callback_query else None)
     if not message:
@@ -386,50 +363,19 @@ async def execute_search(
         await status_msg.edit_text(f"❌ No matching flight offers found for **{origin} ✈️ {destination}** on **{date}** ({filter_label}).", parse_mode="Markdown")
         return
 
+    offers.sort(key=lambda x: x.price)
+    top_offers = offers[:5]
     date_display = f"{start_date} ➔ {end_date}" if end_date else date
     reply_lines = [
-        f"✈️ **Flight Search Results** ({filter_label})\n",
+        f"✈️ **Top {len(top_offers)} Flight Results** ({filter_label})\n",
         f"📍 **Route**: {origin} ✈️ {destination} | 📅 **Date**: {date_display}\n"
     ]
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
 
-    # Compute discount scores for sorting
-    for o in offers:
-        typ_min = getattr(o, "typical_min", None)
-        typ_max = getattr(o, "typical_max", None)
-        setattr(o, "_disc_score", calculate_discount_score(o.price, typ_min, typ_max) if (typ_min or typ_max) else 0.0)
+    for i, o in enumerate(top_offers):
+        reply_lines.append(_format_search_offer(o, emojis[i], bool(end_date)))
 
-    if sort_by == "both":
-        disc_offers = list(offers)
-        disc_offers.sort(key=lambda x: (-getattr(x, "_disc_score", 0.0), x.price))
-        top_disc = disc_offers[:5]
-
-        price_offers = list(offers)
-        price_offers.sort(key=lambda x: x.price)
-        top_price = price_offers[:5]
-
-        reply_lines.append("💥 **TOP DISCOUNTED OFFERS (% OFF)**")
-        for i, o in enumerate(top_disc):
-            reply_lines.append(_format_search_offer(o, emojis[i], bool(end_date)))
-
-        reply_lines.append("\n💶 **CHEAPEST FLIGHT OFFERS (€)**")
-        for i, o in enumerate(top_price):
-            reply_lines.append(_format_search_offer(o, emojis[i], bool(end_date)))
-
-        lowest = top_price[0]
-    elif sort_by == "discount":
-        offers.sort(key=lambda x: (-getattr(x, "_disc_score", 0.0), x.price))
-        top_offers = offers[:5]
-        for i, o in enumerate(top_offers):
-            reply_lines.append(_format_search_offer(o, emojis[i], bool(end_date)))
-        lowest = top_offers[0]
-    else:
-        offers.sort(key=lambda x: x.price)
-        top_offers = offers[:5]
-        for i, o in enumerate(top_offers):
-            reply_lines.append(_format_search_offer(o, emojis[i], bool(end_date)))
-        lowest = top_offers[0]
-
+    lowest = top_offers[0]
     reply_text = "\n".join(reply_lines)
 
     from providers.fast_flights import build_google_flights_url

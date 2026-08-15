@@ -390,6 +390,8 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     return ConversationHandler.END
 
 def _format_deal_item(d: Dict[str, Any], idx: int) -> tuple[str, InlineKeyboardButton]:
+    from providers.fast_flights import build_google_flights_url
+
     disc_pct = d.get("discount_pct", 0)
     base_price = d.get("baseline_price")
     if disc_pct > 0 and base_price:
@@ -399,9 +401,12 @@ def _format_deal_item(d: Dict[str, Any], idx: int) -> tuple[str, InlineKeyboardB
     else:
         disc_text = ""
 
+    flights_url = build_google_flights_url(d["origin_code"], d["destination_code"], d["departure_date"])
+    price_str = f"[**€{d['price']:.2f}**]({flights_url})"
+
     line = (
         f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-        f"💶 **€{d['price']:.2f}**{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+        f"💶 {price_str}{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
     )
     cb_data = f"track_deal_{d['origin_code']}_{d['destination_code']}_{d['departure_date']}_{d['price']}"
     btn = InlineKeyboardButton(f"🔔 Track Deal #{idx} (€{d['price']:.0f})", callback_data=cb_data)
