@@ -227,12 +227,17 @@ class FastFlightsProvider(AbstractFlightProvider):
                 q = create_query(**query_kwargs)
 
 
-                try:
-                    html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
-                    return parse_google_flights_payload_generic(html, origin, dest_code, departure_date, return_date, currency)
-                except Exception as e:
-                    logger.error(f"Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
-                    return []
+                for attempt in range(2):
+                    try:
+                        html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
+                        return parse_google_flights_payload_generic(html, origin, dest_code, departure_date, return_date, currency)
+                    except Exception as e:
+                        if "429" in str(e) and attempt == 0:
+                            logger.warning(f"⚠️ Rate limited (HTTP 429) for {origin} -> {dest_code}, retrying in 1.5s...")
+                            await asyncio.sleep(1.5)
+                            continue
+                        logger.error(f"Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
+                        return []
 
 
         tasks = [_fetch_for_dest(d) for d in target_destinations]
