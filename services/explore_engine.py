@@ -27,6 +27,29 @@ def calculate_discount_score(
     discount = ((baseline - current_price) / baseline) * 100.0
     return round(discount, 2)
 
+def _filter_and_cap_deals(all_deals: List[Dict[str, Any]], max_results: int) -> List[Dict[str, Any]]:
+    seen_destinations = set()
+    unique_deals = []
+    for deal in all_deals:
+        dst = deal["destination_code"]
+        if dst in seen_destinations:
+            continue
+        seen_destinations.add(dst)
+        unique_deals.append(deal)
+
+    country_counts: Dict[str, int] = {}
+    capped_deals: List[Dict[str, Any]] = []
+    for deal in unique_deals:
+        c = deal["country"]
+        if c:
+            current_count = country_counts.get(c, 0)
+            if current_count >= 2:
+                continue
+            country_counts[c] = current_count + 1
+        capped_deals.append(deal)
+
+    return capped_deals[:max_results]
+
 async def run_explore_query(
     origin: str,
     region: str,
@@ -34,12 +57,12 @@ async def run_explore_query(
     max_budget: Optional[float] = None,
     sort_by: str = "discount",
     max_results: int = 10
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any] | List[Dict[str, Any]]:
     """Query primary country airports in a region and score deal opportunities."""
     airports = get_region_airports(region)
     if not airports:
         logger.warning(f"No airports registered for region: {region}")
-        return []
+        return {} if sort_by == "both" else []
 
     origin_country = get_airport_country(origin)
     normalized_region = region.lower().strip()
@@ -100,35 +123,26 @@ async def run_explore_query(
     all_deals = [deal for sublist in raw_results_nested for deal in sublist]
 
     if not all_deals:
-        return []
+        return {} if sort_by == "both" else []
 
-    # Sorting
+    # Sorting and capping
+    if sort_by == "both":
+        deals_discount = list(all_deals)
+        deals_discount.sort(key=lambda x: (-x["discount_pct"], x["price"]))
+        capped_discount = _filter_and_cap_deals(deals_discount, max_results)
+
+        deals_price = list(all_deals)
+        deals_price.sort(key=lambda x: x["price"])
+        capped_price = _filter_and_cap_deals(deals_price, max_results)
+
+        return {
+            "discount_deals": capped_discount,
+            "cheapest_deals": capped_price
+        }
+
     if sort_by == "price":
         all_deals.sort(key=lambda x: x["price"])
     else:
         all_deals.sort(key=lambda x: (-x["discount_pct"], x["price"]))
 
-    # Deduplicate by destination_code (keep single best deal per destination)
-    seen_destinations = set()
-    unique_deals = []
-    for deal in all_deals:
-        dst = deal["destination_code"]
-        if dst in seen_destinations:
-            continue
-        seen_destinations.add(dst)
-        unique_deals.append(deal)
-
-    # Regional Diversity Cap (Max 2 per country)
-    country_counts: Dict[str, int] = {}
-    capped_deals: List[Dict[str, Any]] = []
-
-    for deal in unique_deals:
-        c = deal["country"]
-        if c:
-            current_count = country_counts.get(c, 0)
-            if current_count >= 2:
-                continue
-            country_counts[c] = current_count + 1
-        capped_deals.append(deal)
-
-    return capped_deals[:max_results]
+    return _filter_and_cap_deals(all_deals, max_results)

@@ -153,3 +153,27 @@ async def test_explore_engine_discount_sort_secondary_tie_breaker_by_price():
         assert deals[1]["destination_code"] == "SJJ"  # €46.00
         assert deals[2]["destination_code"] == "CDG"  # €99.00
 
+@pytest.mark.asyncio
+async def test_run_explore_query_sort_by_both():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "CDG":
+                # 50% discount, 100 EUR (baseline 200 EUR)
+                return [AsyncMock(price=100.0, airline="Air France", typical_min=190.0, typical_max=210.0, country="France")]
+            elif dst == "SOF":
+                # 0% discount, 20 EUR (no baseline)
+                return [AsyncMock(price=20.0, airline="Ryanair", typical_min=None, typical_max=None, country="Bulgaria")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        res = await run_explore_query("ATH", "europe", "2026-09-15", sort_by="both")
+        assert isinstance(res, dict)
+        assert "discount_deals" in res and "cheapest_deals" in res
+        assert res["discount_deals"][0]["destination_code"] == "CDG"  # 50% discount first
+        assert res["cheapest_deals"][0]["destination_code"] == "SOF"    # €20 lowest price first
+
+
