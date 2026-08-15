@@ -85,7 +85,12 @@ async def run_explore_query(
                 return []
 
         try:
-            offers = await provider.search_flights(origin, dst_code, departure_date, currency="EUR")
+            if ".." in departure_date:
+                s_d, e_d = departure_date.split("..", 1)
+                offers = await provider.search_flights_range(origin, dst_code, s_d, e_d, currency="EUR")
+            else:
+                offers = await provider.search_flights(origin, dst_code, departure_date, currency="EUR")
+
             if not offers:
                 return []
 

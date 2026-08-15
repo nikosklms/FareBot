@@ -30,16 +30,25 @@ def parse_date_or_range(raw_input: str) -> Tuple[str, Optional[str]]:
     dt = datetime.strptime(clean, "%Y-%m-%d")
     return dt.strftime("%Y-%m-%d"), None
 
-def generate_date_sequence(start_date: str, end_date: str, max_days: int = 14) -> List[str]:
-    """Generates an inclusive sequence of ISO date strings between start_date and end_date, capped at max_days."""
+def generate_date_sequence(start_date: str, end_date: str, max_days: int = 14, sample_evenly: bool = True) -> List[str]:
+    """Generates an inclusive sequence of ISO date strings between start_date and end_date."""
     start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    if start_dt > end_dt:
+        start_dt, end_dt = end_dt, start_dt
+
+    total_days = (end_dt - start_dt).days + 1
+    if not sample_evenly or total_days <= max_days:
+        step = 1
+    else:
+        step = max(1, total_days // max_days)
 
     dates = []
     curr = start_dt
     while curr <= end_dt and len(dates) < max_days:
         dates.append(curr.strftime("%Y-%m-%d"))
-        curr += timedelta(days=1)
+        curr += timedelta(days=step)
     return dates
 
 def get_preset_range(preset_key: str) -> Tuple[str, str]:
