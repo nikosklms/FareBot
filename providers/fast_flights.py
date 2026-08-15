@@ -193,6 +193,14 @@ def parse_google_flights_payload_generic(
     unique_offers.sort(key=lambda x: x.price)
     return unique_offers
 
+_HTTP_SEMAPHORE: Optional[asyncio.Semaphore] = None
+
+def _get_http_semaphore() -> asyncio.Semaphore:
+    global _HTTP_SEMAPHORE
+    if _HTTP_SEMAPHORE is None:
+        _HTTP_SEMAPHORE = asyncio.Semaphore(3)
+    return _HTTP_SEMAPHORE
+
 class FastFlightsProvider(AbstractFlightProvider):
     async def search_flights(
         self,
@@ -207,10 +215,11 @@ class FastFlightsProvider(AbstractFlightProvider):
         fetcher = UrllibFetchIntegration()
 
         target_destinations = MULTI_AIRPORT_CITIES.get(destination.upper(), [destination])
-        sem = asyncio.Semaphore(2)  # Limit concurrent HTTP requests to prevent Google rate limits
+        sem = _get_http_semaphore()
 
         async def _fetch_for_dest(dest_code: str) -> List[FlightOffer]:
             async with sem:
+                await asyncio.sleep(0.05)
                 flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
                 if return_date:
                     flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
