@@ -1,5 +1,5 @@
 import calendar
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Tuple, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -35,7 +35,12 @@ def create_calendar(year: int, month: int, mode: str = "range", start_date: Opti
     # Month grid
     month_days = calendar.monthcalendar(year, month)
     today = datetime.now(timezone.utc).date()
-    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date() if (start_date and isinstance(start_date, str)) else None
+    start_date_obj = None
+    if start_date and isinstance(start_date, str):
+        try:
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+        except ValueError:
+            start_date_obj = None
     
     for week in month_days:
         row = []
@@ -43,8 +48,8 @@ def create_calendar(year: int, month: int, mode: str = "range", start_date: Opti
             if day == 0:
                 row.append(InlineKeyboardButton(" ", callback_data="cal_ignore"))
             else:
+                day_date = date(year, month, day)
                 date_str = f"{year:04d}-{month:02d}-{day:02d}"
-                day_date = datetime.strptime(date_str, "%Y-%m-%d").date()
                 
                 min_date = start_date_obj if (start_date_obj and start_date_obj > today) else today
                 

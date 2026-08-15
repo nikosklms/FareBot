@@ -62,4 +62,11 @@ def test_calendar_default_mode_is_range():
     # Default mode should be range, so mode toggle button offers "cal_mode_single"
     assert any("cal_mode_single" in d for d in button_datas)
 
+def test_calendar_handles_invalid_start_date_gracefully():
+    markup = create_calendar(2026, 9, mode="range", start_date="invalid-date-string")
+    assert markup is not None
+    button_datas = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert any("cal_day_2026-09-15" in d for d in button_datas)
+
+
 
