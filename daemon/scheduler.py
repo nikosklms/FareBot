@@ -37,6 +37,9 @@ class TrackerDaemonScheduler:
         if not tracker or tracker["status"] != "ACTIVE":
             return
 
+        if tracker["destination_code"].startswith("REGION:"):
+            return
+
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         end_date = tracker.get("departure_date_end") or tracker["departure_date"]
         if end_date < today_str:
@@ -168,8 +171,21 @@ async def register_active_trackers_on_startup(app, db: DatabaseManager, provider
 
     if app.job_queue:
         for t in active_trackers:
-            freq = t.get("frequency_hours", 6)
-            schedule_tracker_job(app.job_queue, t["id"], freq, db=db, provider=provider)
+            dest = t.get("destination_code", "")
+            if dest.startswith("REGION:"):
+                region_name = dest.replace("REGION:", "").lower()
+                schedule_digest_job(
+                    app.job_queue,
+                    tracker_id=t["id"],
+                    user_id=t["user_id"],
+                    origin=t["origin_code"],
+                    region=region_name,
+                    budget=t.get("max_budget"),
+                    schedule_str=t.get("departure_date", "30d|Sunday@15:00")
+                )
+            else:
+                freq = t.get("frequency_hours", 6)
+                schedule_tracker_job(app.job_queue, t["id"], freq, db=db, provider=provider)
             count += 1
 
     return count

@@ -358,11 +358,11 @@ def _format_deal_item(d: Dict[str, Any], idx: int) -> tuple[str, InlineKeyboardB
         disc_text = ""
 
     flights_url = build_google_flights_url(d["origin_code"], d["destination_code"], d["departure_date"])
-    price_str = f"[**€{d['price']:.2f}**]({flights_url})"
+    price_str = f"[€{d['price']:.2f}]({flights_url})"
 
     line = (
         f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-        f"💶 {price_str}{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+        f"💶 **{price_str}**{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
     )
     cb_data = f"track_deal_{d['origin_code']}_{d['destination_code']}_{d['departure_date']}_{d['price']}"
     btn = InlineKeyboardButton(f"🔔 Track Deal #{idx} (€{d['price']:.0f})", callback_data=cb_data)
@@ -398,6 +398,8 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
                     buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
                     button_idx += 1
         else:
+            msg_lines.append("💶 **CHEAPEST OVERALL FLIGHTS (€)**")
+            msg_lines.append("*(No deals on this date were priced below Google's average baseline)*\n")
             for d in cheapest_deals:
                 line, btn = _format_deal_item(d, button_idx)
                 msg_lines.append(line)
@@ -409,7 +411,12 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
             msg_lines.append(line)
             buttons.append([btn])
 
-    await message.reply_text("\n".join(msg_lines), parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+    await message.reply_text(
+        "\n".join(msg_lines),
+        parse_mode="Markdown",
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 @restricted
 async def track_deal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
