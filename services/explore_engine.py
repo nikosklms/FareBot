@@ -106,7 +106,7 @@ async def run_explore_query(
     if sort_by == "price":
         all_deals.sort(key=lambda x: x["price"])
     else:
-        all_deals.sort(key=lambda x: x["discount_pct"], reverse=True)
+        all_deals.sort(key=lambda x: (-x["discount_pct"], x["price"]))
 
     # Deduplicate by destination_code (keep single best deal per destination)
     seen_destinations = set()

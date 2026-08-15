@@ -126,3 +126,30 @@ async def test_run_explore_query_ranking_diversity_cap_and_sort_by_price():
 
         deals_price = await run_explore_query("ATH", "europe", "2026-09-15", max_budget=100.0, sort_by="price")
         assert deals_price[0]["destination_code"] == "SOF"  # 20 EUR lowest price first!
+
+@pytest.mark.asyncio
+async def test_explore_engine_discount_sort_secondary_tie_breaker_by_price():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "CDG":
+                # 0% discount, 99 EUR
+                return [AsyncMock(price=99.0, airline="Air Serbia", typical_min=None, typical_max=None, country="France")]
+            elif dst == "ZAG":
+                # 0% discount, 44 EUR
+                return [AsyncMock(price=44.0, airline="Ryanair", typical_min=None, typical_max=None, country="Croatia")]
+            elif dst == "SJJ":
+                # 0% discount, 46 EUR
+                return [AsyncMock(price=46.0, airline="Ryanair", typical_min=None, typical_max=None, country="Bosnia and Herzegovina")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15", sort_by="discount")
+        # When all discounts are 0%, ties MUST be broken by lowest price first!
+        assert deals[0]["destination_code"] == "ZAG"  # €44.00
+        assert deals[1]["destination_code"] == "SJJ"  # €46.00
+        assert deals[2]["destination_code"] == "CDG"  # €99.00
+
