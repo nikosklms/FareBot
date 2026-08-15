@@ -286,7 +286,7 @@ class DatabaseManager:
         cutoff_30d = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
         cutoff_60d = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S")
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=15.0) as db:
             # Rule 1: Mark past departure active trackers as EXPIRED
             cursor = await db.execute(
                 "UPDATE trackers SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND departure_date < ?",

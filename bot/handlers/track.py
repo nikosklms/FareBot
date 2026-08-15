@@ -6,6 +6,7 @@ from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
 from daemon import schedule_tracker_job
 from bot.handlers.auth import restricted
+from bot.inline_calendar import create_calendar
 from utils.date_parser import parse_date_or_range, get_preset_range
 
 ORIGIN, DESTINATION, DEPARTURE_DATE, FLIGHT_TYPE, BUDGET, FREQUENCY = range(6)
@@ -193,7 +194,6 @@ async def open_calendar_track_callback(update: Update, context: ContextTypes.DEF
     await query.answer()
     context.user_data["cal_mode"] = "range"
     context.user_data.pop("cal_start_date", None)
-    from bot.inline_calendar import create_calendar
     now = datetime.now(timezone.utc)
     calendar_markup = create_calendar(now.year, now.month, mode="range")
     await query.message.edit_text(
@@ -207,7 +207,6 @@ async def open_calendar_track_callback(update: Update, context: ContextTypes.DEF
 async def calendar_nav_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    from bot.inline_calendar import create_calendar
     target = query.data.replace("cal_nav_", "")
     year, month = map(int, target.split("-"))
     mode = context.user_data.get("cal_mode", "single")
@@ -225,7 +224,6 @@ async def track_calendar_mode_callback(update: Update, context: ContextTypes.DEF
     if target_mode == "single":
         context.user_data.pop("cal_start_date", None)
 
-    from bot.inline_calendar import create_calendar
     year, month = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
     if query.message and query.message.reply_markup:
         for row in query.message.reply_markup.inline_keyboard:
@@ -405,7 +403,6 @@ async def handle_calendar_date_selection(update: Update, context: ContextTypes.D
             # 1st click: Set start date
             context.user_data["cal_start_date"] = clicked_date
             dt = datetime.strptime(clicked_date, "%Y-%m-%d")
-            from bot.inline_calendar import create_calendar
             calendar_markup = create_calendar(dt.year, dt.month, mode="range", start_date=clicked_date)
             await query.message.edit_text(
                 f"📆 **Interactive Date Picker (Range Mode)**\nSelect **END** departure date (Start: `{clicked_date}`):",
