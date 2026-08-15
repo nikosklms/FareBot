@@ -91,12 +91,12 @@ async def run_explore_query(
                 s_d, e_d = departure_date.split("..", 1)
                 offers = await asyncio.wait_for(
                     provider.search_flights_range(origin, dst_code, s_d, e_d, currency="EUR", max_days=3),
-                    timeout=30.0
+                    timeout=60.0
                 )
             else:
                 offers = await asyncio.wait_for(
                     provider.search_flights(origin, dst_code, departure_date, currency="EUR"),
-                    timeout=20.0
+                    timeout=60.0
                 )
 
             if not offers:
