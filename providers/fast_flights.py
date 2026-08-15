@@ -269,10 +269,12 @@ class FastFlightsProvider(AbstractFlightProvider):
         start_date: str,
         end_date: str,
         currency: str = "EUR",
-        direct_only: bool = False
+        direct_only: bool = False,
+        max_days: int = 14
     ) -> List[FlightOffer]:
         from utils.date_parser import generate_date_sequence
-        dates = generate_date_sequence(start_date, end_date, max_days=14)
+        dates = generate_date_sequence(start_date, end_date, max_days=max_days)
+        logger.info(f"📅 Range search {origin} -> {destination} ({start_date}..{end_date}): sampling {len(dates)} dates ({dates})")
 
         tasks = [
             self.search_flights(

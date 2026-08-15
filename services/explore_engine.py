@@ -68,6 +68,8 @@ async def run_explore_query(
     normalized_region = region.lower().strip()
     provider = FastFlightsProvider()
 
+    logger.info(f"🔍 Starting /explore query: {origin} -> {region} ({departure_date}), checking {len(airports)} airports...")
+
     async def fetch_airport_deals(target_airport: Dict[str, str]) -> List[Dict[str, Any]]:
         dst_code = target_airport["code"]
         dst_name = target_airport.get("name", dst_code)
@@ -87,13 +89,21 @@ async def run_explore_query(
         try:
             if ".." in departure_date:
                 s_d, e_d = departure_date.split("..", 1)
-                offers = await provider.search_flights_range(origin, dst_code, s_d, e_d, currency="EUR")
+                offers = await asyncio.wait_for(
+                    provider.search_flights_range(origin, dst_code, s_d, e_d, currency="EUR", max_days=3),
+                    timeout=10.0
+                )
             else:
-                offers = await provider.search_flights(origin, dst_code, departure_date, currency="EUR")
+                offers = await asyncio.wait_for(
+                    provider.search_flights(origin, dst_code, departure_date, currency="EUR"),
+                    timeout=8.0
+                )
 
             if not offers:
+                logger.info(f"ℹ️ {origin} -> {dst_code}: no offers found.")
                 return []
 
+            logger.info(f"✅ {origin} -> {dst_code}: found {len(offers)} flight offers.")
             results = []
             for offer in offers:
                 price = getattr(offer, "price", None)
@@ -119,13 +129,17 @@ async def run_explore_query(
                     "discount_pct": discount_pct
                 })
             return results
+        except asyncio.TimeoutError:
+            logger.warning(f"⏰ Timeout fetching flights for {origin} -> {dst_code}")
+            return []
         except Exception as e:
-            logger.debug(f"Failed to query {origin} -> {dst_code}: {e}")
+            logger.warning(f"❌ Failed to query {origin} -> {dst_code}: {e}")
             return []
 
     # Parallel query execution across airports
     raw_results_nested = await asyncio.gather(*[fetch_airport_deals(a) for a in airports])
     all_deals = [deal for sublist in raw_results_nested for deal in sublist]
+    logger.info(f"🎉 /explore query complete! Total valid deals across {region}: {len(all_deals)}")
 
     if not all_deals:
         return {} if sort_by == "both" else []
