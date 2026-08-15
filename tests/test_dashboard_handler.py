@@ -84,3 +84,34 @@ async def test_dashboard_resume_digest_preserves_custom_schedule():
             with patch("daemon.scheduler.schedule_digest_job") as sched_digest_mock:
                 await dashboard_callback_handler(update, context)
                 sched_digest_mock.assert_called_once_with(context.job_queue, 101, 123, "ATH", "europe", 80.0, "Friday@18:00")
+
+@pytest.mark.asyncio
+async def test_mytracks_displays_date_range_and_digest_horizon():
+    update = MagicMock()
+    update.effective_user.id = 123
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+
+    range_tracker = {
+        "id": 32, "status": "ACTIVE", "user_id": 123, "origin_code": "SKG",
+        "destination_code": "LON", "departure_date": "2026-10-15", "departure_date_end": "2026-10-23",
+        "max_budget": 300.0, "last_price_found": None, "direct_only": 1
+    }
+    digest_tracker = {
+        "id": 30, "status": "ACTIVE", "user_id": 123, "origin_code": "SKG",
+        "destination_code": "REGION:EUROPE", "departure_date": "30d|Sunday@15:00",
+        "max_budget": 80.0, "last_price_found": None, "direct_only": 0
+    }
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        with patch("bot.handlers.dashboard.db_manager") as db_mock:
+            db_mock.get_user_trackers = AsyncMock(return_value=[range_tracker, digest_tracker])
+            await mytracks_command(update, context)
+
+            calls = update.message.reply_text.call_args_list
+            assert len(calls) == 2
+            range_text = calls[0][0][0]
+            digest_text = calls[1][0][0]
+
+            assert "2026-10-15 ➔ 2026-10-23" in range_text
+            assert "30 Days Horizon" in digest_text

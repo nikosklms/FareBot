@@ -28,18 +28,26 @@ async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         budget_disp = f"€{t['max_budget']:.2f}" if t.get("max_budget", 0) > 0 else "Any Budget"
 
         if is_digest:
+            schedule_raw = t.get("departure_date", "")
+            horizon_str = ""
+            if "|" in schedule_raw:
+                tf_part = schedule_raw.split("|")[0]
+                if tf_part.endswith("d") and tf_part[:-1].isdigit():
+                    horizon_str = f" ({tf_part[:-1]} Days Horizon)"
             text = (
                 f"{header_text}\n"
                 f"📍 **Route**: {route_text}\n"
-                f"📅 **Frequency**: Every Week (Sunday)\n"
+                f"📅 **Frequency**: Every Week (Sunday){horizon_str}\n"
                 f"🎯 **Target Budget**: {budget_disp}\n"
                 f"📊 **Status**: {t['status']}"
             )
         else:
+            dep_end = t.get("departure_date_end")
+            date_str = f"{t['departure_date']} ➔ {dep_end}" if dep_end else t["departure_date"]
             text = (
                 f"{header_text}\n"
                 f"📍 **Route**: {route_text}\n"
-                f"📅 **Date**: {t['departure_date']}\n"
+                f"📅 **Date**: {date_str}\n"
                 f"⚙️ **Flight Type**: {flight_type_text}\n"
                 f"🎯 **Target Budget**: {budget_disp}\n"
                 f"📊 **Status**: {t['status']}\n"
