@@ -377,7 +377,7 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
         return
 
     msg_lines = [f"🌟 **Top Flight Deals for {origin} → {region.upper().replace('_', ' ')}**\n"]
-    buttons = []
+    raw_btns = []
 
     if isinstance(deals, dict):
         discount_deals = deals.get("discount_deals", [])
@@ -389,7 +389,7 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
             for d in discount_deals:
                 line, btn = _format_deal_item(d, button_idx, show_percentage=True)
                 msg_lines.append(line)
-                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
+                raw_btns.append(InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data))
                 button_idx += 1
 
         if cheapest_deals:
@@ -397,13 +397,16 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
             for d in cheapest_deals:
                 line, btn = _format_deal_item(d, button_idx, show_percentage=False)
                 msg_lines.append(line)
-                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
+                raw_btns.append(InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data))
                 button_idx += 1
     else:
         for idx, d in enumerate(deals, start=1):
             line, btn = _format_deal_item(d, idx, show_percentage=False)
             msg_lines.append(line)
-            buttons.append([btn])
+            raw_btns.append(InlineKeyboardButton(f"🔔 Track #{idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data))
+
+    # Chunk buttons into 2-column grid layout for compact keyboard height
+    buttons = [raw_btns[i:i + 2] for i in range(0, len(raw_btns), 2)]
 
     await message.reply_text(
         "\n".join(msg_lines),
