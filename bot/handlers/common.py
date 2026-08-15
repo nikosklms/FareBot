@@ -67,3 +67,32 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if query.message and hasattr(query.message, "edit_text"):
             await query.message.edit_text("❌ Action cancelled.")
     return ConversationHandler.END
+
+def build_status_estimate_text(
+    header_text: str,
+    est_seconds: float,
+    total_queries: int = 1,
+    num_airports: int = 1,
+    num_days: int = 1
+) -> str:
+    """Format status text with dynamic execution time estimate and ETA clock."""
+    from datetime import datetime, timedelta, timezone
+    if est_seconds >= 60:
+        mins_lower = max(1, int(est_seconds // 60))
+        mins_upper = mins_lower + 2
+        completion_dt = datetime.now(timezone.utc) + timedelta(seconds=est_seconds)
+        completion_clock = completion_dt.strftime("%H:%M")
+        time_text = f"⏱️ **Estimated Completion**: ~{mins_lower}–{mins_upper} mins (around **{completion_clock}**)"
+    else:
+        secs_lower = max(5, int(est_seconds))
+        secs_upper = secs_lower + 5
+        time_text = f"⏱️ **Estimated Completion**: ~{secs_lower}–{secs_upper} secs"
+
+    if total_queries > 1:
+        if num_days > 1:
+            details_text = f"📊 **Queries**: {total_queries} flights across {num_airports} airports & {num_days} days"
+        else:
+            details_text = f"📊 **Queries**: {total_queries} flights across {num_airports} airports"
+        return f"{header_text}\n\n{time_text}\n{details_text}"
+    else:
+        return f"{header_text}\n\n{time_text}"

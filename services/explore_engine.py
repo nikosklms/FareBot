@@ -60,7 +60,8 @@ async def run_explore_query(
     departure_date: str,
     max_budget: Optional[float] = None,
     sort_by: str = "discount",
-    max_results: int = 10
+    max_results: int = 10,
+    status_callback: Optional[Any] = None
 ) -> Dict[str, Any] | List[Dict[str, Any]]:
     """Query primary country airports in a region and score deal opportunities."""
     airports = get_region_airports(region)
@@ -75,8 +76,21 @@ async def run_explore_query(
     normalized_region = region.lower().strip()
     provider = FastFlightsProvider()
 
-    from utils.date_parser import parse_date_or_range
+    from utils.date_parser import parse_date_or_range, generate_date_sequence
+    import math
     start_date, end_date = parse_date_or_range(departure_date)
+    dates = generate_date_sequence(start_date, end_date) if end_date else [departure_date]
+    num_days = len(dates)
+    num_airports = len(airports)
+    total_queries = num_airports * num_days
+    num_batches = math.ceil(total_queries / 3)
+    est_seconds = num_batches * 1.25
+
+    if status_callback:
+        try:
+            await status_callback(est_seconds, total_queries, num_airports, num_days)
+        except Exception as e:
+            logger.warning(f"[EXPLORE] Initial status_callback error: {e}")
 
     async def fetch_airport_deals(target_airport: Dict[str, str]) -> List[Dict[str, Any]]:
         dst_code = target_airport["code"]

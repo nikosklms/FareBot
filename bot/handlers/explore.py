@@ -54,10 +54,27 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
         start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
         end_date = (today + timedelta(days=tf)).strftime("%Y-%m-%d")
         dep_date = f"{start_date}..{end_date}"
-        status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({start_date} ➔ {end_date})..."
-        await update.message.reply_text(status_msg, parse_mode="Markdown")
+        header_text = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({start_date} ➔ {end_date})..."
+        sent_msg = await update.message.reply_text(header_text, parse_mode="Markdown")
 
-        deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, max_results=limit)
+        from bot.handlers.common import build_status_estimate_text
+
+        async def status_cb(est_seconds: float, total_queries: int, num_airports: int, num_days: int) -> None:
+            try:
+                status_text = build_status_estimate_text(
+                    header_text=header_text,
+                    est_seconds=est_seconds,
+                    total_queries=total_queries,
+                    num_airports=num_airports,
+                    num_days=num_days
+                )
+                await sent_msg.edit_text(status_text, parse_mode="Markdown")
+            except Exception:
+                pass
+
+        deals = await run_explore_query(
+            origin, region, dep_date, max_budget=max_budget, max_results=limit, status_callback=status_cb
+        )
         await _render_explore_deals(update.message, origin, region, deals)
         return ConversationHandler.END
 
@@ -348,14 +365,31 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
 
     logger.info(f"[EXPLORE] Executing wizard explore: origin={origin}, region={region}, date={dep_date}, sort={sort_mode}, limit={limit}")
 
-    status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({date_display})..."
+    header_text = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({date_display})..."
 
     if is_callback:
-        await message.edit_text(status_msg, parse_mode="Markdown")
+        sent_msg = await message.edit_text(header_text, parse_mode="Markdown")
     else:
-        await message.reply_text(status_msg, parse_mode="Markdown")
+        sent_msg = await message.reply_text(header_text, parse_mode="Markdown")
 
-    deals = await run_explore_query(origin, region, dep_date, sort_by=sort_mode, max_results=limit)
+    from bot.handlers.common import build_status_estimate_text
+
+    async def status_cb(est_seconds: float, total_queries: int, num_airports: int, num_days: int) -> None:
+        try:
+            status_text = build_status_estimate_text(
+                header_text=header_text,
+                est_seconds=est_seconds,
+                total_queries=total_queries,
+                num_airports=num_airports,
+                num_days=num_days
+            )
+            await sent_msg.edit_text(status_text, parse_mode="Markdown")
+        except Exception:
+            pass
+
+    deals = await run_explore_query(
+        origin, region, dep_date, sort_by=sort_mode, max_results=limit, status_callback=status_cb
+    )
     await _render_explore_deals(message, origin, region, deals)
     elapsed_s = time.perf_counter() - t_start
     logger.info(f"[EXPLORE] Finished wizard explore rendering for origin={origin}, region={region} in {elapsed_s:.2f}s")

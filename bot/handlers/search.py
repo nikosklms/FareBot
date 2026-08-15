@@ -370,11 +370,22 @@ async def execute_search(
     filter_label = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
     start_date, end_date = parse_date_or_range(date)
 
+    from bot.handlers.common import build_status_estimate_text
+    from utils.date_parser import generate_date_sequence
+    import math
+
     if end_date:
-        status_msg = await message.reply_text(f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** between **{start_date}** and **{end_date}**...", parse_mode="Markdown")
+        dates = generate_date_sequence(start_date, end_date)
+        num_days = len(dates)
+        est_sec = math.ceil(num_days / 3) * 1.25
+        hdr = f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** between **{start_date}** and **{end_date}**..."
+        status_text = build_status_estimate_text(hdr, est_sec, total_queries=num_days, num_airports=1, num_days=num_days)
+        status_msg = await message.reply_text(status_text, parse_mode="Markdown")
         offers = await provider.search_flights_range(origin=origin, destination=destination, start_date=start_date, end_date=end_date, direct_only=direct_only)
     else:
-        status_msg = await message.reply_text(f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** on **{date}**...", parse_mode="Markdown")
+        hdr = f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** on **{date}**..."
+        status_text = build_status_estimate_text(hdr, est_seconds=2.5, total_queries=1, num_airports=1, num_days=1)
+        status_msg = await message.reply_text(status_text, parse_mode="Markdown")
         offers = await provider.search_flights(origin=origin, destination=destination, departure_date=date, direct_only=direct_only)
 
     elapsed_s = time.perf_counter() - t_start
