@@ -1,4 +1,8 @@
 import pytest
+import warnings
+from telegram.warnings import PTBUserWarning
+warnings.filterwarnings("ignore", category=PTBUserWarning)
+
 from unittest.mock import AsyncMock
 from telegram.ext import CommandHandler, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 from bot.handlers import start_command, help_command, cancel_command, search_command, mytracks_command

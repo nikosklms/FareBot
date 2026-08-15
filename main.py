@@ -233,7 +233,8 @@ def main():
             CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
         ],
         per_chat=True,
-        per_user=True
+        per_user=True,
+        per_message=False
     )
     app.add_handler(digest_wizard)
 
@@ -271,7 +272,8 @@ def main():
             CallbackQueryHandler(cancel_callback, pattern="^(cancel_wizard|cal_cancel)$")
         ],
         per_chat=True,
-        per_user=True
+        per_user=True,
+        per_message=False
     )
     app.add_handler(explore_wizard)
 
@@ -303,7 +305,8 @@ def main():
             CallbackQueryHandler(cancel_callback, pattern="^(cancel_wizard|cal_cancel)$")
         ],
         per_chat=True,
-        per_user=True
+        per_user=True,
+        per_message=False
     )
     app.add_handler(search_wizard)
 
@@ -337,7 +340,8 @@ def main():
             CallbackQueryHandler(cancel_callback, pattern="^(cancel_wizard|cal_cancel)$")
         ],
         per_chat=True,
-        per_user=True
+        per_user=True,
+        per_message=False
     )
     app.add_handler(track_wizard)
 
