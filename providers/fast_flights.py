@@ -3,7 +3,7 @@ import asyncio
 import urllib.request
 import urllib.parse
 import json
-from typing import List, Optional
+from typing import List, Optional, Any
 from selectolax.lexbor import LexborHTMLParser
 from fast_flights import create_query, FlightQuery, Passengers
 from fast_flights.integrations.base import FetchIntegration
@@ -53,6 +53,23 @@ def build_google_flights_url(
         logger.warning(f"Failed to generate Google Flights tfs URL: {e}")
         return f"https://www.google.com/travel/flights/search?tfs=GhoSC{departure_date}jBRID{origin}rUSA{destination}&curr={currency}"
 
+def _extract_typical_price_range(payload: Any) -> tuple[Optional[float], Optional[float]]:
+    candidates = []
+    def _walk(obj):
+        if not isinstance(obj, list):
+            return
+        if len(obj) == 2 and isinstance(obj[0], (int, float)) and isinstance(obj[1], (int, float)):
+            if 10 <= obj[0] <= 1000 and 15 <= obj[1] <= 1500 and obj[1] > obj[0]:
+                candidates.append((float(obj[0]), float(obj[1])))
+        for child in obj:
+            _walk(child)
+    _walk(payload)
+
+    valid = [c for c in candidates if (c[1] - c[0]) >= 5]
+    if valid:
+        return valid[0][0], valid[0][1]
+    return None, None
+
 def parse_google_flights_payload_generic(
     html: str,
     default_origin: str,
@@ -75,6 +92,8 @@ def parse_google_flights_payload_generic(
     except Exception as e:
         logger.warning(f"Failed to parse script.ds:1 JSON payload: {e}")
         return offers
+
+    typical_min, typical_max = _extract_typical_price_range(payload)
 
     def _walk(obj):
         if not isinstance(obj, list):
@@ -150,6 +169,8 @@ def parse_google_flights_payload_generic(
                         departure_time=dep_time,
                         arrival_time=arr_time,
                         day_offset=day_offset_val,
+                        typical_min=typical_min,
+                        typical_max=typical_max,
                         booking_url=booking_url_val
                     )
                 )
