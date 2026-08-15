@@ -25,11 +25,11 @@ from .explore import (
 )
 from .digest import (
     start_digest_wizard, handle_digest_origin_input, select_digest_origin_callback,
-    select_digest_region_callback, handle_digest_budget_input, select_digest_budget_callback,
+    select_digest_region_callback, select_digest_sort_callback, handle_digest_budget_input, select_digest_budget_callback,
     handle_digest_timeframe_input, select_digest_timeframe_callback, select_digest_day_callback,
     handle_digest_time_input, select_digest_time_callback, handle_digest_limit_input,
     select_digest_limit_callback,
-    DIGEST_ORIGIN, DIGEST_REGION, DIGEST_BUDGET, DIGEST_TIMEFRAME, DIGEST_DAY, DIGEST_TIME, DIGEST_LIMIT
+    DIGEST_ORIGIN, DIGEST_REGION, DIGEST_SORT, DIGEST_BUDGET, DIGEST_TIMEFRAME, DIGEST_DAY, DIGEST_TIME, DIGEST_LIMIT
 )
 
 __all__ = [
@@ -49,9 +49,9 @@ __all__ = [
     "select_explore_limit_callback", "track_deal_callback",
     "EXPLORE_ORIGIN", "EXPLORE_REGION", "EXPLORE_SORT", "EXPLORE_TIMEFRAME", "EXPLORE_LIMIT",
     "start_digest_wizard", "handle_digest_origin_input", "select_digest_origin_callback",
-    "select_digest_region_callback", "handle_digest_budget_input", "select_digest_budget_callback",
+    "select_digest_region_callback", "select_digest_sort_callback", "handle_digest_budget_input", "select_digest_budget_callback",
     "handle_digest_timeframe_input", "select_digest_timeframe_callback", "select_digest_day_callback",
     "handle_digest_time_input", "select_digest_time_callback", "handle_digest_limit_input",
     "select_digest_limit_callback",
-    "DIGEST_ORIGIN", "DIGEST_REGION", "DIGEST_BUDGET", "DIGEST_TIMEFRAME", "DIGEST_DAY", "DIGEST_TIME", "DIGEST_LIMIT"
+    "DIGEST_ORIGIN", "DIGEST_REGION", "DIGEST_SORT", "DIGEST_BUDGET", "DIGEST_TIMEFRAME", "DIGEST_DAY", "DIGEST_TIME", "DIGEST_LIMIT"
 ]

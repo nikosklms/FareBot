@@ -114,4 +114,4 @@ async def test_mytracks_displays_date_range_and_digest_horizon():
             digest_text = calls[1][0][0]
 
             assert "2026-10-15 ➔ 2026-10-23" in range_text
-            assert "30 Days Horizon" in digest_text
+            assert "30 Days Ahead" in digest_text

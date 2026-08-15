@@ -22,7 +22,7 @@ async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         flight_type_text = "Direct Flights Only ✈️" if t.get("direct_only") else "Any Flights 🔄"
 
         is_digest = t.get("destination_code", "").startswith("REGION:")
-        region_name = t["destination_code"].replace("REGION:", "") if is_digest else ""
+        region_name = t["destination_code"].replace("REGION:", "").replace("_", " ") if is_digest else ""
         header_text = f"🗞️ **Weekly Digest #{t['id']}**" if is_digest else f"{status_icon} **Tracker #{t['id']}**"
         route_text = f"{t['origin_code']} ✈️ {region_name}" if is_digest else f"{t['origin_code']} ✈️ {t['destination_code']}"
         budget_disp = f"€{t['max_budget']:.2f}" if t.get("max_budget", 0) > 0 else "Any Budget"
@@ -30,7 +30,9 @@ async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if is_digest:
             sched_raw = t.get("departure_date", "")
             if "|" in sched_raw:
-                tf_part, day_part = sched_raw.split("|", 1)
+                parts = sched_raw.split("|")
+                tf_part = parts[0]
+                day_part = parts[-1]
                 days_ahead = tf_part.replace("d", "") if tf_part.endswith("d") else tf_part
                 freq_text = f"Every Week ({day_part}) — Horizon: {days_ahead} Days Ahead"
             elif "@" in sched_raw:

@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
@@ -21,7 +22,9 @@ EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_SORT, EXPLORE_TIMEFRAME, EXPLORE_BUDGET,
 @restricted
 async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start interactive /explore wizard or execute one-line shortcut if args provided."""
+    user_id = update.effective_user.id if update.effective_user else "unknown"
     args = context.args or []
+    logger.info(f"[EXPLORE] User {user_id} invoked /explore with args={args}")
 
     # One-line shortcut execution
     if len(args) >= 2:
@@ -47,11 +50,11 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
         if len(args) > 3 and max_budget is None and args[3].isdigit():
             max_budget = float(args[3])
 
-        if len(args) > 4 and args[4].isdigit():
-            limit = int(args[4])
-
-        dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
-        status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({tf}d out)..."
+        today = datetime.now(timezone.utc).date()
+        start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        end_date = (today + timedelta(days=tf)).strftime("%Y-%m-%d")
+        dep_date = f"{start_date}..{end_date}"
+        status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({start_date} ➔ {end_date})..."
         await update.message.reply_text(status_msg, parse_mode="Markdown")
 
         deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, max_results=limit)
@@ -322,18 +325,30 @@ async def select_explore_limit_callback(update: Update, context: ContextTypes.DE
     return await _execute_wizard_explore(query.message, context, limit, is_callback=True)
 
 async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, limit: int, is_callback: bool = False) -> int:
+    t_start = time.perf_counter()
     origin = context.user_data.get("explore_origin", "ATH")
     region = context.user_data.get("explore_region", "europe")
     sort_mode = context.user_data.get("explore_sort", "both")
     tf = context.user_data.get("explore_timeframe", 30)
     custom_dep_date = context.user_data.get("explore_departure_date")
 
+    today = datetime.now(timezone.utc).date()
     if custom_dep_date:
         dep_date = custom_dep_date
+        if ".." in custom_dep_date:
+            d_parts = custom_dep_date.split("..")
+            date_display = f"{d_parts[0]} ➔ {d_parts[1]}"
+        else:
+            date_display = custom_dep_date
     else:
-        dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
+        start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        end_date = (today + timedelta(days=tf)).strftime("%Y-%m-%d")
+        dep_date = f"{start_date}..{end_date}"
+        date_display = f"{start_date} ➔ {end_date}"
 
-    status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({dep_date})..."
+    logger.info(f"[EXPLORE] Executing wizard explore: origin={origin}, region={region}, date={dep_date}, sort={sort_mode}, limit={limit}")
+
+    status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({date_display})..."
 
     if is_callback:
         await message.edit_text(status_msg, parse_mode="Markdown")
@@ -342,6 +357,9 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
 
     deals = await run_explore_query(origin, region, dep_date, sort_by=sort_mode, max_results=limit)
     await _render_explore_deals(message, origin, region, deals)
+    elapsed_s = time.perf_counter() - t_start
+    logger.info(f"[EXPLORE] Finished wizard explore rendering for origin={origin}, region={region} in {elapsed_s:.2f}s")
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -349,35 +367,41 @@ def _format_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True)
     from providers.fast_flights import build_google_flights_url
 
     disc_pct = d.get("discount_pct", 0.0)
-    base_price = d.get("baseline_price")
-
-    if show_percentage and base_price and disc_pct > 0:
-        disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-    elif show_percentage and base_price and disc_pct < 0:
-        disc_text = f" (📈 **{disc_pct:.0f}% EXPENSIVE** | Avg: ~€{base_price:.2f})"
-    elif base_price:
-        disc_text = f" (Avg: ~€{base_price:.2f})"
-    else:
-        disc_text = ""
+    disc_text = ""
+    if show_percentage and d.get("discount_pct", 0) > 15:
+        disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)"
 
     flights_url = build_google_flights_url(d["origin_code"], d["destination_code"], d["departure_date"])
     price_str = f"[€{d['price']:.2f}]({flights_url})"
+    stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
 
     line = (
         f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-        f"💶 **{price_str}**{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+        f"💶 **{price_str}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
     )
     cb_data = f"track_deal_{d['origin_code']}_{d['destination_code']}_{d['departure_date']}_{d['price']}"
     btn = InlineKeyboardButton(f"🔔 Track Deal #{idx} (€{d['price']:.0f})", callback_data=cb_data)
     return line, btn
 
 async def _render_explore_deals(message, origin: str, region: str, deals: Dict[str, Any] | List[Dict[str, Any]]) -> None:
-    if not deals:
-        await message.reply_text("❌ No flight deals found matching your criteria.")
+    has_deals = False
+    if isinstance(deals, dict):
+        has_deals = bool(deals.get("discount_deals") or deals.get("cheapest_deals"))
+    elif isinstance(deals, list):
+        has_deals = bool(deals)
+
+    reg_disp = region.upper().replace("_", " ")
+
+    if not has_deals:
+        await message.reply_text(
+            f"ℹ️ **No flight deals found for {origin} → {reg_disp}** matching your criteria.\n\n"
+            f"💡 *Tip: Try selecting 'Any Budget' or increasing your target budget threshold in the wizard.*",
+            parse_mode="Markdown"
+        )
         return
 
     msg_lines = [f"🌟 **Top Flight Deals for {origin} → {region.upper().replace('_', ' ')}**\n"]
-    raw_btns = []
+    buttons = []
 
     if isinstance(deals, dict):
         discount_deals = deals.get("discount_deals", [])
@@ -389,25 +413,21 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
             for d in discount_deals:
                 line, btn = _format_deal_item(d, button_idx, show_percentage=True)
                 msg_lines.append(line)
-                raw_btns.append(InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data))
+                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
                 button_idx += 1
 
         if cheapest_deals:
-            header_prefix = "\n" if discount_deals else ""
-            msg_lines.append(f"{header_prefix}💶 **CHEAPEST OVERALL FLIGHTS (€)**")
+            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
             for d in cheapest_deals:
                 line, btn = _format_deal_item(d, button_idx, show_percentage=False)
                 msg_lines.append(line)
-                raw_btns.append(InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data))
+                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
                 button_idx += 1
     else:
         for idx, d in enumerate(deals, start=1):
             line, btn = _format_deal_item(d, idx, show_percentage=False)
             msg_lines.append(line)
-            raw_btns.append(InlineKeyboardButton(f"🔔 Track #{idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data))
-
-    # Chunk buttons into 2-column grid layout for compact keyboard height
-    buttons = [raw_btns[i:i + 2] for i in range(0, len(raw_btns), 2)]
+            buttons.append([btn])
 
     await message.reply_text(
         "\n".join(msg_lines),

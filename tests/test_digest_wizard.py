@@ -5,6 +5,7 @@ from bot.handlers.digest import (
     start_digest_wizard,
     select_digest_origin_callback,
     select_digest_region_callback,
+    select_digest_sort_callback,
     select_digest_budget_callback,
     select_digest_timeframe_callback,
     select_digest_day_callback,
@@ -12,6 +13,7 @@ from bot.handlers.digest import (
     select_digest_limit_callback,
     DIGEST_ORIGIN,
     DIGEST_REGION,
+    DIGEST_SORT,
     DIGEST_BUDGET,
     DIGEST_TIMEFRAME,
     DIGEST_DAY,
@@ -21,9 +23,12 @@ from bot.handlers.digest import (
 from daemon.scheduler import calculate_next_digest_delay, run_digest_weekly_job
 
 def test_calculate_next_digest_delay():
-    # Test day/time calculation for next Sunday@15:00 or 30d|Sunday@15:00
+    # Test day/time calculation for next Sunday@15:00 or 30d|Sunday@15:00 or 30d|price|Sunday@15:00
     delay = calculate_next_digest_delay("30d|Sunday@15:00")
     assert delay > 0 and delay <= 7 * 86400
+
+    delay_3part = calculate_next_digest_delay("30d|price|Saturday@16:25")
+    assert delay_3part > 0 and delay_3part <= 7 * 86400
 
 @pytest.mark.asyncio
 async def test_digest_wizard_full_step_by_step_flow():
@@ -53,7 +58,7 @@ async def test_digest_wizard_full_step_by_step_flow():
         assert state2 == DIGEST_REGION
         assert context.user_data["digest_origin"] == "ATH"
 
-    # Select Region Europe -> prompts Budget
+    # Select Region Europe -> prompts Sort
     query3 = MagicMock()
     query3.data = "dig_reg_europe"
     query3.answer = AsyncMock()
@@ -64,8 +69,22 @@ async def test_digest_wizard_full_step_by_step_flow():
 
     with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
         state3 = await select_digest_region_callback(update3, context)
-        assert state3 == DIGEST_BUDGET
+        assert state3 == DIGEST_SORT
         assert context.user_data["digest_region"] == "europe"
+
+    # Select Sort Price -> prompts Budget
+    query_sort = MagicMock()
+    query_sort.data = "dig_sort_price"
+    query_sort.answer = AsyncMock()
+    query_sort.message.edit_text = AsyncMock()
+    update_sort = MagicMock()
+    update_sort.effective_user.id = 123
+    update_sort.callback_query = query_sort
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        state_sort = await select_digest_sort_callback(update_sort, context)
+        assert state_sort == DIGEST_BUDGET
+        assert context.user_data["digest_sort"] == "price"
 
     # Select Budget 80 -> prompts Timeframe
     query4 = MagicMock()
@@ -144,7 +163,7 @@ async def test_digest_wizard_full_step_by_step_flow():
                 assert state8 == ConversationHandler.END
                 db_mock.create_tracker.assert_called_once()
                 kw = db_mock.create_tracker.call_args[1]
-                assert kw["departure_date"] == "30d|Sunday@15:00"
+                assert kw["departure_date"] == "30d|price|Sunday@15:00"
                 sched_mock.assert_called_once()
 
 @pytest.mark.asyncio
@@ -161,6 +180,7 @@ async def test_digest_wizard_stores_custom_schedule_str():
     context.user_data = {
         "digest_origin": "ATH",
         "digest_region": "europe",
+        "digest_sort": "discount",
         "digest_timeframe": 60,
         "digest_day": "Friday",
         "digest_time": "18:00"
@@ -174,4 +194,4 @@ async def test_digest_wizard_stores_custom_schedule_str():
                 await select_digest_limit_callback(update, context)
                 db_mock.create_tracker.assert_called_once()
                 kw = db_mock.create_tracker.call_args[1]
-                assert kw["departure_date"] == "60d|Friday@18:00"
+                assert kw["departure_date"] == "60d|discount|Friday@18:00"

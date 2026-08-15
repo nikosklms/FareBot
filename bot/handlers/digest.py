@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 db_manager = DatabaseManager(DB_PATH)
 resolver = LocationResolver()
 
-DIGEST_ORIGIN, DIGEST_REGION, DIGEST_BUDGET, DIGEST_TIMEFRAME, DIGEST_DAY, DIGEST_TIME, DIGEST_LIMIT = range(7)
+DIGEST_ORIGIN, DIGEST_REGION, DIGEST_SORT, DIGEST_BUDGET, DIGEST_TIMEFRAME, DIGEST_DAY, DIGEST_TIME, DIGEST_LIMIT = range(8)
 
 @restricted
 async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -83,7 +83,7 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
         budget_str = f"€{budget:.2f}" if budget else "Any Budget"
         await update.message.reply_text(
             f"✅ **Weekly Digest Scheduled!**\n\n"
-            f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper()}\n"
+            f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper().replace('_', ' ')}\n"
             f"🎯 **Target Budget**: {budget_str}\n"
             f"📅 **Departure Horizon**: {tf} Days Ahead\n"
             f"⏰ **Delivery Schedule**: Every {schedule_str}\n"
@@ -160,14 +160,42 @@ async def select_digest_region_callback(update: Update, context: ContextTypes.DE
     context.user_data["digest_region"] = region
 
     buttons = [
+        [InlineKeyboardButton("💥 Highest Discount %", callback_data="dig_sort_discount"), InlineKeyboardButton("💶 Cheapest Price", callback_data="dig_sort_price")],
+        [InlineKeyboardButton("🔀 Both (Default)", callback_data="dig_sort_both")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+
+    await query.message.edit_text(
+        f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
+        "📊 **Step 3/8**: Select flight deal sorting preference:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    return DIGEST_SORT
+
+@restricted
+async def select_digest_sort_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    sort_mode = query.data.replace("dig_sort_", "")
+    context.user_data["digest_sort"] = sort_mode
+
+    sort_labels = {
+        "price": "Cheapest Price 💶",
+        "discount": "Highest Discount % 💥",
+        "both": "Both Lists 🔀"
+    }
+    label = sort_labels.get(sort_mode, sort_mode)
+
+    buttons = [
         [InlineKeyboardButton("€50", callback_data="dig_bud_50"), InlineKeyboardButton("€80", callback_data="dig_bud_80"), InlineKeyboardButton("€100", callback_data="dig_bud_100")],
         [InlineKeyboardButton("€150", callback_data="dig_bud_150"), InlineKeyboardButton("Any Budget 💶", callback_data="dig_bud_0")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
 
     await query.message.edit_text(
-        f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
-        "🎯 **Step 3/7**: Select maximum target budget threshold (or type amount in EUR, e.g. '80'):",
+        f"✅ Sort mode set to: **{label}**\n\n"
+        "🎯 **Step 4/8**: Select maximum target budget threshold (or type amount in EUR, e.g. '80'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -206,7 +234,7 @@ async def _ask_digest_timeframe(message, context: ContextTypes.DEFAULT_TYPE, is_
 
     msg_text = (
         f"✅ Target Budget set to: **{bud_str}**\n\n"
-        "📅 **Step 4/7**: Select target departure timeframe horizon (or type days ahead, e.g. '30'):"
+        "📅 **Step 5/8**: Select target departure timeframe horizon (or type days ahead, e.g. '30'):"
     )
 
     if is_callback:
@@ -239,14 +267,15 @@ async def _ask_digest_day(message, context: ContextTypes.DEFAULT_TYPE, is_callba
 
     buttons = [
         [InlineKeyboardButton("Sunday (Default)", callback_data="dig_day_Sunday"), InlineKeyboardButton("Monday", callback_data="dig_day_Monday")],
-        [InlineKeyboardButton("Wednesday", callback_data="dig_day_Wednesday"), InlineKeyboardButton("Friday", callback_data="dig_day_Friday")],
+        [InlineKeyboardButton("Tuesday", callback_data="dig_day_Tuesday"), InlineKeyboardButton("Wednesday", callback_data="dig_day_Wednesday")],
+        [InlineKeyboardButton("Thursday", callback_data="dig_day_Thursday"), InlineKeyboardButton("Friday", callback_data="dig_day_Friday")],
         [InlineKeyboardButton("Saturday", callback_data="dig_day_Saturday")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
 
     msg_text = (
         f"✅ Departure Timeframe set to: **{tf} Days Ahead**\n\n"
-        "📅 **Step 5/7**: Select weekly delivery day of week:"
+        "📅 **Step 6/8**: Select weekly delivery day of week (or type any day, e.g. 'Tuesday'):"
     )
 
     if is_callback:
@@ -272,7 +301,7 @@ async def select_digest_day_callback(update: Update, context: ContextTypes.DEFAU
 
     await query.message.edit_text(
         f"✅ Delivery Day set to: **{day}**\n\n"
-        "⏰ **Step 6/7**: Select weekly delivery time of day (or type HH:MM format, e.g. '15:00'):",
+        "⏰ **Step 7/8**: Select weekly delivery time of day (or type HH:MM format, e.g. '15:00'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -307,7 +336,7 @@ async def _ask_digest_limit(message, context: ContextTypes.DEFAULT_TYPE, is_call
 
     msg_text = (
         f"✅ Delivery Time set to: **{time_str}**\n\n"
-        "📊 **Step 7/7**: How many top flight deal results would you like in each weekly digest? (1 to 20, default 10):"
+        "📊 **Step 8/8**: How many top flight deal results would you like in each weekly digest? (1 to 20, default 10):"
     )
 
     if is_callback:
@@ -339,11 +368,12 @@ async def select_digest_limit_callback(update: Update, context: ContextTypes.DEF
 async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, user_id: int, limit: int, is_callback: bool = False) -> int:
     origin = context.user_data.get("digest_origin", "ATH")
     region = context.user_data.get("digest_region", "europe")
+    sort_mode = context.user_data.get("digest_sort", "both")
     budget = context.user_data.get("digest_budget")
     tf = context.user_data.get("digest_timeframe", 30)
     day = context.user_data.get("digest_day", "Sunday")
     time_str = context.user_data.get("digest_time", "15:00")
-    schedule_str = f"{tf}d|{day}@{time_str}"
+    schedule_str = f"{tf}d|{sort_mode}|{day}@{time_str}"
 
     dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
 
@@ -374,13 +404,14 @@ async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, us
         origin=origin,
         region=region,
         budget=budget or 0.0,
-        schedule_str=schedule_str
+        schedule_str=schedule_str,
+        limit=limit
     )
 
     budget_str = f"€{budget:.2f}" if budget else "Any Budget"
     success_text = (
         f"✅ **Weekly Digest Scheduled!**\n\n"
-        f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper()}\n"
+        f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper().replace('_', ' ')}\n"
         f"🎯 **Target Budget**: {budget_str}\n"
         f"📅 **Departure Horizon**: {tf} Days Ahead\n"
         f"⏰ **Delivery Schedule**: Every {day} at {time_str}\n"

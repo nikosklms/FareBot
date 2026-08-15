@@ -1,3 +1,5 @@
+import logging
+import time
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,8 +13,11 @@ from database.db import DatabaseManager
 from daemon import schedule_tracker_job
 from bot.handlers.auth import restricted
 from bot.inline_calendar import create_calendar
+from services.explore_engine import calculate_discount_score
 
 from utils.date_parser import parse_date_or_range, get_preset_range
+
+logger = logging.getLogger(__name__)
 
 SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE, SEARCH_SORT = range(10, 15)
 resolver = LocationResolver()
@@ -22,7 +27,10 @@ db_manager = DatabaseManager(DB_PATH)
 @restricted
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for /search command."""
+    user_id = update.effective_user.id if update.effective_user else "unknown"
     args = context.args
+    logger.info(f"[SEARCH] User {user_id} invoked /search with args={args}")
+
     if args and len(args) >= 3:
         origin_raw, dest_raw, raw_date = args[0], args[1], args[2]
         direct_only = False
@@ -33,9 +41,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         dest_matches = resolver.resolve(dest_raw)
 
         if not origin_matches:
+            logger.warning(f"[SEARCH] User {user_id}: Origin location '{origin_raw}' not recognized.")
             await update.message.reply_text(f"❌ Origin location '{origin_raw}' not recognized.")
             return ConversationHandler.END
         if not dest_matches:
+            logger.warning(f"[SEARCH] User {user_id}: Destination location '{dest_raw}' not recognized.")
             await update.message.reply_text(f"❌ Destination location '{dest_raw}' not recognized.")
             return ConversationHandler.END
 
@@ -46,9 +56,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             start_date, end_date = parse_date_or_range(raw_date)
             today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             if start_date < today_str:
+                logger.warning(f"[SEARCH] User {user_id}: Departure date {start_date} is in the past.")
                 await update.message.reply_text("❌ Departure date cannot be in the past.")
                 return ConversationHandler.END
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[SEARCH] User {user_id}: Invalid date format '{raw_date}': {e}")
             await update.message.reply_text("❌ Invalid date or range format. Use `YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`.", parse_mode="Markdown")
             return ConversationHandler.END
 
@@ -332,10 +344,10 @@ def _format_search_offer(o: Any, idx_emoji: str, has_end_date: bool) -> str:
     disc_pct = calculate_discount_score(o.price, typ_min, typ_max) if (typ_min or typ_max) else 0.0
     base_price = ((typ_min + typ_max) / 2.0) if (typ_min and typ_max) else None
 
-    if base_price and disc_pct < 0:
+    if base_price and disc_pct > 0:
         disc_badge = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-    elif base_price and disc_pct > 0:
-        disc_badge = f" (📈 **+{disc_pct:.0f}% EXPENSIVE** | Avg: ~€{base_price:.2f})"
+    elif base_price and disc_pct < 0:
+        disc_badge = f" (📈 **+{abs(disc_pct):.0f}% EXPENSIVE** | Avg: ~€{base_price:.2f})"
     elif base_price:
         disc_badge = f" (📊 Avg: ~€{base_price:.2f})"
     else:
@@ -351,6 +363,10 @@ async def execute_search(
     if not message:
         return
 
+    t_start = time.perf_counter()
+    user_id = update.effective_user.id if update.effective_user else "unknown"
+    logger.info(f"[SEARCH] Executing search for user {user_id}: {origin} -> {destination} on {date} (direct_only={direct_only})")
+
     filter_label = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
     start_date, end_date = parse_date_or_range(date)
 
@@ -361,10 +377,14 @@ async def execute_search(
         status_msg = await message.reply_text(f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** on **{date}**...", parse_mode="Markdown")
         offers = await provider.search_flights(origin=origin, destination=destination, departure_date=date, direct_only=direct_only)
 
+    elapsed_s = time.perf_counter() - t_start
+
     if not offers:
+        logger.info(f"[SEARCH] Search completed for user {user_id} in {elapsed_s:.2f}s: 0 offers found.")
         await status_msg.edit_text(f"❌ No matching flight offers found for **{origin} ✈️ {destination}** on **{date}** ({filter_label}).", parse_mode="Markdown")
         return
 
+    logger.info(f"[SEARCH] Search completed for user {user_id} in {elapsed_s:.2f}s: {len(offers)} offers found.")
     offers.sort(key=lambda x: x.price)
     top_offers = offers[:5]
     date_display = f"{start_date} ➔ {end_date}" if end_date else date

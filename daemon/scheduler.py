@@ -40,6 +40,8 @@ class TrackerDaemonScheduler:
         if tracker["destination_code"].startswith("REGION:"):
             return
 
+        logger.info(f"[TRACKER_DAEMON] Polling background tracker #{tracker_id} for user {tracker['user_id']}: {tracker['origin_code']} -> {tracker['destination_code']}")
+
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         end_date = tracker.get("departure_date_end") or tracker["departure_date"]
         if end_date < today_str:
@@ -206,8 +208,8 @@ def register_active_trackers(application):
         asyncio.run(_do_register())
 
 def calculate_next_digest_delay(schedule_str: str = "Sunday@15:00") -> float:
-    """Calculate the number of seconds from now until the next occurrence of the requested weekday and time."""
-    from datetime import datetime, timedelta, timezone
+    """Calculate the number of seconds from now until the next occurrence of the requested weekday and time (in local time)."""
+    from datetime import datetime, timedelta
     weekdays = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6}
 
     target_day = "sunday"
@@ -215,7 +217,7 @@ def calculate_next_digest_delay(schedule_str: str = "Sunday@15:00") -> float:
     target_minute = 0
 
     if "|" in schedule_str:
-        schedule_str = schedule_str.split("|", 1)[1]
+        schedule_str = schedule_str.split("|")[-1]
 
     if "@" in schedule_str:
         day_part, time_part = schedule_str.split("@", 1)
@@ -227,7 +229,7 @@ def calculate_next_digest_delay(schedule_str: str = "Sunday@15:00") -> float:
                 target_minute = int(m_str)
 
     target_weekday = weekdays.get(target_day, 6)
-    now = datetime.now(timezone.utc)
+    now = datetime.now().astimezone()
 
     days_ahead = target_weekday - now.weekday()
     if days_ahead < 0 or (days_ahead == 0 and (now.hour > target_hour or (now.hour == target_hour and now.minute >= target_minute))):
@@ -235,9 +237,9 @@ def calculate_next_digest_delay(schedule_str: str = "Sunday@15:00") -> float:
 
     next_run = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0) + timedelta(days=days_ahead)
     delay = (next_run - now).total_seconds()
-    return max(60.0, delay)
+    return max(10.0, delay)
 
-def schedule_digest_job(job_queue, tracker_id: int, user_id: int, origin: str, region: str, budget: float, schedule_str: str = "Sunday@15:00"):
+def schedule_digest_job(job_queue, tracker_id: int, user_id: int, origin: str, region: str, budget: float, schedule_str: str = "Sunday@15:00", limit: int = 10):
     """Schedule weekly recurring digest execution for user."""
     if not job_queue:
         return
@@ -248,7 +250,8 @@ def schedule_digest_job(job_queue, tracker_id: int, user_id: int, origin: str, r
         "origin": origin,
         "region": region,
         "budget": budget,
-        "schedule_str": schedule_str
+        "schedule_str": schedule_str,
+        "limit": limit
     }
 
     interval = 7 * 24 * 3600  # 7 days
@@ -269,28 +272,88 @@ async def run_digest_weekly_job(context):
     origin = job_data.get("origin", "ATH")
     region = job_data.get("region", "europe")
     budget = job_data.get("budget")
-    schedule_str = job_data.get("schedule_str", "30d|Sunday@15:00")
+    limit = job_data.get("limit", 10)
+    schedule_str = job_data.get("schedule_str", "30d|both|Sunday@15:00")
     offset_days = 30
+    sort_mode = "both"
+
     if "|" in schedule_str:
-        tf_part = schedule_str.split("|")[0]
+        parts = schedule_str.split("|")
+        if len(parts) >= 3:
+            tf_part = parts[0]
+            sort_mode = parts[1]
+        elif len(parts) == 2:
+            tf_part = parts[0]
+            sort_mode = "both"
+        else:
+            tf_part = parts[0]
+
         if tf_part.endswith("d") and tf_part[:-1].isdigit():
             offset_days = int(tf_part[:-1])
 
     from services.explore_engine import run_explore_query
     from datetime import datetime, timedelta, timezone
     dep_date = (datetime.now(timezone.utc) + timedelta(days=offset_days)).strftime("%Y-%m-%d")
+    deals = await run_explore_query(origin, region, dep_date, max_budget=budget, sort_by=sort_mode, max_results=limit)
 
-    deals = await run_explore_query(origin, region, dep_date, max_budget=budget)
-    if not deals or not user_id:
+    if not user_id:
+        return
+
+    reg_disp = region.upper().replace("_", " ")
+
+    has_deals = False
+    if isinstance(deals, dict):
+        has_deals = bool(deals.get("discount_deals") or deals.get("cheapest_deals"))
+    elif isinstance(deals, list):
+        has_deals = bool(deals)
+
+    if not has_deals:
+        bud_str = f"€{budget:.2f}" if (budget and budget > 0) else "Any Budget"
+        no_deals_msg = (
+            f"🗞️ **Weekly Flight Digest for {origin} → {reg_disp}**\n\n"
+            f"ℹ️ **No flight deals found** matching your criteria (Target Budget: {bud_str}).\n"
+            f"💡 *Tip: You can edit your budget threshold anytime in `/mytracks`!*"
+        )
+        try:
+            await context.bot.send_message(chat_id=user_id, text=no_deals_msg, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Failed to send empty digest notice to user {user_id}: {e}")
         return
 
     msg_lines = [f"🗞️ **Weekly Flight Digest for {origin} → {region.upper()}**\n"]
-    for idx, d in enumerate(deals[:5], start=1):
-        disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)" if d.get("discount_pct", 0) > 15 else ""
-        msg_lines.append(
-            f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-            f"💶 **€{d['price']:.2f}**{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
-        )
+    if isinstance(deals, dict):
+        discount_deals = deals.get("discount_deals", [])
+        cheapest_deals = deals.get("cheapest_deals", [])
+
+        idx_cnt = 1
+        if discount_deals:
+            msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
+            for d in discount_deals[:limit]:
+                disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)" if d.get("discount_pct", 0) > 15 else ""
+                stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
+                msg_lines.append(
+                    f"{idx_cnt}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
+                    f"💶 **€{d['price']:.2f}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+                )
+                idx_cnt += 1
+
+        if cheapest_deals:
+            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
+            for d in cheapest_deals[:limit]:
+                stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
+                msg_lines.append(
+                    f"{idx_cnt}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
+                    f"💶 **€{d['price']:.2f}** | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+                )
+                idx_cnt += 1
+    else:
+        for idx, d in enumerate(deals[:limit], start=1):
+            disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)" if d.get("discount_pct", 0) > 15 else ""
+            stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
+            msg_lines.append(
+                f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
+                f"💶 **€{d['price']:.2f}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+            )
 
     try:
         await context.bot.send_message(chat_id=user_id, text="\n".join(msg_lines), parse_mode="Markdown")

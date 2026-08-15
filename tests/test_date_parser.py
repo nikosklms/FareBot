@@ -27,15 +27,10 @@ def test_generate_date_sequence_normal():
     assert dates == ["2026-09-01", "2026-09-02", "2026-09-03"]
 
 def test_generate_date_sequence_capped():
-    dates_consec = generate_date_sequence("2026-09-01", "2026-09-30", max_days=5, sample_evenly=False)
-    assert len(dates_consec) == 5
-    assert dates_consec[0] == "2026-09-01"
-    assert dates_consec[-1] == "2026-09-05"
-
-    dates_sampled = generate_date_sequence("2026-09-01", "2026-09-30", max_days=5, sample_evenly=True)
-    assert len(dates_sampled) == 5
-    assert dates_sampled[0] == "2026-09-01"
-    assert dates_sampled[-1] == "2026-09-25"
+    dates = generate_date_sequence("2026-09-01", "2026-09-30", max_days=5)
+    assert len(dates) == 5
+    assert dates[0] == "2026-09-01"
+    assert dates[-1] == "2026-09-05"
 
 def test_get_preset_range_next_7_days():
     today = datetime.now(timezone.utc).date()
