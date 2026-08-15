@@ -6,11 +6,13 @@ from bot.handlers.explore import (
     handle_explore_origin_input,
     select_explore_origin_callback,
     select_explore_region_callback,
+    select_explore_sort_callback,
     select_explore_timeframe_callback,
     select_explore_budget_callback,
     select_explore_limit_callback,
     EXPLORE_ORIGIN,
     EXPLORE_REGION,
+    EXPLORE_SORT,
     EXPLORE_TIMEFRAME,
     EXPLORE_BUDGET,
     EXPLORE_LIMIT
@@ -69,7 +71,7 @@ async def test_explore_wizard_step_by_step_flow():
         assert state2 == EXPLORE_REGION
         assert context.user_data["explore_origin"] == "ATH"
 
-    # Select Region Europe -> prompts Timeframe selection
+    # Select Region Europe -> prompts Sort mode selection
     query3 = MagicMock()
     query3.data = "expl_reg_europe"
     query3.answer = AsyncMock()
@@ -80,8 +82,23 @@ async def test_explore_wizard_step_by_step_flow():
 
     with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
         state3 = await select_explore_region_callback(update3, context)
-        assert state3 == EXPLORE_TIMEFRAME
+        assert state3 == EXPLORE_SORT
         assert context.user_data["explore_region"] == "europe"
+
+    # Select Sort Mode 'both' -> prompts Timeframe selection
+    from bot.handlers.explore import select_explore_sort_callback
+    query_sort = MagicMock()
+    query_sort.data = "expl_sort_both"
+    query_sort.answer = AsyncMock()
+    query_sort.message.edit_text = AsyncMock()
+    update_sort = MagicMock()
+    update_sort.effective_user.id = 123
+    update_sort.callback_query = query_sort
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        state_sort = await select_explore_sort_callback(update_sort, context)
+        assert state_sort == EXPLORE_TIMEFRAME
+        assert context.user_data["explore_sort"] == "both"
 
     # Select Timeframe 30d -> prompts Budget selection
     query4 = MagicMock()

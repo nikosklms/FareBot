@@ -17,12 +17,12 @@ from .track import (
 from .dashboard import mytracks_command, dashboard_callback_handler, handle_edit_budget_input
 from .explore import (
     start_explore_wizard, handle_explore_origin_input, select_explore_origin_callback,
-    select_explore_region_callback, handle_explore_timeframe_input, select_explore_timeframe_callback,
+    select_explore_region_callback, select_explore_sort_callback, handle_explore_timeframe_input, select_explore_timeframe_callback,
     open_calendar_explore_callback, explore_calendar_nav_callback, explore_calendar_mode_callback,
     explore_calendar_ignore_callback, handle_explore_calendar_date_selection,
     handle_explore_budget_input, select_explore_budget_callback, handle_explore_limit_input,
     select_explore_limit_callback, track_deal_callback,
-    EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_TIMEFRAME, EXPLORE_BUDGET, EXPLORE_LIMIT
+    EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_SORT, EXPLORE_TIMEFRAME, EXPLORE_BUDGET, EXPLORE_LIMIT
 )
 from .digest import (
     start_digest_wizard, handle_digest_origin_input, select_digest_origin_callback,
@@ -45,10 +45,10 @@ __all__ = [
     "ORIGIN", "DESTINATION", "DEPARTURE_DATE", "FLIGHT_TYPE", "BUDGET", "FREQUENCY",
     "mytracks_command", "dashboard_callback_handler", "handle_edit_budget_input",
     "start_explore_wizard", "handle_explore_origin_input", "select_explore_origin_callback",
-    "select_explore_region_callback", "handle_explore_timeframe_input", "select_explore_timeframe_callback",
+    "select_explore_region_callback", "select_explore_sort_callback", "handle_explore_timeframe_input", "select_explore_timeframe_callback",
     "handle_explore_budget_input", "select_explore_budget_callback", "handle_explore_limit_input",
     "select_explore_limit_callback", "track_deal_callback",
-    "EXPLORE_ORIGIN", "EXPLORE_REGION", "EXPLORE_TIMEFRAME", "EXPLORE_BUDGET", "EXPLORE_LIMIT",
+    "EXPLORE_ORIGIN", "EXPLORE_REGION", "EXPLORE_SORT", "EXPLORE_TIMEFRAME", "EXPLORE_BUDGET", "EXPLORE_LIMIT",
     "start_digest_wizard", "handle_digest_origin_input", "select_digest_origin_callback",
     "select_digest_region_callback", "handle_digest_budget_input", "select_digest_budget_callback",
     "handle_digest_timeframe_input", "select_digest_timeframe_callback", "select_digest_day_callback",

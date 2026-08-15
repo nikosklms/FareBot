@@ -45,6 +45,7 @@ from bot.handlers import (
     handle_explore_origin_input,
     select_explore_origin_callback,
     select_explore_region_callback,
+    select_explore_sort_callback,
     handle_explore_timeframe_input,
     select_explore_timeframe_callback,
     open_calendar_explore_callback,
@@ -58,6 +59,7 @@ from bot.handlers import (
     select_explore_limit_callback,
     EXPLORE_ORIGIN,
     EXPLORE_REGION,
+    EXPLORE_SORT,
     EXPLORE_TIMEFRAME,
     EXPLORE_BUDGET,
     EXPLORE_LIMIT,
@@ -248,6 +250,9 @@ def main():
             ],
             EXPLORE_REGION: [
                 CallbackQueryHandler(select_explore_region_callback, pattern="^expl_reg_")
+            ],
+            EXPLORE_SORT: [
+                CallbackQueryHandler(select_explore_sort_callback, pattern="^expl_sort_")
             ],
             EXPLORE_TIMEFRAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_timeframe_input),

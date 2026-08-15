@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 db_manager = DatabaseManager(DB_PATH)
 resolver = LocationResolver()
 
-EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_TIMEFRAME, EXPLORE_BUDGET, EXPLORE_LIMIT = range(5)
+EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_SORT, EXPLORE_TIMEFRAME, EXPLORE_BUDGET, EXPLORE_LIMIT = range(6)
 
 @restricted
 async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -125,15 +125,43 @@ async def select_explore_region_callback(update: Update, context: ContextTypes.D
     context.user_data["explore_region"] = region
 
     buttons = [
+        [InlineKeyboardButton("💶 Cheapest Price", callback_data="expl_sort_price"), InlineKeyboardButton("💥 Highest Discount %", callback_data="expl_sort_discount")],
+        [InlineKeyboardButton("🔀 Show Both Lists", callback_data="expl_sort_both")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+
+    await query.message.edit_text(
+        f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
+        "📊 **Step 3/6**: How would you like flight deals sorted?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    return EXPLORE_SORT
+
+@restricted
+async def select_explore_sort_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    sort_mode = query.data.replace("expl_sort_", "")
+    context.user_data["explore_sort"] = sort_mode
+
+    buttons = [
         [InlineKeyboardButton("⚡ Next Weekend (7d)", callback_data="expl_tf_7"), InlineKeyboardButton("📅 14 Days", callback_data="expl_tf_14")],
         [InlineKeyboardButton("🗓️ 30 Days (Default)", callback_data="expl_tf_30"), InlineKeyboardButton("✈️ 60 Days", callback_data="expl_tf_60")],
         [InlineKeyboardButton("🌍 90 Days", callback_data="expl_tf_90"), InlineKeyboardButton("📆 Custom Calendar", callback_data="open_cal_explore")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
 
+    sort_labels = {
+        "price": "Cheapest Price 💶",
+        "discount": "Highest Discount % 💥",
+        "both": "Show Both Lists 🔀"
+    }
+    label = sort_labels.get(sort_mode, sort_mode)
+
     await query.message.edit_text(
-        f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
-        "📅 **Step 3/5**: Select departure timeframe horizon, open the custom calendar, or type days ahead (e.g. '45'):",
+        f"✅ Sort mode set to: **{label}**\n\n"
+        "📅 **Step 4/6**: Select departure timeframe horizon, open the custom calendar, or type days ahead (e.g. '45'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -339,6 +367,7 @@ async def select_explore_limit_callback(update: Update, context: ContextTypes.DE
 async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, limit: int, is_callback: bool = False) -> int:
     origin = context.user_data.get("explore_origin", "ATH")
     region = context.user_data.get("explore_region", "europe")
+    sort_mode = context.user_data.get("explore_sort", "both")
     tf = context.user_data.get("explore_timeframe", 30)
     max_budget = context.user_data.get("explore_budget")
     custom_dep_date = context.user_data.get("explore_departure_date")
@@ -355,12 +384,30 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     else:
         await message.reply_text(status_msg, parse_mode="Markdown")
 
-    deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, max_results=limit)
+    deals = await run_explore_query(origin, region, dep_date, max_budget=max_budget, sort_by=sort_mode, max_results=limit)
     await _render_explore_deals(message, origin, region, deals)
     context.user_data.clear()
     return ConversationHandler.END
 
-async def _render_explore_deals(message, origin: str, region: str, deals: List[Dict[str, Any]]) -> None:
+def _format_deal_item(d: Dict[str, Any], idx: int) -> tuple[str, InlineKeyboardButton]:
+    disc_pct = d.get("discount_pct", 0)
+    base_price = d.get("baseline_price")
+    if disc_pct > 0 and base_price:
+        disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
+    elif disc_pct > 0:
+        disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
+    else:
+        disc_text = ""
+
+    line = (
+        f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
+        f"💶 **€{d['price']:.2f}**{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+    )
+    cb_data = f"track_deal_{d['origin_code']}_{d['destination_code']}_{d['departure_date']}_{d['price']}"
+    btn = InlineKeyboardButton(f"🔔 Track Deal #{idx} (€{d['price']:.0f})", callback_data=cb_data)
+    return line, btn
+
+async def _render_explore_deals(message, origin: str, region: str, deals: Dict[str, Any] | List[Dict[str, Any]]) -> None:
     if not deals:
         await message.reply_text("❌ No flight deals found matching your criteria.")
         return
@@ -368,14 +415,31 @@ async def _render_explore_deals(message, origin: str, region: str, deals: List[D
     msg_lines = [f"🌟 **Top Flight Deals for {origin} → {region.upper().replace('_', ' ')}**\n"]
     buttons = []
 
-    for idx, d in enumerate(deals, start=1):
-        disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)" if d.get("discount_pct", 0) > 15 else ""
-        msg_lines.append(
-            f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-            f"💶 **€{d['price']:.2f}**{disc_text} | 📅 {d['departure_date']} ({d['airline']})\n"
-        )
-        cb_data = f"track_deal_{d['origin_code']}_{d['destination_code']}_{d['departure_date']}_{d['price']}"
-        buttons.append([InlineKeyboardButton(f"🔔 Track Deal #{idx} (€{d['price']:.0f})", callback_data=cb_data)])
+    if isinstance(deals, dict):
+        discount_deals = deals.get("discount_deals", [])
+        cheapest_deals = deals.get("cheapest_deals", [])
+
+        button_idx = 1
+        if discount_deals:
+            msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
+            for d in discount_deals:
+                line, btn = _format_deal_item(d, button_idx)
+                msg_lines.append(line)
+                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
+                button_idx += 1
+
+        if cheapest_deals:
+            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
+            for d in cheapest_deals:
+                line, btn = _format_deal_item(d, button_idx)
+                msg_lines.append(line)
+                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
+                button_idx += 1
+    else:
+        for idx, d in enumerate(deals, start=1):
+            line, btn = _format_deal_item(d, idx)
+            msg_lines.append(line)
+            buttons.append([btn])
 
     await message.reply_text("\n".join(msg_lines), parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
 
