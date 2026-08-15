@@ -9,11 +9,15 @@ Searching flight prices manually across multiple dates requires checking Google 
 ## Features
 
 - Single-date and date-range flight search using Google Flights data parsed via fast-flights
+- **Regional Flight Exploration (`/explore`)**: Browse top flight deals across destinations in Europe, Greek Islands, Asia, Middle East, Americas, and Worldwide with optional target budget caps
+- **Weekly Flight Digests (`/digest`)**: Schedule automated weekly reports for regional flight deals on a chosen day and time with customizable deal sorting (`Highest Discount %`, `Cheapest Price`, or `Both`) and deal limits (up to 20)
+- **Flight Type Badges**: Real-time identification of direct flights vs connecting flights with layovers (`🟢 Direct` vs `🟡 Connecting`)
 - Automated background fare monitoring with configurable polling intervals
 - Price drop notification alerts delivered directly via Telegram messages
+- **Active Trackers & Digest Management (`/mytracks`)**: View, edit budgets, pause, or delete active trackers and weekly digests
 - Whitelisted user authentication based on Telegram user IDs
 - Embedded HTTP health check server for cloud deployments on Render or Railway
-- SQLite persistent storage for active trackers and price history
+- SQLite persistent storage for active trackers, scheduled digests, and price history
 
 ## Requirements
 
@@ -89,8 +93,10 @@ Interact with FareBot using standard Telegram chat commands and interactive inli
 | `/start` | Verify authorization and view bot status |
 | `/help` | View command syntax and usage instructions |
 | `/search` | Start flight search wizard for single dates or date ranges |
-| `/track` | Create a recurring background price tracker |
-| `/dashboard` | View active trackers, delete trackers or trigger manual price checks |
+| `/track` | Create a recurring background price tracker for a specific route and date |
+| `/explore` | Interactively search top flight deals by region (Europe, Islands, Asia, Middle East, Americas, etc.) |
+| `/digest` | Schedule a recurring weekly flight deal digest with custom day, time, sorting, and deal limits |
+| `/mytracks` | Manage active price trackers and weekly digests (edit budget, pause, or delete) |
 | `/cancel` | Cancel an ongoing wizard session |
 
 ## Testing
