@@ -33,6 +33,8 @@ from bot.handlers import (
     handle_calendar_date_selection,
     open_calendar_track_callback,
     calendar_nav_callback,
+    track_calendar_mode_callback,
+    track_calendar_ignore_callback,
     select_flight_type_callback,
     handle_budget,
     select_frequency_callback,
@@ -45,6 +47,11 @@ from bot.handlers import (
     select_explore_region_callback,
     handle_explore_timeframe_input,
     select_explore_timeframe_callback,
+    open_calendar_explore_callback,
+    explore_calendar_nav_callback,
+    explore_calendar_mode_callback,
+    explore_calendar_ignore_callback,
+    handle_explore_calendar_date_selection,
     handle_explore_budget_input,
     select_explore_budget_callback,
     handle_explore_limit_input,
@@ -84,6 +91,9 @@ from bot.handlers import (
     handle_search_date_preset_callback,
     open_calendar_search_callback,
     handle_search_calendar_date_selection,
+    search_calendar_nav_callback,
+    search_calendar_mode_callback,
+    search_calendar_ignore_callback,
     select_search_flight_type_callback,
     search_track_callback_handler,
     ORIGIN,
@@ -240,6 +250,11 @@ def main():
             ],
             EXPLORE_TIMEFRAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_explore_timeframe_input),
+                CallbackQueryHandler(open_calendar_explore_callback, pattern="^open_cal_explore$"),
+                CallbackQueryHandler(explore_calendar_nav_callback, pattern="^cal_nav_"),
+                CallbackQueryHandler(explore_calendar_mode_callback, pattern="^cal_mode_"),
+                CallbackQueryHandler(explore_calendar_ignore_callback, pattern="^cal_ignore$"),
+                CallbackQueryHandler(handle_explore_calendar_date_selection, pattern="^cal_day_"),
                 CallbackQueryHandler(select_explore_timeframe_callback, pattern="^expl_tf_")
             ],
             EXPLORE_BUDGET: [
@@ -253,7 +268,7 @@ def main():
         },
         fallbacks=[
             CommandHandler("cancel", cancel_command),
-            CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
+            CallbackQueryHandler(cancel_callback, pattern="^(cancel_wizard|cal_cancel)$")
         ],
         per_chat=True,
         per_user=True
@@ -276,14 +291,16 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_date),
                 CallbackQueryHandler(open_calendar_search_callback, pattern="^open_cal_search$"),
                 CallbackQueryHandler(handle_search_date_preset_callback, pattern="^src_datepreset_"),
-                CallbackQueryHandler(calendar_nav_callback, pattern="^cal_nav_"),
+                CallbackQueryHandler(search_calendar_nav_callback, pattern="^cal_nav_"),
+                CallbackQueryHandler(search_calendar_mode_callback, pattern="^cal_mode_"),
+                CallbackQueryHandler(search_calendar_ignore_callback, pattern="^cal_ignore$"),
                 CallbackQueryHandler(handle_search_calendar_date_selection, pattern="^cal_day_")
             ],
             SEARCH_FLIGHT_TYPE: [CallbackQueryHandler(select_search_flight_type_callback, pattern="^src_fl_type_")]
         },
         fallbacks=[
             CommandHandler("cancel", cancel_command),
-            CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
+            CallbackQueryHandler(cancel_callback, pattern="^(cancel_wizard|cal_cancel)$")
         ],
         per_chat=True,
         per_user=True
@@ -307,6 +324,8 @@ def main():
                 CallbackQueryHandler(open_calendar_track_callback, pattern="^open_cal_track$"),
                 CallbackQueryHandler(handle_date_preset_callback, pattern="^datepreset_"),
                 CallbackQueryHandler(calendar_nav_callback, pattern="^cal_nav_"),
+                CallbackQueryHandler(track_calendar_mode_callback, pattern="^cal_mode_"),
+                CallbackQueryHandler(track_calendar_ignore_callback, pattern="^cal_ignore$"),
                 CallbackQueryHandler(handle_calendar_date_selection, pattern="^cal_day_")
             ],
             FLIGHT_TYPE: [CallbackQueryHandler(select_flight_type_callback, pattern="^fl_type_")],
@@ -315,7 +334,7 @@ def main():
         },
         fallbacks=[
             CommandHandler("cancel", cancel_command),
-            CallbackQueryHandler(cancel_callback, pattern="^cancel_wizard$")
+            CallbackQueryHandler(cancel_callback, pattern="^(cancel_wizard|cal_cancel)$")
         ],
         per_chat=True,
         per_user=True

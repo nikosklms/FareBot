@@ -126,17 +126,117 @@ async def select_explore_region_callback(update: Update, context: ContextTypes.D
     buttons = [
         [InlineKeyboardButton("⚡ Next Weekend (7d)", callback_data="expl_tf_7"), InlineKeyboardButton("📅 14 Days", callback_data="expl_tf_14")],
         [InlineKeyboardButton("🗓️ 30 Days (Default)", callback_data="expl_tf_30"), InlineKeyboardButton("✈️ 60 Days", callback_data="expl_tf_60")],
-        [InlineKeyboardButton("🌍 90 Days", callback_data="expl_tf_90")],
+        [InlineKeyboardButton("🌍 90 Days", callback_data="expl_tf_90"), InlineKeyboardButton("📆 Custom Calendar", callback_data="open_cal_explore")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
 
     await query.message.edit_text(
         f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
-        "📅 **Step 3/5**: Select departure timeframe horizon (or type days ahead, e.g. '45'):",
+        "📅 **Step 3/5**: Select departure timeframe horizon, open the custom calendar, or type days ahead (e.g. '45'):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
     return EXPLORE_TIMEFRAME
+
+@restricted
+async def open_calendar_explore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    from bot.inline_calendar import create_calendar
+    now = datetime.now(timezone.utc)
+    calendar_markup = create_calendar(now.year, now.month)
+    await query.message.edit_text(
+        "📆 **Interactive Date Picker**\nSelect departure date on calendar below:",
+        reply_markup=calendar_markup,
+        parse_mode="Markdown"
+    )
+    return EXPLORE_TIMEFRAME
+
+@restricted
+async def explore_calendar_nav_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    from bot.inline_calendar import create_calendar
+    target = query.data.replace("cal_nav_", "")
+    year, month = map(int, target.split("-"))
+    mode = context.user_data.get("cal_mode", "single")
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=mode, start_date=start_date)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
+    return EXPLORE_TIMEFRAME
+
+@restricted
+async def explore_calendar_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    target_mode = query.data.replace("cal_mode_", "")
+    context.user_data["cal_mode"] = target_mode
+    if target_mode == "single":
+        context.user_data.pop("cal_start_date", None)
+
+    from bot.inline_calendar import create_calendar
+    year, month = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
+    if query.message and query.message.reply_markup:
+        for row in query.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("cal_nav_"):
+                    try:
+                        prev_year, prev_month = map(int, btn.callback_data.replace("cal_nav_", "").split("-"))
+                        if prev_month == 12:
+                            year, month = prev_year + 1, 1
+                        else:
+                            year, month = prev_year, prev_month + 1
+                        break
+                    except ValueError:
+                        pass
+            if "cal_nav_" in str(query.message.reply_markup):
+                break
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=target_mode, start_date=start_date)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
+    return EXPLORE_TIMEFRAME
+
+@restricted
+async def explore_calendar_ignore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    return EXPLORE_TIMEFRAME
+
+@restricted
+async def handle_explore_calendar_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    clicked_date = query.data.replace("cal_day_", "")
+    mode = context.user_data.get("cal_mode", "single")
+
+    if mode == "range":
+        start_date = context.user_data.get("cal_start_date")
+        if not start_date:
+            context.user_data["cal_start_date"] = clicked_date
+            dt = datetime.strptime(clicked_date, "%Y-%m-%d")
+            from bot.inline_calendar import create_calendar
+            calendar_markup = create_calendar(dt.year, dt.month, mode="range", start_date=clicked_date)
+            await query.message.edit_text(
+                f"📆 **Interactive Date Picker (Range Mode)**\nSelect **END** departure date (Start: `{clicked_date}`):",
+                reply_markup=calendar_markup,
+                parse_mode="Markdown"
+            )
+            return EXPLORE_TIMEFRAME
+        else:
+            context.user_data.pop("cal_start_date", None)
+            dep_date = start_date if start_date == clicked_date else f"{start_date}..{clicked_date}"
+            target_start = start_date
+    else:
+        dep_date = clicked_date
+        target_start = clicked_date
+
+    context.user_data["explore_departure_date"] = dep_date
+    today = datetime.now(timezone.utc).date()
+    start_dt = datetime.strptime(target_start, "%Y-%m-%d").date()
+    days_diff = max(1, (start_dt - today).days)
+    context.user_data["explore_timeframe"] = days_diff
+
+    return await _ask_explore_budget(query.message, context, is_callback=True)
 
 @restricted
 async def handle_explore_timeframe_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -242,9 +342,14 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     region = context.user_data.get("explore_region", "europe")
     tf = context.user_data.get("explore_timeframe", 30)
     max_budget = context.user_data.get("explore_budget")
+    custom_dep_date = context.user_data.get("explore_departure_date")
 
-    dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
-    status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({tf}d out)..."
+    if custom_dep_date:
+        dep_date = custom_dep_date
+    else:
+        dep_date = (datetime.now(timezone.utc) + timedelta(days=tf)).strftime("%Y-%m-%d")
+
+    status_msg = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({dep_date})..."
 
     if is_callback:
         await message.edit_text(status_msg, parse_mode="Markdown")

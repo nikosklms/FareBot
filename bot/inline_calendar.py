@@ -1,9 +1,9 @@
 import calendar
 from datetime import datetime, timezone
-from typing import Tuple
+from typing import Tuple, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-def create_calendar(year: int, month: int, mode: str = "single") -> InlineKeyboardMarkup:
+def create_calendar(year: int, month: int, mode: str = "single", start_date: Optional[str] = None) -> InlineKeyboardMarkup:
     """Create an interactive Telegram inline keyboard calendar."""
     keyboard = []
     
@@ -35,6 +35,7 @@ def create_calendar(year: int, month: int, mode: str = "single") -> InlineKeyboa
     # Month grid
     month_days = calendar.monthcalendar(year, month)
     today = datetime.now(timezone.utc).date()
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date() if (start_date and isinstance(start_date, str)) else None
     
     for week in month_days:
         row = []
@@ -45,8 +46,12 @@ def create_calendar(year: int, month: int, mode: str = "single") -> InlineKeyboa
                 date_str = f"{year:04d}-{month:02d}-{day:02d}"
                 day_date = datetime.strptime(date_str, "%Y-%m-%d").date()
                 
-                if day_date < today:
+                min_date = start_date_obj if (start_date_obj and start_date_obj > today) else today
+                
+                if day_date < min_date:
                     row.append(InlineKeyboardButton("·", callback_data="cal_ignore"))
+                elif start_date_obj and day_date == start_date_obj:
+                    row.append(InlineKeyboardButton(f"🚩{day}", callback_data=f"cal_day_{date_str}"))
                 else:
                     row.append(InlineKeyboardButton(str(day), callback_data=f"cal_day_{date_str}"))
         keyboard.append(row)

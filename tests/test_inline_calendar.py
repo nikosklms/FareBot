@@ -45,3 +45,14 @@ def test_calendar_leap_year_february():
     markup_leap = create_calendar(2028, 2)
     day_buttons = [b.callback_data for row in markup_leap.inline_keyboard for b in row if "cal_day_" in b.callback_data]
     assert "cal_day_2028-02-29" in day_buttons
+
+def test_calendar_start_date_highlighting():
+    markup = create_calendar(2026, 9, mode="range", start_date="2026-09-15")
+    button_texts = [b.text for row in markup.inline_keyboard for b in row]
+    
+    # Start date 15 should be marked with 🚩
+    assert any("🚩15" in t for t in button_texts)
+    # Days before 15 (e.g. 14) in same month should be disabled ('·')
+    dots = [b.text for row in markup.inline_keyboard for b in row if b.text == "·"]
+    assert len(dots) >= 14
+

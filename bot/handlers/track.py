@@ -208,9 +208,49 @@ async def calendar_nav_callback(update: Update, context: ContextTypes.DEFAULT_TY
     from bot.inline_calendar import create_calendar
     target = query.data.replace("cal_nav_", "")
     year, month = map(int, target.split("-"))
-    calendar_markup = create_calendar(year, month)
+    mode = context.user_data.get("cal_mode", "single")
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=mode, start_date=start_date)
     await query.message.edit_reply_markup(reply_markup=calendar_markup)
     return DEPARTURE_DATE
+
+@restricted
+async def track_calendar_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    target_mode = query.data.replace("cal_mode_", "")
+    context.user_data["cal_mode"] = target_mode
+    if target_mode == "single":
+        context.user_data.pop("cal_start_date", None)
+
+    from bot.inline_calendar import create_calendar
+    year, month = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
+    if query.message and query.message.reply_markup:
+        for row in query.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("cal_nav_"):
+                    try:
+                        prev_year, prev_month = map(int, btn.callback_data.replace("cal_nav_", "").split("-"))
+                        if prev_month == 12:
+                            year, month = prev_year + 1, 1
+                        else:
+                            year, month = prev_year, prev_month + 1
+                        break
+                    except ValueError:
+                        pass
+            if "cal_nav_" in str(query.message.reply_markup):
+                break
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=target_mode, start_date=start_date)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
+    return DEPARTURE_DATE
+
+@restricted
+async def track_calendar_ignore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    return DEPARTURE_DATE
+
 
 @restricted
 async def handle_date_preset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -354,12 +394,39 @@ async def select_frequency_callback(update: Update, context: ContextTypes.DEFAUL
 async def handle_calendar_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    data = query.data
+    clicked_date = query.data.replace("cal_day_", "")
+    mode = context.user_data.get("cal_mode", "single")
+
+    if mode == "range":
+        start_date = context.user_data.get("cal_start_date")
+        if not start_date:
+            # 1st click: Set start date
+            context.user_data["cal_start_date"] = clicked_date
+            dt = datetime.strptime(clicked_date, "%Y-%m-%d")
+            from bot.inline_calendar import create_calendar
+            calendar_markup = create_calendar(dt.year, dt.month, mode="range", start_date=clicked_date)
+            await query.message.edit_text(
+                f"📆 **Interactive Date Picker (Range Mode)**\nSelect **END** departure date (Start: `{clicked_date}`):",
+                reply_markup=calendar_markup,
+                parse_mode="Markdown"
+            )
+            return DEPARTURE_DATE
+        else:
+            # 2nd click: End date selected
+            context.user_data.pop("cal_start_date", None)
+            if start_date == clicked_date:
+                dep_date = start_date
+                dep_end = None
+            else:
+                dep_date = start_date
+                dep_end = clicked_date
+    else:
+        dep_date = clicked_date
+        dep_end = None
 
     user_id = update.effective_user.id
     origin = context.user_data.get("track_origin") or context.user_data.get("origin_code")
     destination = context.user_data.get("track_destination") or context.user_data.get("destination_code")
-    dep_date = data.replace("cal_day_", "")
 
     if await db_manager.has_active_tracker(user_id, origin, destination, dep_date):
         buttons = [
@@ -375,13 +442,16 @@ async def handle_calendar_date_selection(update: Update, context: ContextTypes.D
         return DEPARTURE_DATE
 
     context.user_data["departure_date"] = dep_date
+    context.user_data["departure_date_end"] = dep_end
+
+    date_display = f"{dep_date} ➔ {dep_end}" if dep_end else dep_date
     buttons = [
         [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="fl_type_1")],
         [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="fl_type_0")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
-    await query.message.reply_text(
-        f"📅 **Date**: {dep_date}\n\n"
+    await query.message.edit_text(
+        f"📅 **Date**: {date_display}\n\n"
         "✈️ **Step 4/6**: Select your flight type preference:",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown"
