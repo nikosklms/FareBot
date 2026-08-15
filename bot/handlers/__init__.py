@@ -4,8 +4,8 @@ from .search import (
     handle_search_destination, select_search_destination_callback, handle_search_date, handle_search_date_preset_callback,
     open_calendar_search_callback, handle_search_calendar_date_selection,
     search_calendar_nav_callback, search_calendar_mode_callback, search_calendar_ignore_callback,
-    select_search_flight_type_callback, execute_search, search_track_callback_handler,
-    SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE
+    select_search_flight_type_callback, select_search_sort_callback, execute_search, search_track_callback_handler,
+    SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE, SEARCH_SORT
 )
 from .track import (
     start_newtrack, handle_origin_input, select_origin_callback,
@@ -37,8 +37,8 @@ __all__ = [
     "start_command", "help_command", "cancel_command", "cancel_callback",
     "search_command", "handle_search_origin", "select_search_origin_callback",
     "handle_search_destination", "select_search_destination_callback", "handle_search_date", "handle_search_date_preset_callback",
-    "select_search_flight_type_callback", "execute_search", "search_track_callback_handler",
-    "SEARCH_ORIGIN", "SEARCH_DESTINATION", "SEARCH_DATE", "SEARCH_FLIGHT_TYPE",
+    "select_search_flight_type_callback", "select_search_sort_callback", "execute_search", "search_track_callback_handler",
+    "SEARCH_ORIGIN", "SEARCH_DESTINATION", "SEARCH_DATE", "SEARCH_FLIGHT_TYPE", "SEARCH_SORT",
     "start_newtrack", "handle_origin_input", "select_origin_callback",
     "handle_destination_input", "select_destination_callback", "handle_departure_date", "handle_date_preset_callback",
     "select_flight_type_callback", "handle_budget", "select_frequency_callback", "handle_calendar_date_selection",

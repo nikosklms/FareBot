@@ -86,16 +86,27 @@ async def test_search_wizard_flight_type_step():
 
 
     # Test callback selection
+    from bot.handlers.search import SEARCH_SORT, select_search_sort_callback
     query = MagicMock()
     query.data = "src_fl_type_1"
     query.answer = AsyncMock()
+    query.message.edit_text = AsyncMock()
     update.callback_query = query
 
+    next_state = await select_search_flight_type_callback(update, context)
+    assert next_state == SEARCH_SORT
+    assert context.user_data["search_direct_only"] is True
+
+    query_sort = MagicMock()
+    query_sort.data = "src_sort_both"
+    query_sort.answer = AsyncMock()
+    update.callback_query = query_sort
+
     with patch("bot.handlers.search.execute_search", new=AsyncMock()) as mock_exec:
-        next_state = await select_search_flight_type_callback(update, context)
-        assert next_state == -1  # ConversationHandler.END
+        end_state = await select_search_sort_callback(update, context)
+        assert end_state == -1  # ConversationHandler.END
         mock_exec.assert_called_once_with(
-            update, "ATH", "LON", "2028-12-01", direct_only=True
+            update, "ATH", "LON", "2028-12-01", direct_only=True, sort_by="both"
         )
 
 @pytest.mark.asyncio

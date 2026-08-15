@@ -97,6 +97,7 @@ from bot.handlers import (
     search_calendar_mode_callback,
     search_calendar_ignore_callback,
     select_search_flight_type_callback,
+    select_search_sort_callback,
     search_track_callback_handler,
     ORIGIN,
     DESTINATION,
@@ -107,7 +108,8 @@ from bot.handlers import (
     SEARCH_ORIGIN,
     SEARCH_DESTINATION,
     SEARCH_DATE,
-    SEARCH_FLIGHT_TYPE
+    SEARCH_FLIGHT_TYPE,
+    SEARCH_SORT
 )
 from daemon import register_active_trackers, run_daily_cleanup_job
 
@@ -303,7 +305,8 @@ def main():
                 CallbackQueryHandler(search_calendar_ignore_callback, pattern="^cal_ignore$"),
                 CallbackQueryHandler(handle_search_calendar_date_selection, pattern="^cal_day_")
             ],
-            SEARCH_FLIGHT_TYPE: [CallbackQueryHandler(select_search_flight_type_callback, pattern="^src_fl_type_")]
+            SEARCH_FLIGHT_TYPE: [CallbackQueryHandler(select_search_flight_type_callback, pattern="^src_fl_type_")],
+            SEARCH_SORT: [CallbackQueryHandler(select_search_sort_callback, pattern="^src_sort_")]
         },
         fallbacks=[
             CommandHandler("cancel", cancel_command),
