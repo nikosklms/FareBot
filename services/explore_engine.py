@@ -127,7 +127,7 @@ async def run_explore_query(
 
     # Sorting and capping
     if sort_by == "both":
-        deals_discount = list(all_deals)
+        deals_discount = [d for d in all_deals if d["discount_pct"] < 0]
         deals_discount.sort(key=lambda x: (x["discount_pct"], x["price"]))
         capped_discount = _filter_and_cap_deals(deals_discount, max_results)
 

@@ -18,6 +18,27 @@ async def test_run_explore_query_invalid_region_returns_empty():
     assert deals == []
 
 @pytest.mark.asyncio
+async def test_explore_engine_filters_only_negative_discounts():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "FCO":
+                return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
+            elif dst == "ZAG":
+                return [AsyncMock(price=60.0, airline="Croatia Airlines", typical_min=25.0, typical_max=35.0, country="Croatia")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        res = await run_explore_query("ATH", "europe", "2026-09-15", sort_by="both")
+        assert "discount_deals" in res
+        discount_codes = [d["destination_code"] for d in res["discount_deals"]]
+        assert "FCO" in discount_codes
+        assert "ZAG" not in discount_codes
+
+@pytest.mark.asyncio
 async def test_run_explore_query_excludes_origin_country():
     with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
         provider = AsyncMock()

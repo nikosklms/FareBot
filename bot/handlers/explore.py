@@ -345,18 +345,16 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     context.user_data.clear()
     return ConversationHandler.END
 
-def _format_deal_item(d: Dict[str, Any], idx: int) -> tuple[str, InlineKeyboardButton]:
+def _format_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True) -> tuple[str, InlineKeyboardButton]:
     from providers.fast_flights import build_google_flights_url
 
     disc_pct = d.get("discount_pct", 0.0)
     base_price = d.get("baseline_price")
 
-    if base_price and disc_pct < 0:
+    if base_price and disc_pct < 0 and show_percentage:
         disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-    elif base_price and disc_pct > 0:
-        disc_text = f" (📈 **+{disc_pct:.0f}% EXPENSIVE** | Avg: ~€{base_price:.2f})"
     elif base_price:
-        disc_text = f" (📊 Avg: ~€{base_price:.2f})"
+        disc_text = f" (Avg: ~€{base_price:.2f})"
     else:
         disc_text = ""
 
@@ -387,7 +385,7 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
         if discount_deals:
             msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
             for d in discount_deals:
-                line, btn = _format_deal_item(d, button_idx)
+                line, btn = _format_deal_item(d, button_idx, show_percentage=True)
                 msg_lines.append(line)
                 buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
                 button_idx += 1
@@ -395,7 +393,7 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
         if cheapest_deals:
             msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
             for d in cheapest_deals:
-                line, btn = _format_deal_item(d, button_idx)
+                line, btn = _format_deal_item(d, button_idx, show_percentage=False)
                 msg_lines.append(line)
                 buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
                 button_idx += 1
