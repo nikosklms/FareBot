@@ -11,7 +11,10 @@ def calculate_discount_score(
     baseline_min: Optional[float] = None,
     baseline_max: Optional[float] = None
 ) -> float:
-    """Calculate discount percentage relative to Google Flights typical price baseline."""
+    """Calculate percentage price variation relative to Google Flights typical price baseline.
+    Negative values indicate discounts (-28.0 = 28% below average).
+    Positive values indicate expensive flights (+30.0 = 30% above average).
+    """
     if baseline_min is not None and baseline_max is not None and (baseline_min + baseline_max) > 0:
         baseline = (baseline_min + baseline_max) / 2.0
     elif baseline_min is not None and baseline_min > 0:
@@ -21,11 +24,8 @@ def calculate_discount_score(
     else:
         return 0.0
 
-    if current_price >= baseline:
-        return 0.0
-
-    discount = ((baseline - current_price) / baseline) * 100.0
-    return round(discount, 2)
+    pct_diff = ((current_price - baseline) / baseline) * 100.0
+    return round(pct_diff, 1)
 
 def _filter_and_cap_deals(all_deals: List[Dict[str, Any]], max_results: int) -> List[Dict[str, Any]]:
     seen_destinations = set()
@@ -128,7 +128,7 @@ async def run_explore_query(
     # Sorting and capping
     if sort_by == "both":
         deals_discount = list(all_deals)
-        deals_discount.sort(key=lambda x: (-x["discount_pct"], x["price"]))
+        deals_discount.sort(key=lambda x: (x["discount_pct"], x["price"]))
         capped_discount = _filter_and_cap_deals(deals_discount, max_results)
 
         deals_price = list(all_deals)
@@ -143,6 +143,6 @@ async def run_explore_query(
     if sort_by == "price":
         all_deals.sort(key=lambda x: x["price"])
     else:
-        all_deals.sort(key=lambda x: (-x["discount_pct"], x["price"]))
+        all_deals.sort(key=lambda x: (x["discount_pct"], x["price"]))
 
     return _filter_and_cap_deals(all_deals, max_results)

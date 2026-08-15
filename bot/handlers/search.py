@@ -325,22 +325,24 @@ def _format_search_offer(o: Any, idx_emoji: str, has_end_date: bool) -> str:
     time_info = f" | 🕒 {dep_time} ➔ {arr_time}{offset_str}" if (dep_time and arr_time) else ""
     date_badge = f" ({o.departure_date})" if has_end_date else ""
     booking_url = getattr(o, "booking_url", None)
-    price_str = f"[**€{o.price:.2f}**]({booking_url})" if booking_url else f"**€{o.price:.2f}**"
+    price_str = f"[€{o.price:.2f}]({booking_url})" if booking_url else f"€{o.price:.2f}"
 
     typ_min = getattr(o, "typical_min", None)
     typ_max = getattr(o, "typical_max", None)
     disc_pct = calculate_discount_score(o.price, typ_min, typ_max) if (typ_min or typ_max) else 0.0
     base_price = ((typ_min + typ_max) / 2.0) if (typ_min and typ_max) else None
 
-    if disc_pct > 0 and base_price:
+    if base_price and disc_pct < 0:
         disc_badge = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-    elif disc_pct > 0:
-        disc_badge = f" (💥 **{disc_pct:.0f}% OFF!**)"
+    elif base_price and disc_pct > 0:
+        disc_badge = f" (📈 **+{disc_pct:.0f}% EXPENSIVE** | Avg: ~€{base_price:.2f})"
+    elif base_price:
+        disc_badge = f" (📊 Avg: ~€{base_price:.2f})"
     else:
         disc_badge = ""
 
     airline_name = getattr(o, "airline", None) or "Various"
-    return f"{idx_emoji} {price_str}{disc_badge}{date_badge} — {airline_name} ({stop_badge}){time_info}"
+    return f"{idx_emoji} **{price_str}**{disc_badge}{date_badge} — {airline_name} ({stop_badge}){time_info}"
 
 async def execute_search(
     update: Update, origin: str, destination: str, date: str, direct_only: bool = False
@@ -391,7 +393,7 @@ async def execute_search(
         InlineKeyboardButton(f"🔔 Track Lowest (€{lowest.price:.2f})", callback_data=f"track_{origin}_{destination}_{cb_date}_{lowest.price}_{direct_flag_val}")
     ])
 
-    await status_msg.edit_text(reply_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await status_msg.edit_text(reply_text, parse_mode="Markdown", disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(keyboard))
 
 @restricted
 async def search_track_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

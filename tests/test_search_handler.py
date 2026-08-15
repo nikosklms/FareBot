@@ -219,7 +219,7 @@ async def test_execute_search_item_booking_url_hyperlink():
         await execute_search(update, origin="SKG", destination="ORY", date="2027-04-03")
         status_msg.edit_text.assert_called_once()
         text = status_msg.edit_text.call_args[0][0]
-        assert "[**€85.00**](https://www.google.com/travel/flights?q=test)" in text
+        assert "[€85.00](https://www.google.com/travel/flights?q=test)" in text
 
 @pytest.mark.asyncio
 async def test_search_calendar_nav_mode_ignore():
