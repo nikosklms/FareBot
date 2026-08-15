@@ -198,7 +198,7 @@ _HTTP_SEMAPHORE: Optional[asyncio.Semaphore] = None
 def _get_http_semaphore() -> asyncio.Semaphore:
     global _HTTP_SEMAPHORE
     if _HTTP_SEMAPHORE is None:
-        _HTTP_SEMAPHORE = asyncio.Semaphore(3)
+        _HTTP_SEMAPHORE = asyncio.Semaphore(6)
     return _HTTP_SEMAPHORE
 
 class FastFlightsProvider(AbstractFlightProvider):
