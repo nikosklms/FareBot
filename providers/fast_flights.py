@@ -198,7 +198,7 @@ _HTTP_SEMAPHORE: Optional[asyncio.Semaphore] = None
 def _get_http_semaphore() -> asyncio.Semaphore:
     global _HTTP_SEMAPHORE
     if _HTTP_SEMAPHORE is None:
-        _HTTP_SEMAPHORE = asyncio.Semaphore(6)
+        _HTTP_SEMAPHORE = asyncio.Semaphore(2)  # Strict concurrency limit of 2 to avoid HTTP 429
     return _HTTP_SEMAPHORE
 
 class FastFlightsProvider(AbstractFlightProvider):
@@ -219,7 +219,7 @@ class FastFlightsProvider(AbstractFlightProvider):
 
         async def _fetch_for_dest(dest_code: str) -> List[FlightOffer]:
             async with sem:
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.2)
                 flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
                 if return_date:
                     flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
