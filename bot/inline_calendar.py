@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Tuple, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-def create_calendar(year: int, month: int, mode: str = "single", start_date: Optional[str] = None) -> InlineKeyboardMarkup:
+def create_calendar(year: int, month: int, mode: str = "range", start_date: Optional[str] = None) -> InlineKeyboardMarkup:
     """Create an interactive Telegram inline keyboard calendar."""
     keyboard = []
     

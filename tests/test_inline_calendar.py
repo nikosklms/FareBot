@@ -56,3 +56,10 @@ def test_calendar_start_date_highlighting():
     dots = [b.text for row in markup.inline_keyboard for b in row if b.text == "·"]
     assert len(dots) >= 14
 
+def test_calendar_default_mode_is_range():
+    markup_default = create_calendar(2026, 9)
+    button_datas = [b.callback_data for row in markup_default.inline_keyboard for b in row]
+    # Default mode should be range, so mode toggle button offers "cal_mode_single"
+    assert any("cal_mode_single" in d for d in button_datas)
+
+

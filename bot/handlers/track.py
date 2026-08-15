@@ -191,9 +191,11 @@ async def select_destination_callback(update: Update, context: ContextTypes.DEFA
 async def open_calendar_track_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    context.user_data["cal_mode"] = "range"
+    context.user_data.pop("cal_start_date", None)
     from bot.inline_calendar import create_calendar
     now = datetime.now(timezone.utc)
-    calendar_markup = create_calendar(now.year, now.month)
+    calendar_markup = create_calendar(now.year, now.month, mode="range")
     await query.message.edit_text(
         "📆 **Interactive Date Picker**\nSelect departure date on calendar below:",
         reply_markup=calendar_markup,
