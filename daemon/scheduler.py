@@ -329,7 +329,16 @@ async def run_digest_weekly_job(context):
         if discount_deals:
             msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
             for d in discount_deals[:limit]:
-                disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)" if d.get("discount_pct", 0) > 15 else ""
+                base_price = d.get("baseline_price")
+                disc_pct = d.get("discount_pct", 0)
+                if base_price and disc_pct > 15:
+                    disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
+                elif base_price:
+                    disc_text = f" (Avg: ~€{base_price:.2f})"
+                elif disc_pct > 15:
+                    disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
+                else:
+                    disc_text = ""
                 stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
                 msg_lines.append(
                     f"{idx_cnt}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
@@ -340,15 +349,26 @@ async def run_digest_weekly_job(context):
         if cheapest_deals:
             msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
             for d in cheapest_deals[:limit]:
+                base_price = d.get("baseline_price")
+                disc_text = f" (Avg: ~€{base_price:.2f})" if base_price else ""
                 stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
                 msg_lines.append(
                     f"{idx_cnt}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-                    f"💶 **€{d['price']:.2f}** | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+                    f"💶 **€{d['price']:.2f}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
                 )
                 idx_cnt += 1
     else:
         for idx, d in enumerate(deals[:limit], start=1):
-            disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)" if d.get("discount_pct", 0) > 15 else ""
+            base_price = d.get("baseline_price")
+            disc_pct = d.get("discount_pct", 0)
+            if base_price and disc_pct > 15:
+                disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
+            elif base_price:
+                disc_text = f" (Avg: ~€{base_price:.2f})"
+            elif disc_pct > 15:
+                disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
+            else:
+                disc_text = ""
             stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
             msg_lines.append(
                 f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"

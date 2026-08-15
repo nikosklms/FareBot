@@ -367,9 +367,16 @@ def _format_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True)
     from providers.fast_flights import build_google_flights_url
 
     disc_pct = d.get("discount_pct", 0.0)
-    disc_text = ""
-    if show_percentage and d.get("discount_pct", 0) > 15:
-        disc_text = f" (💥 {d['discount_pct']:.0f}% OFF!)"
+    base_price = d.get("baseline_price")
+
+    if show_percentage and base_price and disc_pct > 15:
+        disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
+    elif base_price:
+        disc_text = f" (Avg: ~€{base_price:.2f})"
+    elif show_percentage and disc_pct > 15:
+        disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
+    else:
+        disc_text = ""
 
     flights_url = build_google_flights_url(d["origin_code"], d["destination_code"], d["departure_date"])
     price_str = f"[€{d['price']:.2f}]({flights_url})"
