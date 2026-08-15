@@ -380,21 +380,20 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
     raw_btns = []
 
     if isinstance(deals, dict):
-        raw_discount_deals = deals.get("discount_deals", [])
-        valid_discount_deals = [d for d in raw_discount_deals if d.get("discount_pct", 0.0) > 0]
+        discount_deals = deals.get("discount_deals", [])
         cheapest_deals = deals.get("cheapest_deals", [])
 
         button_idx = 1
-        if valid_discount_deals:
+        if discount_deals:
             msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
-            for d in valid_discount_deals:
+            for d in discount_deals:
                 line, btn = _format_deal_item(d, button_idx, show_percentage=True)
                 msg_lines.append(line)
                 raw_btns.append(InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data))
                 button_idx += 1
 
         if cheapest_deals:
-            header_prefix = "\n" if valid_discount_deals else ""
+            header_prefix = "\n" if discount_deals else ""
             msg_lines.append(f"{header_prefix}💶 **CHEAPEST OVERALL FLIGHTS (€)**")
             for d in cheapest_deals:
                 line, btn = _format_deal_item(d, button_idx, show_percentage=False)
