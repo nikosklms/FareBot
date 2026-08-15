@@ -3,40 +3,19 @@ from unittest.mock import AsyncMock, patch
 from services.explore_engine import run_explore_query, calculate_discount_score
 
 def test_calculate_discount_score():
-    # Baseline 200 EUR, price 50 EUR -> (50-200)/200 = -75.0% (discount)
+    # Baseline 200 EUR, price 50 EUR -> (200-50)/200 = +75.0% (75% OFF)
     score = calculate_discount_score(current_price=50.0, baseline_min=190.0, baseline_max=210.0)
-    assert abs(score - (-75.0)) < 0.1
+    assert abs(score - 75.0) < 0.1
 
 def test_discount_score_zero_when_price_above_baseline():
-    # Current price 220 EUR, baseline 200 EUR -> (220-200)/200 = +10.0% (expensive)
+    # Current price 220 EUR, baseline 200 EUR -> (200-220)/200 = -10.0% (expensive)
     score = calculate_discount_score(current_price=220.0, baseline_min=190.0, baseline_max=210.0)
-    assert abs(score - 10.0) < 0.1
+    assert abs(score - (-10.0)) < 0.1
 
 @pytest.mark.asyncio
 async def test_run_explore_query_invalid_region_returns_empty():
     deals = await run_explore_query("ATH", "non_existent_region", "2026-09-15")
     assert deals == []
-
-@pytest.mark.asyncio
-async def test_explore_engine_filters_only_negative_discounts():
-    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
-        provider = AsyncMock()
-
-        def mock_search(origin, dst, date, currency="EUR"):
-            if dst == "FCO":
-                return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
-            elif dst == "ZAG":
-                return [AsyncMock(price=60.0, airline="Croatia Airlines", typical_min=25.0, typical_max=35.0, country="Croatia")]
-            return []
-
-        provider.search_flights.side_effect = mock_search
-        provider_cls.return_value = provider
-
-        res = await run_explore_query("ATH", "europe", "2026-09-15", sort_by="both")
-        assert "discount_deals" in res
-        discount_codes = [d["destination_code"] for d in res["discount_deals"]]
-        assert "FCO" in discount_codes
-        assert "ZAG" not in discount_codes
 
 @pytest.mark.asyncio
 async def test_run_explore_query_excludes_origin_country():

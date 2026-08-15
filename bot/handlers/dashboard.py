@@ -28,26 +28,31 @@ async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         budget_disp = f"€{t['max_budget']:.2f}" if t.get("max_budget", 0) > 0 else "Any Budget"
 
         if is_digest:
-            schedule_raw = t.get("departure_date", "")
-            horizon_str = ""
-            if "|" in schedule_raw:
-                tf_part = schedule_raw.split("|")[0]
-                if tf_part.endswith("d") and tf_part[:-1].isdigit():
-                    horizon_str = f" ({tf_part[:-1]} Days Horizon)"
+            sched_raw = t.get("departure_date", "")
+            if "|" in sched_raw:
+                tf_part, day_part = sched_raw.split("|", 1)
+                days_ahead = tf_part.replace("d", "") if tf_part.endswith("d") else tf_part
+                freq_text = f"Every Week ({day_part}) — Horizon: {days_ahead} Days Ahead"
+            elif "@" in sched_raw:
+                freq_text = f"Every Week ({sched_raw})"
+            elif sched_raw and not sched_raw.startswith("202"):
+                freq_text = f"Every Week ({sched_raw})"
+            else:
+                freq_text = "Every Week (Sunday)"
+
             text = (
                 f"{header_text}\n"
                 f"📍 **Route**: {route_text}\n"
-                f"📅 **Frequency**: Every Week (Sunday){horizon_str}\n"
+                f"📅 **Frequency**: {freq_text}\n"
                 f"🎯 **Target Budget**: {budget_disp}\n"
                 f"📊 **Status**: {t['status']}"
             )
         else:
-            dep_end = t.get("departure_date_end")
-            date_str = f"{t['departure_date']} ➔ {dep_end}" if dep_end else t["departure_date"]
+            date_disp = f"{t['departure_date']} ➔ {t['departure_date_end']}" if t.get("departure_date_end") else t['departure_date']
             text = (
                 f"{header_text}\n"
                 f"📍 **Route**: {route_text}\n"
-                f"📅 **Date**: {date_str}\n"
+                f"📅 **Date**: {date_disp}\n"
                 f"⚙️ **Flight Type**: {flight_type_text}\n"
                 f"🎯 **Target Budget**: {budget_disp}\n"
                 f"📊 **Status**: {t['status']}\n"

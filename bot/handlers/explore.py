@@ -351,8 +351,10 @@ def _format_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True)
     disc_pct = d.get("discount_pct", 0.0)
     base_price = d.get("baseline_price")
 
-    if base_price and disc_pct < 0 and show_percentage:
+    if show_percentage and base_price and disc_pct > 0:
         disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
+    elif show_percentage and base_price and disc_pct < 0:
+        disc_text = f" (📈 **{disc_pct:.0f}% EXPENSIVE** | Avg: ~€{base_price:.2f})"
     elif base_price:
         disc_text = f" (Avg: ~€{base_price:.2f})"
     else:
@@ -399,7 +401,7 @@ async def _render_explore_deals(message, origin: str, region: str, deals: Dict[s
                 button_idx += 1
     else:
         for idx, d in enumerate(deals, start=1):
-            line, btn = _format_deal_item(d, idx)
+            line, btn = _format_deal_item(d, idx, show_percentage=False)
             msg_lines.append(line)
             buttons.append([btn])
 
