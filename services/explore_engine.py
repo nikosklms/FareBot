@@ -117,12 +117,13 @@ async def run_explore_query(
 
                 baseline_price = ((typ_min + typ_max) / 2.0) if (typ_min and typ_max) else None
 
+                flight_date = getattr(offer, "departure_date", None) or departure_date
                 results.append({
                     "origin_code": origin,
                     "destination_code": dst_code,
                     "destination_name": dst_name,
                     "country": country,
-                    "departure_date": departure_date,
+                    "departure_date": flight_date,
                     "price": price,
                     "airline": airline,
                     "baseline_price": baseline_price,
