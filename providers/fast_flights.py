@@ -193,7 +193,7 @@ def parse_google_flights_payload_generic(
             valid_legs = [l for l in legs if isinstance(l, list)] if isinstance(legs, list) else []
             orig_val = valid_legs[0][3] if valid_legs and len(valid_legs[0]) > 3 else None
             dest_val = valid_legs[-1][6] if valid_legs and len(valid_legs[-1]) > 6 else None
-            is_direct_flight = (len(valid_legs) == 1) if valid_legs else True
+            is_direct_flight = (len(valid_legs) == 1) if valid_legs else (True if direct_only else False)
 
             def _fmt_t(t_list):
                 if isinstance(t_list, list) and len(t_list) >= 2 and isinstance(t_list[0], int) and isinstance(t_list[1], int):
