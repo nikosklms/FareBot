@@ -69,6 +69,11 @@ from bot.handlers import (
     select_digest_budget_callback,
     handle_digest_timeframe_input,
     select_digest_timeframe_callback,
+    open_calendar_digest_callback,
+    digest_calendar_nav_callback,
+    digest_calendar_mode_callback,
+    digest_calendar_ignore_callback,
+    handle_digest_calendar_date_selection,
     select_digest_day_callback,
     handle_digest_time_input,
     select_digest_time_callback,
@@ -218,6 +223,11 @@ def main():
             ],
             DIGEST_TIMEFRAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_digest_timeframe_input),
+                CallbackQueryHandler(open_calendar_digest_callback, pattern="^open_cal_digest$"),
+                CallbackQueryHandler(digest_calendar_nav_callback, pattern="^cal_nav_"),
+                CallbackQueryHandler(digest_calendar_mode_callback, pattern="^cal_mode_"),
+                CallbackQueryHandler(digest_calendar_ignore_callback, pattern="^cal_ignore$"),
+                CallbackQueryHandler(handle_digest_calendar_date_selection, pattern="^cal_day_"),
                 CallbackQueryHandler(select_digest_timeframe_callback, pattern="^dig_tf_")
             ],
             DIGEST_DAY: [

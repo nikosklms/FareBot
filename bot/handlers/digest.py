@@ -222,6 +222,8 @@ async def select_digest_budget_callback(update: Update, context: ContextTypes.DE
     context.user_data["digest_budget"] = val if val > 0 else None
     return await _ask_digest_timeframe(query.message, context, is_callback=True)
 
+from bot.inline_calendar import create_calendar
+
 async def _ask_digest_timeframe(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:
     budget = context.user_data.get("digest_budget")
     bud_str = f"€{budget:.2f}" if budget else "Any Budget"
@@ -229,6 +231,7 @@ async def _ask_digest_timeframe(message, context: ContextTypes.DEFAULT_TYPE, is_
     buttons = [
         [InlineKeyboardButton("📅 14 Days", callback_data="dig_tf_14"), InlineKeyboardButton("🗓️ 30 Days (Default)", callback_data="dig_tf_30")],
         [InlineKeyboardButton("✈️ 60 Days", callback_data="dig_tf_60"), InlineKeyboardButton("🌍 90 Days", callback_data="dig_tf_90")],
+        [InlineKeyboardButton("📆 Custom Date / Range", callback_data="open_cal_digest")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
 
@@ -260,6 +263,85 @@ async def select_digest_timeframe_callback(update: Update, context: ContextTypes
     await query.answer()
     days = int(query.data.split("_")[2])
     context.user_data["digest_timeframe"] = days
+    return await _ask_digest_day(query.message, context, is_callback=True)
+
+@restricted
+async def open_calendar_digest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["cal_mode"] = "range"
+    context.user_data.pop("cal_start_date", None)
+    now = datetime.now(timezone.utc)
+    calendar_markup = create_calendar(now.year, now.month, mode="range")
+    await query.message.edit_text(
+        "📆 **Interactive Date Picker**\nSelect target departure date or range on calendar below:",
+        reply_markup=calendar_markup,
+        parse_mode="Markdown"
+    )
+    return DIGEST_TIMEFRAME
+
+@restricted
+async def digest_calendar_nav_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    target = query.data.replace("cal_nav_", "")
+    year, month = map(int, target.split("-"))
+    mode = context.user_data.get("cal_mode", "range")
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=mode, start_date=start_date)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
+    return DIGEST_TIMEFRAME
+
+@restricted
+async def digest_calendar_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    target_mode = query.data.replace("cal_mode_", "")
+    context.user_data["cal_mode"] = target_mode
+    if target_mode == "single":
+        context.user_data.pop("cal_start_date", None)
+
+    year, month = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=target_mode, start_date=start_date)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
+    return DIGEST_TIMEFRAME
+
+@restricted
+async def digest_calendar_ignore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    return DIGEST_TIMEFRAME
+
+@restricted
+async def handle_digest_calendar_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    clicked_date = query.data.replace("cal_day_", "")
+    mode = context.user_data.get("cal_mode", "range")
+
+    if mode == "range":
+        start_date = context.user_data.get("cal_start_date")
+        if not start_date:
+            context.user_data["cal_start_date"] = clicked_date
+            dt = datetime.strptime(clicked_date, "%Y-%m-%d")
+            calendar_markup = create_calendar(dt.year, dt.month, mode="range", start_date=clicked_date)
+            await query.message.edit_text(
+                f"📆 **Interactive Date Picker (Range Mode)**\nSelect **END** departure date (Start: `{clicked_date}`):",
+                reply_markup=calendar_markup,
+                parse_mode="Markdown"
+            )
+            return DIGEST_TIMEFRAME
+        else:
+            context.user_data.pop("cal_start_date", None)
+            target_start = start_date
+    else:
+        target_start = clicked_date
+
+    today = datetime.now(timezone.utc).date()
+    start_dt = datetime.strptime(target_start, "%Y-%m-%d").date()
+    days_diff = max(1, (start_dt - today).days)
+    context.user_data["digest_timeframe"] = days_diff
     return await _ask_digest_day(query.message, context, is_callback=True)
 
 async def _ask_digest_day(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:

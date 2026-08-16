@@ -195,3 +195,26 @@ async def test_digest_wizard_stores_custom_schedule_str():
                 db_mock.create_tracker.assert_called_once()
                 kw = db_mock.create_tracker.call_args[1]
                 assert kw["departure_date"] == "60d|discount|Friday@18:00"
+
+@pytest.mark.asyncio
+async def test_digest_wizard_calendar_callbacks():
+    from bot.handlers.digest import open_calendar_digest_callback, handle_digest_calendar_date_selection, DIGEST_TIMEFRAME
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.message.edit_text = AsyncMock()
+    update = MagicMock()
+    update.effective_user.id = 123
+    update.callback_query = query
+    context = MagicMock()
+    context.user_data = {}
+
+    with patch("bot.handlers.auth.get_allowed_users", return_value=[123]):
+        state = await open_calendar_digest_callback(update, context)
+        assert state == DIGEST_TIMEFRAME
+        assert context.user_data["cal_mode"] == "range"
+
+        query.data = "cal_day_2026-10-15"
+        state2 = await handle_digest_calendar_date_selection(update, context)
+        assert state2 == DIGEST_TIMEFRAME
+        assert context.user_data["cal_start_date"] == "2026-10-15"
+
