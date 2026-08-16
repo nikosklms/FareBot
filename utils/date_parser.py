@@ -30,7 +30,7 @@ def parse_date_or_range(raw_input: str) -> Tuple[str, Optional[str]]:
     dt = datetime.strptime(clean, "%Y-%m-%d")
     return dt.strftime("%Y-%m-%d"), None
 
-def generate_date_sequence(start_date: str, end_date: str, max_days: Optional[int] = 60) -> List[str]:
+def generate_date_sequence(start_date: str, end_date: str, max_days: Optional[int] = 330) -> List[str]:
     """Generates an inclusive sequence of ISO date strings for every consecutive day between start_date and end_date."""
     start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()

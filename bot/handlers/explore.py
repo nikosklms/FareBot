@@ -59,6 +59,9 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
         from bot.handlers.common import build_status_estimate_text
 
         async def status_cb(est_seconds: float, total_queries: int, num_airports: int, num_days: int) -> None:
+            active_task = context.user_data.get("active_explore_task")
+            if active_task and hasattr(active_task, "cancelled") and active_task.cancelled():
+                return
             try:
                 status_text = build_status_estimate_text(
                     header_text=header_text,
@@ -71,10 +74,20 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
             except Exception:
                 pass
 
-        deals = await run_explore_query(
-            origin, region, dep_date, max_budget=max_budget, max_results=limit, status_callback=status_cb
-        )
-        await _render_explore_deals(update.message, origin, region, deals)
+        import asyncio
+        context.user_data["active_explore_task"] = asyncio.current_task()
+
+        try:
+            deals = await run_explore_query(
+                origin, region, dep_date, max_budget=max_budget, max_results=limit, status_callback=status_cb
+            )
+            await _render_explore_deals(update.message, origin, region, deals)
+        except asyncio.CancelledError:
+            logger.info("[EXPLORE] Shortcut explore task cancelled.")
+            return ConversationHandler.END
+        finally:
+            context.user_data.pop("active_explore_task", None)
+
         return ConversationHandler.END
 
     # Start multi-step wizard
@@ -376,6 +389,9 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     from bot.handlers.common import build_status_estimate_text
 
     async def status_cb(est_seconds: float, total_queries: int, num_airports: int, num_days: int) -> None:
+        active_task = context.user_data.get("active_explore_task")
+        if active_task and hasattr(active_task, "cancelled") and active_task.cancelled():
+            return
         try:
             status_text = build_status_estimate_text(
                 header_text=header_text,
@@ -388,10 +404,20 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
         except Exception:
             pass
 
-    deals = await run_explore_query(
-        origin, region, dep_date, sort_by=sort_mode, max_results=limit, status_callback=status_cb
-    )
-    await _render_explore_deals(message, origin, region, deals)
+    import asyncio
+    context.user_data["active_explore_task"] = asyncio.current_task()
+
+    try:
+        deals = await run_explore_query(
+            origin, region, dep_date, sort_by=sort_mode, max_results=limit, status_callback=status_cb
+        )
+        await _render_explore_deals(message, origin, region, deals)
+    except asyncio.CancelledError:
+        logger.info("[EXPLORE] Explore wizard execution task cancelled.")
+        return ConversationHandler.END
+    finally:
+        context.user_data.pop("active_explore_task", None)
+
     elapsed_s = time.perf_counter() - t_start
     logger.info(f"[EXPLORE] Finished wizard explore rendering for origin={origin}, region={region} in {elapsed_s:.2f}s")
 

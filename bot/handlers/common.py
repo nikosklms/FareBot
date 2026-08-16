@@ -64,8 +64,17 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     if query:
         await query.answer()
+        active_task = context.user_data.pop("active_explore_task", None)
+        if active_task and hasattr(active_task, "cancel"):
+            try:
+                active_task.cancel()
+            except Exception:
+                pass
         if query.message and hasattr(query.message, "edit_text"):
-            await query.message.edit_text("❌ Action cancelled.")
+            try:
+                await query.message.edit_text("❌ Action cancelled.")
+            except Exception:
+                pass
     return ConversationHandler.END
 
 def build_status_estimate_text(

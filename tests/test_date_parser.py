@@ -32,6 +32,11 @@ def test_generate_date_sequence_capped():
     assert dates[0] == "2026-09-01"
     assert dates[-1] == "2026-09-05"
 
+def test_generate_date_sequence_90_days():
+    dates = generate_date_sequence("2026-08-17", "2026-11-14")
+    assert len(dates) == 90
+
+
 def test_get_preset_range_next_7_days():
     today = datetime.now(timezone.utc).date()
     start_str, end_str = get_preset_range("next_7_days")
