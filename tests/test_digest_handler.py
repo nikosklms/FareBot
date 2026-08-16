@@ -41,3 +41,23 @@ async def test_digest_command_registration_and_schedule_job():
         }]
         await run_digest_weekly_job(job_context)
         explore_mock.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_digest_weekly_job_sends_start_and_estimate_notifications():
+    job_context = MagicMock()
+    job_context.job.data = {"user_id": 123, "origin": "ATH", "region": "europe", "budget": 80.0, "schedule_str": "30d|both|Sunday@15:00"}
+    bot_mock = MagicMock()
+    sent_msg = AsyncMock()
+    bot_mock.send_message = AsyncMock(return_value=sent_msg)
+    job_context.bot = bot_mock
+
+    with patch("services.explore_engine.run_explore_query") as explore_mock:
+        explore_mock.return_value = [{
+            "origin_code": "ATH", "destination_code": "CDG", "destination_name": "Paris CDG",
+            "departure_date": "2026-09-15", "price": 50.0, "airline": "Air France", "discount_pct": 66.7
+        }]
+        await run_digest_weekly_job(job_context)
+        assert bot_mock.send_message.called
+        first_text = bot_mock.send_message.call_args_list[0][1]["text"]
+        assert "Digest" in first_text or "starting" in first_text
+

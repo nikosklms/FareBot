@@ -293,13 +293,39 @@ async def run_digest_weekly_job(context):
 
     from services.explore_engine import run_explore_query, build_timeframe_date_range, render_explore_report_text
 
+    reg_disp = region.upper().replace("_", " ")
+    sent_msg = None
+    if user_id and hasattr(context, "bot") and context.bot:
+        try:
+            init_header = f"🗞️ **Weekly Flight Digest starting for {origin} → {reg_disp}...**\n\n⏳ *Initializing deal search...*"
+            sent_msg = await context.bot.send_message(chat_id=user_id, text=init_header, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Failed to send digest start message to user {user_id}: {e}")
+
+    async def status_cb(est_seconds: float, total_queries: int, num_airports: int, num_days: int) -> None:
+        if not sent_msg:
+            return
+        try:
+            from bot.handlers.common import build_status_estimate_text
+            digest_header = f"🗞️ **Weekly Flight Digest execution starting for {origin} → {reg_disp}...**"
+            status_text = build_status_estimate_text(
+                header_text=digest_header,
+                est_seconds=est_seconds,
+                total_queries=total_queries,
+                num_airports=num_airports,
+                num_days=num_days
+            )
+            await sent_msg.edit_text(status_text, parse_mode="Markdown")
+        except Exception:
+            pass
+
     dep_date = build_timeframe_date_range(offset_days)
-    deals = await run_explore_query(origin, region, dep_date, max_budget=budget, sort_by=sort_mode, max_results=limit)
+    deals = await run_explore_query(
+        origin, region, dep_date, max_budget=budget, sort_by=sort_mode, max_results=limit, status_callback=status_cb
+    )
 
     if not user_id:
         return
-
-    reg_disp = region.upper().replace("_", " ")
 
     has_deals = False
     if isinstance(deals, dict):
@@ -314,6 +340,12 @@ async def run_digest_weekly_job(context):
             f"ℹ️ **No flight deals found** matching your criteria (Target Budget: {bud_str}).\n"
             f"💡 *Tip: You can edit your budget threshold anytime in `/mytracks`!*"
         )
+        if sent_msg:
+            try:
+                await sent_msg.edit_text(text=no_deals_msg, parse_mode="Markdown")
+                return
+            except Exception:
+                pass
         try:
             await context.bot.send_message(chat_id=user_id, text=no_deals_msg, parse_mode="Markdown")
         except Exception as e:
@@ -326,6 +358,17 @@ async def run_digest_weekly_job(context):
         deals=deals,
         title_prefix=f"🗞️ **Weekly Flight Digest for {origin} → {reg_disp}**"
     )
+
+    if sent_msg:
+        try:
+            await sent_msg.edit_text(
+                text=msg_text,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+            return
+        except Exception:
+            pass
 
     try:
         await context.bot.send_message(
