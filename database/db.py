@@ -1,7 +1,7 @@
 import sqlite3
 import aiosqlite
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from config import DB_PATH
 
 def init_db(db_path: Optional[str] = None):
@@ -233,6 +233,7 @@ class DatabaseManager:
 
     async def delete_tracker(self, tracker_id: int):
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM price_history WHERE tracker_id = ?", (tracker_id,))
             await db.execute("DELETE FROM trackers WHERE id = ?", (tracker_id,))
             await db.commit()
 
@@ -253,3 +254,55 @@ class DatabaseManager:
                 (user_id, username, full_name, input_text)
             )
             await db.commit()
+
+    async def update_budget(self, tracker_id: int, new_budget: float) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE trackers SET max_budget = ? WHERE id = ?",
+                (new_budget, tracker_id)
+            )
+            await db.commit()
+
+    async def has_active_tracker(self, user_id: int, origin_code: str, destination_code: str, departure_date: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM trackers WHERE user_id = ? AND origin_code = ? AND destination_code = ? AND departure_date = ? AND status IN ('ACTIVE', 'PAUSED')",
+                (user_id, origin_code, destination_code, departure_date)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return (row[0] > 0) if row else False
+
+    async def has_active_digest(self, user_id: int, origin_code: str, region_code: str, departure_date: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM trackers WHERE user_id = ? AND origin_code = ? AND destination_code = ? AND departure_date = ? AND status IN ('ACTIVE', 'PAUSED')",
+                (user_id, origin_code, region_code, departure_date)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return (row[0] > 0) if row else False
+
+    async def purge_stale_trackers(self) -> Dict[str, int]:
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cutoff_30d = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_60d = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S")
+
+        async with aiosqlite.connect(self.db_path, timeout=15.0) as db:
+            # Rule 1: Mark past departure active trackers as EXPIRED
+            cursor = await db.execute(
+                "UPDATE trackers SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND departure_date < ?",
+                (today_str,)
+            )
+            expired_count = cursor.rowcount
+
+            # Rule 2 & 3: Purge old expired or long-paused trackers
+            cursor = await db.execute(
+                "DELETE FROM trackers WHERE (status = 'EXPIRED' AND created_at < ?) OR (status = 'PAUSED' AND created_at < ?)",
+                (cutoff_30d, cutoff_60d)
+            )
+            purged_count = cursor.rowcount
+
+            # Cleanup orphan price history
+            await db.execute("DELETE FROM price_history WHERE tracker_id NOT IN (SELECT id FROM trackers)")
+            await db.commit()
+
+            return {"expired": expired_count, "purged": purged_count}
