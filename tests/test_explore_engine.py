@@ -1,0 +1,207 @@
+import pytest
+from unittest.mock import AsyncMock, patch
+from services.explore_engine import run_explore_query, calculate_discount_score
+
+def test_calculate_discount_score():
+    # Baseline 200 EUR, price 50 EUR -> (200-50)/200 = +75.0% (75% OFF)
+    score = calculate_discount_score(current_price=50.0, baseline_min=190.0, baseline_max=210.0)
+    assert abs(score - 75.0) < 0.1
+
+def test_discount_score_zero_when_price_above_baseline():
+    # Current price 220 EUR, baseline 200 EUR -> (200-220)/200 = -10.0% (expensive)
+    score = calculate_discount_score(current_price=220.0, baseline_min=190.0, baseline_max=210.0)
+    assert abs(score - (-10.0)) < 0.1
+
+@pytest.mark.asyncio
+async def test_run_explore_query_invalid_region_returns_empty():
+    deals = await run_explore_query("ATH", "non_existent_region", "2026-09-15")
+    assert deals == []
+
+@pytest.mark.asyncio
+async def test_run_explore_query_excludes_origin_country():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "SKG":  # Greece (Same country as ATH)
+                return [AsyncMock(price=30.0, airline="Aegean", typical_min=80.0, typical_max=100.0, country="Greece")]
+            elif dst == "FCO":  # Italy
+                return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15")
+        returned_codes = [d["destination_code"] for d in deals]
+        assert "SKG" not in returned_codes  # SKG (Greece) excluded because origin ATH is in Greece!
+        assert "FCO" in returned_codes      # FCO (Italy) included!
+
+@pytest.mark.asyncio
+async def test_run_explore_query_excludes_cyprus_for_greece_origin():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "LCA":  # Cyprus
+                return [AsyncMock(price=35.0, airline="Wizz Air", typical_min=80.0, typical_max=100.0, country="Cyprus")]
+            elif dst == "FCO":  # Italy
+                return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15")
+        returned_codes = [d["destination_code"] for d in deals]
+        assert "LCA" not in returned_codes  # LCA (Cyprus) excluded when origin is Greece!
+        assert "FCO" in returned_codes      # FCO (Italy) included!
+
+@pytest.mark.asyncio
+async def test_run_explore_query_respects_custom_max_results():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            return [AsyncMock(price=40.0, airline="Airline", typical_min=90.0, typical_max=110.0, country=f"Country_{dst}")]
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15", max_results=3)
+        assert len(deals) <= 3
+
+@pytest.mark.asyncio
+async def test_run_explore_query_handles_provider_error_gracefully():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "CDG":
+                raise RuntimeError("Google Flights connection timeout")
+            elif dst == "FCO":
+                return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15")
+        # CDG failed, but FCO succeeded! Explore query should return FCO without throwing an exception.
+        assert len(deals) >= 1
+        assert deals[0]["destination_code"] == "FCO"
+
+@pytest.mark.asyncio
+async def test_run_explore_query_ranking_diversity_cap_and_sort_by_price():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "CDG":
+                return [AsyncMock(price=50.0, airline="Air France", typical_min=190.0, typical_max=210.0, country="France")]
+            elif dst == "ORY":
+                return [AsyncMock(price=45.0, airline="Transavia", typical_min=140.0, typical_max=160.0, country="France")]
+            elif dst == "NCE":
+                return [AsyncMock(price=40.0, airline="EasyJet", typical_min=70.0, typical_max=90.0, country="France")]
+            elif dst == "FCO":
+                return [AsyncMock(price=40.0, airline="ITA Airways", typical_min=90.0, typical_max=110.0, country="Italy")]
+            elif dst == "SOF":
+                return [AsyncMock(price=20.0, airline="Ryanair", typical_min=22.0, typical_max=26.0, country="Bulgaria")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals_discount = await run_explore_query("ATH", "europe", "2026-09-15", max_budget=100.0, sort_by="discount")
+        french_deals = [d for d in deals_discount if d.get("country") == "France"]
+        assert len(french_deals) == 2  # Max 2 French destinations kept!
+        french_codes = [d["destination_code"] for d in french_deals]
+        assert "CDG" in french_codes and "ORY" in french_codes
+        assert "NCE" not in french_codes  # NCE dropped by diversity cap!
+
+        assert deals_discount[0]["destination_code"] == "CDG"
+        assert deals_discount[1]["destination_code"] == "ORY"
+        assert deals_discount[2]["destination_code"] == "FCO"
+        assert deals_discount[3]["destination_code"] == "SOF"
+
+        deals_price = await run_explore_query("ATH", "europe", "2026-09-15", max_budget=100.0, sort_by="price")
+        assert deals_price[0]["destination_code"] == "SOF"  # 20 EUR lowest price first!
+
+@pytest.mark.asyncio
+async def test_explore_engine_discount_sort_secondary_tie_breaker_by_price():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "CDG":
+                # 0% discount, 99 EUR
+                return [AsyncMock(price=99.0, airline="Air Serbia", typical_min=None, typical_max=None, country="France")]
+            elif dst == "ZAG":
+                # 0% discount, 44 EUR
+                return [AsyncMock(price=44.0, airline="Ryanair", typical_min=None, typical_max=None, country="Croatia")]
+            elif dst == "SJJ":
+                # 0% discount, 46 EUR
+                return [AsyncMock(price=46.0, airline="Ryanair", typical_min=None, typical_max=None, country="Bosnia and Herzegovina")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        deals = await run_explore_query("ATH", "europe", "2026-09-15", sort_by="discount")
+        # When all discounts are 0%, ties MUST be broken by lowest price first!
+        assert deals[0]["destination_code"] == "ZAG"  # €44.00
+        assert deals[1]["destination_code"] == "SJJ"  # €46.00
+        assert deals[2]["destination_code"] == "CDG"  # €99.00
+
+@pytest.mark.asyncio
+async def test_run_explore_query_sort_by_both():
+    with patch("services.explore_engine.FastFlightsProvider") as provider_cls:
+        provider = AsyncMock()
+        
+        def mock_search(origin, dst, date, currency="EUR"):
+            if dst == "CDG":
+                # 50% discount, 100 EUR (baseline 200 EUR)
+                return [AsyncMock(price=100.0, airline="Air France", typical_min=190.0, typical_max=210.0, country="France")]
+            elif dst == "SOF":
+                # 0% discount, 20 EUR (no baseline)
+                return [AsyncMock(price=20.0, airline="Ryanair", typical_min=None, typical_max=None, country="Bulgaria")]
+            return []
+
+        provider.search_flights.side_effect = mock_search
+        provider_cls.return_value = provider
+
+        res = await run_explore_query("ATH", "europe", "2026-09-15", sort_by="both")
+        assert isinstance(res, dict)
+        assert "discount_deals" in res and "cheapest_deals" in res
+        assert res["discount_deals"][0]["destination_code"] == "CDG"  # 50% discount first
+        assert res["cheapest_deals"][0]["destination_code"] == "SOF"    # €20 lowest price first
+
+def test_build_timeframe_date_range():
+    from services.explore_engine import build_timeframe_date_range
+    res = build_timeframe_date_range(30)
+    assert ".." in res
+    start, end = res.split("..")
+    assert len(start) == 10 and len(end) == 10
+
+def test_render_explore_report_text():
+    from services.explore_engine import render_explore_report_text
+    deals = {
+        "discount_deals": [{
+            "origin_code": "ATH", "destination_code": "BUD", "destination_name": "Budapest",
+            "departure_date": "2026-09-15", "price": 30.0, "airline": "Wizz Air",
+            "baseline_price": 80.0, "discount_pct": 62.5, "is_direct": True
+        }],
+        "cheapest_deals": [{
+            "origin_code": "ATH", "destination_code": "BUD", "destination_name": "Budapest",
+            "departure_date": "2026-09-15", "price": 30.0, "airline": "Wizz Air",
+            "baseline_price": 80.0, "discount_pct": 62.5, "is_direct": True
+        }]
+    }
+    msg = render_explore_report_text("ATH", "europe", deals, title_prefix="🗞️ Weekly Flight Digest for ATH → EUROPE")
+    assert "Weekly Flight Digest" in msg
+    assert "BUD" in msg
+    assert "€30.00" in msg
+    assert "https://www.google.com/travel/flights" in msg
+
+
+
