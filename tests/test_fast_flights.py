@@ -41,6 +41,19 @@ async def test_search_flights_range():
         assert offers[0].price == 100.0
 
 @pytest.mark.asyncio
+async def test_search_flights_range_full_99_days():
+    provider = FastFlightsProvider()
+    async def mock_search(origin, destination, departure_date, **kwargs):
+        return [FlightOffer(origin=origin, destination=destination, departure_date=departure_date, price=200.0)]
+
+    with patch.object(provider, "search_flights", side_effect=mock_search):
+        offers = await provider.search_flights_range(
+            origin="ATH", destination="SIN", start_date="2026-08-17", end_date="2026-11-23"
+        )
+        assert len(offers) == 99
+
+
+@pytest.mark.asyncio
 async def test_skg_to_lon_returns_absolute_lowest_price_first():
     """Verify that searching SKG to LON finds low-cost carriers (e.g. Ryanair/easyJet) and sorts strictly ascending by price."""
     provider = FastFlightsProvider()
@@ -181,5 +194,40 @@ async def test_google_flights_url_generation_and_stateless_booking_links():
     # URL should be a stateless tfs URL, NOT containing the Cj session token
     assert "google.com/travel/flights/search?tfs=" in offers[0].booking_url
     assert "CjRIdi" not in offers[0].booking_url
+
+@pytest.mark.asyncio
+async def test_bot_challenge_html_raises_google_rate_limit_exception():
+    """Verify that receiving a Google bot challenge / captcha page raises GoogleRateLimitException."""
+    from providers.fast_flights import GoogleRateLimitException
+    captcha_html = "<html><body><h1>unusual traffic from your computer network</h1><p>recaptcha</p></body></html>"
+    with pytest.raises(GoogleRateLimitException):
+        parse_google_flights_payload_generic(captcha_html, "SKG", "VIE", "2026-10-31")
+
+@pytest.mark.asyncio
+async def test_fast_flights_exponential_backoff_retry_on_429():
+    """Verify that FastFlightsProvider retries with backoff when HTTP 429 occurs and succeeds if a subsequent retry works."""
+    from providers.fast_flights import GoogleRateLimitException
+    provider = FastFlightsProvider()
+
+    attempt_counter = 0
+    leg = [None]*8 + [[10, 0], None, [12, 0]] + [None]*11 + [["flight_meta"]]
+    flight_node = [None, ["Ryanair"], [leg]]
+    payload = [flight_node, [[None, 45.0]]]
+    import json
+    valid_html = f"<script class=\"ds:1\">data:{json.dumps([payload])},</script>"
+
+    def mock_fetch(q):
+        nonlocal attempt_counter
+        attempt_counter += 1
+        if attempt_counter == 1:
+            raise GoogleRateLimitException("HTTP Error 429: Too Many Requests")
+        return valid_html
+
+    with patch("providers.fast_flights.UrllibFetchIntegration.fetch_html", side_effect=mock_fetch):
+        offers = await provider.search_flights("SKG", "VIE", "2026-10-31")
+        assert len(offers) == 1
+        assert offers[0].price == 45.0
+        assert attempt_counter == 2
+
 
 

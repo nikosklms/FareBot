@@ -1,4 +1,8 @@
 import pytest
+import warnings
+from telegram.warnings import PTBUserWarning
+warnings.filterwarnings("ignore", category=PTBUserWarning)
+
 from unittest.mock import AsyncMock
 from telegram.ext import CommandHandler, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 from bot.handlers import start_command, help_command, cancel_command, search_command, mytracks_command
@@ -36,7 +40,8 @@ def test_all_bot_commands_are_registered():
     from bot.handlers.track import (
         handle_origin_input, select_origin_callback,
         handle_destination_input, select_destination_callback,
-        handle_departure_date, handle_budget, select_frequency_callback,
+        handle_departure_date, handle_date_preset_callback, handle_calendar_date_selection,
+        handle_budget, select_frequency_callback,
         ORIGIN, DESTINATION, DEPARTURE_DATE, BUDGET, FREQUENCY
     )
     track_wizard = ConversationHandler(
@@ -44,7 +49,11 @@ def test_all_bot_commands_are_registered():
         states={
             ORIGIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_origin_input)],
             DESTINATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_destination_input)],
-            DEPARTURE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date)],
+            DEPARTURE_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_departure_date),
+                CallbackQueryHandler(handle_date_preset_callback, pattern="^datepreset_"),
+                CallbackQueryHandler(handle_calendar_date_selection, pattern="^cal_day_")
+            ],
             BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_budget)],
             FREQUENCY: [CallbackQueryHandler(select_frequency_callback, pattern="^freq_")]
         },

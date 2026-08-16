@@ -18,6 +18,8 @@ class FlightOffer:
     departure_time: Optional[str] = None
     arrival_time: Optional[str] = None
     day_offset: int = 0
+    typical_min: Optional[float] = None
+    typical_max: Optional[float] = None
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 

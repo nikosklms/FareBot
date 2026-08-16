@@ -1,3 +1,6 @@
+import logging
+import time
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -9,10 +12,14 @@ from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
 from daemon import schedule_tracker_job
 from bot.handlers.auth import restricted
+from bot.inline_calendar import create_calendar
+from services.explore_engine import calculate_discount_score
 
 from utils.date_parser import parse_date_or_range, get_preset_range
 
-SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE = range(10, 14)
+logger = logging.getLogger(__name__)
+
+SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE, SEARCH_SORT = range(10, 15)
 resolver = LocationResolver()
 provider = FastFlightsProvider()
 db_manager = DatabaseManager(DB_PATH)
@@ -20,7 +27,10 @@ db_manager = DatabaseManager(DB_PATH)
 @restricted
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for /search command."""
+    user_id = update.effective_user.id if update.effective_user else "unknown"
     args = context.args
+    logger.info(f"[SEARCH] User {user_id} invoked /search with args={args}")
+
     if args and len(args) >= 3:
         origin_raw, dest_raw, raw_date = args[0], args[1], args[2]
         direct_only = False
@@ -31,9 +41,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         dest_matches = resolver.resolve(dest_raw)
 
         if not origin_matches:
+            logger.warning(f"[SEARCH] User {user_id}: Origin location '{origin_raw}' not recognized.")
             await update.message.reply_text(f"❌ Origin location '{origin_raw}' not recognized.")
             return ConversationHandler.END
         if not dest_matches:
+            logger.warning(f"[SEARCH] User {user_id}: Destination location '{dest_raw}' not recognized.")
             await update.message.reply_text(f"❌ Destination location '{dest_raw}' not recognized.")
             return ConversationHandler.END
 
@@ -44,9 +56,11 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             start_date, end_date = parse_date_or_range(raw_date)
             today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             if start_date < today_str:
+                logger.warning(f"[SEARCH] User {user_id}: Departure date {start_date} is in the past.")
                 await update.message.reply_text("❌ Departure date cannot be in the past.")
                 return ConversationHandler.END
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[SEARCH] User {user_id}: Invalid date format '{raw_date}': {e}")
             await update.message.reply_text("❌ Invalid date or range format. Use `YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`.", parse_mode="Markdown")
             return ConversationHandler.END
 
@@ -134,16 +148,126 @@ async def select_search_destination_callback(update: Update, context: ContextTyp
     date_buttons = [
         [InlineKeyboardButton("🗓️ Next 7 Days", callback_data="src_datepreset_next_7_days"),
          InlineKeyboardButton("✈️ Next 14 Days", callback_data="src_datepreset_next_14_days")],
-        [InlineKeyboardButton("📅 This Weekend", callback_data="src_datepreset_this_weekend")],
+        [InlineKeyboardButton("📅 This Weekend", callback_data="src_datepreset_this_weekend"),
+         InlineKeyboardButton("📆 Custom Calendar", callback_data="open_cal_search")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
     ]
     await query.message.edit_text(
         f"🛬 **Destination**: {iata} - {name}\n\n"
-        "📅 **Step 3/4**: Select a quick date preset or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
+        "📅 **Step 3/4**: Select a quick date preset, open the calendar, or type a date / date range (`YYYY-MM-DD` or `YYYY-MM-DD..YYYY-MM-DD`):",
         reply_markup=InlineKeyboardMarkup(date_buttons),
         parse_mode="Markdown"
     )
     return SEARCH_DATE
+
+@restricted
+async def open_calendar_search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["cal_mode"] = "range"
+    context.user_data.pop("cal_start_date", None)
+    now = datetime.now(timezone.utc)
+    calendar_markup = create_calendar(now.year, now.month, mode="range")
+    await query.message.edit_text(
+        "📆 **Interactive Date Picker**\nSelect departure date on calendar below:",
+        reply_markup=calendar_markup,
+        parse_mode="Markdown"
+    )
+    return SEARCH_DATE
+
+@restricted
+async def search_calendar_nav_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    target = query.data.replace("cal_nav_", "")
+    year, month = map(int, target.split("-"))
+    mode = context.user_data.get("cal_mode", "single")
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=mode, start_date=start_date)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
+    return SEARCH_DATE
+
+@restricted
+async def search_calendar_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    target_mode = query.data.replace("cal_mode_", "")
+    context.user_data["cal_mode"] = target_mode
+    if target_mode == "single":
+        context.user_data.pop("cal_start_date", None)
+    
+    year, month = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
+    if query.message and query.message.reply_markup:
+        for row in query.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("cal_nav_"):
+                    try:
+                        prev_year, prev_month = map(int, btn.callback_data.replace("cal_nav_", "").split("-"))
+                        if prev_month == 12:
+                            year, month = prev_year + 1, 1
+                        else:
+                            year, month = prev_year, prev_month + 1
+                        break
+                    except ValueError:
+                        pass
+            if "cal_nav_" in str(query.message.reply_markup):
+                break
+    start_date = context.user_data.get("cal_start_date")
+    calendar_markup = create_calendar(year, month, mode=target_mode, start_date=start_date)
+    await query.message.edit_reply_markup(reply_markup=calendar_markup)
+    return SEARCH_DATE
+
+@restricted
+async def search_calendar_ignore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    return SEARCH_DATE
+
+
+@restricted
+async def handle_search_calendar_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    clicked_date = query.data.replace("cal_day_", "")
+    mode = context.user_data.get("cal_mode", "single")
+
+    if mode == "range":
+        start_date = context.user_data.get("cal_start_date")
+        if not start_date:
+            # 1st click: Set start date
+            context.user_data["cal_start_date"] = clicked_date
+            dt = datetime.strptime(clicked_date, "%Y-%m-%d")
+            calendar_markup = create_calendar(dt.year, dt.month, mode="range", start_date=clicked_date)
+            await query.message.edit_text(
+                f"📆 **Interactive Date Picker (Range Mode)**\nSelect **END** departure date (Start: `{clicked_date}`):",
+                reply_markup=calendar_markup,
+                parse_mode="Markdown"
+            )
+            return SEARCH_DATE
+        else:
+            # 2nd click: End date selected
+            context.user_data.pop("cal_start_date", None)
+            if start_date == clicked_date:
+                dep_date = start_date
+            else:
+                dep_date = f"{start_date}..{clicked_date}"
+    else:
+        dep_date = clicked_date
+
+    context.user_data["search_departure_date"] = dep_date
+
+    buttons = [
+        [InlineKeyboardButton("✈️ Direct Flights Only", callback_data="src_fl_type_1")],
+        [InlineKeyboardButton("🔄 Any (Direct & Layovers)", callback_data="src_fl_type_0")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
+    ]
+    await query.message.edit_text(
+        f"📅 **Departure Date**: {dep_date}\n\n"
+        "⚙️ **Step 4/4**: What type of flights do you want?",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+    return SEARCH_FLIGHT_TYPE
 
 @restricted
 async def handle_search_date_preset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -204,6 +328,33 @@ async def select_search_flight_type_callback(update: Update, context: ContextTyp
     await execute_search(update, origin, destination, date, direct_only=direct_only)
     return ConversationHandler.END
 
+def _format_search_offer(o: Any, idx_emoji: str, has_end_date: bool) -> str:
+    stop_badge = "Direct ✈️" if getattr(o, "is_direct", True) else "1+ Stops 🔄"
+    offset_val = getattr(o, "day_offset", 0)
+    offset_str = f" (+{offset_val})" if offset_val > 0 else ""
+    dep_time = getattr(o, "departure_time", None)
+    arr_time = getattr(o, "arrival_time", None)
+    time_info = f" | 🕒 {dep_time} ➔ {arr_time}{offset_str}" if (dep_time and arr_time) else ""
+    date_badge = f" ({o.departure_date})" if has_end_date else ""
+    booking_url = getattr(o, "booking_url", None)
+    price_str = f"[€{o.price:.2f}]({booking_url})" if booking_url else f"€{o.price:.2f}"
+
+    typ_min = getattr(o, "typical_min", None)
+    typ_max = getattr(o, "typical_max", None)
+    disc_pct = calculate_discount_score(o.price, typ_min, typ_max) if (typ_min or typ_max) else 0.0
+    base_price = ((typ_min + typ_max) / 2.0) if (typ_min and typ_max) else None
+
+    if base_price and disc_pct > 0:
+        disc_badge = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
+    elif base_price and disc_pct < 0:
+        disc_badge = f" (📈 **+{abs(disc_pct):.0f}% EXPENSIVE** | Avg: ~€{base_price:.2f})"
+    elif base_price:
+        disc_badge = f" (📊 Avg: ~€{base_price:.2f})"
+    else:
+        disc_badge = ""
+
+    airline_name = getattr(o, "airline", None) or "Various"
+    return f"{idx_emoji} **{price_str}**{disc_badge}{date_badge} — {airline_name} ({stop_badge}){time_info}"
 
 async def execute_search(
     update: Update, origin: str, destination: str, date: str, direct_only: bool = False
@@ -212,39 +363,54 @@ async def execute_search(
     if not message:
         return
 
+    t_start = time.perf_counter()
+    user_id = update.effective_user.id if update.effective_user else "unknown"
+    logger.info(f"[SEARCH] Executing search for user {user_id}: {origin} -> {destination} on {date} (direct_only={direct_only})")
+
     filter_label = "Direct Flights Only ✈️" if direct_only else "Any Flights 🔄"
     start_date, end_date = parse_date_or_range(date)
 
+    from bot.handlers.common import build_status_estimate_text
+    from utils.date_parser import generate_date_sequence
+    import math
+
     if end_date:
-        status_msg = await message.reply_text(f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** between **{start_date}** and **{end_date}**...", parse_mode="Markdown")
+        dates = generate_date_sequence(start_date, end_date)
+        num_days = len(dates)
+        est_sec = math.ceil(num_days / 3) * 1.25
+        hdr = f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** between **{start_date}** and **{end_date}**..."
+        status_text = build_status_estimate_text(hdr, est_sec, total_queries=num_days, num_airports=1, num_days=num_days)
+        status_msg = await message.reply_text(status_text, parse_mode="Markdown")
         offers = await provider.search_flights_range(origin=origin, destination=destination, start_date=start_date, end_date=end_date, direct_only=direct_only)
     else:
-        status_msg = await message.reply_text(f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** on **{date}**...", parse_mode="Markdown")
+        hdr = f"🔍 Searching top flight offers ({filter_label}) from **{origin}** to **{destination}** on **{date}**..."
+        status_text = build_status_estimate_text(hdr, est_seconds=2.5, total_queries=1, num_airports=1, num_days=1)
+        status_msg = await message.reply_text(status_text, parse_mode="Markdown")
         offers = await provider.search_flights(origin=origin, destination=destination, departure_date=date, direct_only=direct_only)
 
+    elapsed_s = time.perf_counter() - t_start
+
     if not offers:
+        logger.info(f"[SEARCH] Search completed for user {user_id} in {elapsed_s:.2f}s: 0 offers found.")
         await status_msg.edit_text(f"❌ No matching flight offers found for **{origin} ✈️ {destination}** on **{date}** ({filter_label}).", parse_mode="Markdown")
         return
 
+    logger.info(f"[SEARCH] Search completed for user {user_id} in {elapsed_s:.2f}s: {len(offers)} offers found.")
+    offers.sort(key=lambda x: x.price)
     top_offers = offers[:5]
     date_display = f"{start_date} ➔ {end_date}" if end_date else date
     reply_lines = [
         f"✈️ **Top {len(top_offers)} Flight Results** ({filter_label})\n",
         f"📍 **Route**: {origin} ✈️ {destination} | 📅 **Date**: {date_display}\n"
     ]
-
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
-    for i, o in enumerate(top_offers):
-        stop_badge = "Direct ✈️" if o.is_direct else "1+ Stops 🔄"
-        offset_str = f" (+{o.day_offset})" if getattr(o, "day_offset", 0) > 0 else ""
-        time_info = f" | 🕒 {o.departure_time} ➔ {o.arrival_time}{offset_str}" if (o.departure_time and o.arrival_time) else ""
-        date_badge = f" ({o.departure_date})" if end_date else ""
-        price_str = f"[**€{o.price:.2f}**]({o.booking_url})" if o.booking_url else f"**€{o.price:.2f}**"
-        reply_lines.append(f"{emojis[i]} {price_str}{date_badge} — {o.airline or 'Various'} ({stop_badge}){time_info}")
 
-    reply_text = "\n".join(reply_lines)
+    for i, o in enumerate(top_offers):
+        reply_lines.append(_format_search_offer(o, emojis[i], bool(end_date)))
 
     lowest = top_offers[0]
+    reply_text = "\n".join(reply_lines)
+
     from providers.fast_flights import build_google_flights_url
     booking_url = lowest.booking_url or build_google_flights_url(origin, destination, lowest.departure_date, direct_only=direct_only)
 
@@ -258,7 +424,7 @@ async def execute_search(
         InlineKeyboardButton(f"🔔 Track Lowest (€{lowest.price:.2f})", callback_data=f"track_{origin}_{destination}_{cb_date}_{lowest.price}_{direct_flag_val}")
     ])
 
-    await status_msg.edit_text(reply_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await status_msg.edit_text(reply_text, parse_mode="Markdown", disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup(keyboard))
 
 @restricted
 async def search_track_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

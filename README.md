@@ -8,12 +8,13 @@ Searching flight prices manually across multiple dates requires checking Google 
 
 ## Features
 
-- Single-date and date-range flight search using Google Flights data parsed via fast-flights
-- Automated background fare monitoring with configurable polling intervals
-- Price drop notification alerts delivered directly via Telegram messages
-- Whitelisted user authentication based on Telegram user IDs
-- Embedded HTTP health check server for cloud deployments on Render or Railway
-- SQLite persistent storage for active trackers and price history
+- **Instant Flight Search (`/search`)**: Search single-date or date-range fares using Google Flights data, with direct/connecting badges and historical price baselines (`XX% OFF`).
+- **Interactive Date Picker**: Visual inline calendar with month navigation and range-selection mode across all wizards.
+- **Regional Deal Exploration (`/explore`)**: Discover top flight deals across 8 global regions with customizable sorting (`Highest Discount %`, `Cheapest Price`, or `Both`).
+- **Automated Weekly Digests (`/digest`)**: Schedule recurring weekly deal reports delivered directly via Telegram on your chosen day and time.
+- **Background Price Tracking (`/track` & `/mytracks`)**: Monitor routes in the background with instant push notifications when prices drop below your budget.
+- **Live ETAs & Search Cancellation**: Real-time progress updates with wall-clock completion times (`around HH:MM`) and 1-tap cancellation.
+- **Self-Hosted Infrastructure**: Whitelisted user access control, SQLite storage, automated daily database cleanup, and embedded HTTP health checks for Render/Railway.
 
 ## Requirements
 
@@ -75,7 +76,7 @@ Internal operational limits configured in `config.py`:
 | --- | --- | --- |
 | MIN_POLL_INTERVAL_HOURS | 6 | Minimum allowed background polling interval in hours |
 | DEFAULT_POLL_INTERVAL_HOURS | 6 | Default polling frequency for new price trackers |
-| MAX_TRACKERS_PER_USER | 5 | Maximum active trackers permitted per user |
+| MAX_TRACKERS_PER_USER | 20 | Maximum active trackers permitted per user |
 | MAX_CONSECUTIVE_FAILURES | 3 | Failed search attempts before a tracker is paused |
 
 ## Usage
@@ -89,8 +90,10 @@ Interact with FareBot using standard Telegram chat commands and interactive inli
 | `/start` | Verify authorization and view bot status |
 | `/help` | View command syntax and usage instructions |
 | `/search` | Start flight search wizard for single dates or date ranges |
-| `/track` | Create a recurring background price tracker |
-| `/dashboard` | View active trackers, delete trackers or trigger manual price checks |
+| `/track` | Create a recurring background price tracker for a specific route and date |
+| `/explore` | Interactively search top flight deals by region (Europe, Islands, Asia, Middle East, Americas, etc.) |
+| `/digest` | Schedule a recurring weekly flight deal digest with custom day, time, sorting, and deal limits |
+| `/mytracks` | Manage active price trackers and weekly digests (edit budget, pause, or delete) |
 | `/cancel` | Cancel an ongoing wizard session |
 
 ## Testing

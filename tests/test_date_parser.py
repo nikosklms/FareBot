@@ -32,6 +32,19 @@ def test_generate_date_sequence_capped():
     assert dates[0] == "2026-09-01"
     assert dates[-1] == "2026-09-05"
 
+def test_generate_date_sequence_90_days():
+    dates = generate_date_sequence("2026-08-17", "2026-11-14")
+    assert len(dates) == 90
+
+def test_generate_date_sequence_custom_98_days():
+    from services.explore_engine import build_timeframe_date_range
+    dep_range = build_timeframe_date_range(98)
+    start_date, end_date = dep_range.split("..")
+    dates = generate_date_sequence(start_date, end_date)
+    assert len(dates) == 98
+
+
+
 def test_get_preset_range_next_7_days():
     today = datetime.now(timezone.utc).date()
     start_str, end_str = get_preset_range("next_7_days")
