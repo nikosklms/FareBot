@@ -317,6 +317,8 @@ class FastFlightsProvider(AbstractFlightProvider):
                         else:
                             logger.error(f"[PROVIDER_ERR] Max retries reached for {origin} -> {dest_code}: {e}")
                             return []
+                    except asyncio.CancelledError:
+                        raise
                     except Exception as e:
                         logger.error(f"[PROVIDER_ERR] Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
                         return []
@@ -326,7 +328,9 @@ class FastFlightsProvider(AbstractFlightProvider):
 
         all_offers: List[FlightOffer] = []
         for res in results_list:
-            if isinstance(res, list):
+            if isinstance(res, asyncio.CancelledError):
+                raise res
+            elif isinstance(res, list):
                 all_offers.extend(res)
             elif isinstance(res, Exception):
                 logger.error(f"[PROVIDER_ERR] Task exception during gather for {origin} -> {destination}: {res}")
@@ -364,7 +368,7 @@ class FastFlightsProvider(AbstractFlightProvider):
         end_date: str,
         currency: str = "EUR",
         direct_only: bool = False,
-        max_days: Optional[int] = 60
+        max_days: Optional[int] = 330
     ) -> List[FlightOffer]:
         from utils.date_parser import generate_date_sequence
         dates = generate_date_sequence(start_date, end_date, max_days=max_days)
@@ -385,7 +389,9 @@ class FastFlightsProvider(AbstractFlightProvider):
 
         all_offers: List[FlightOffer] = []
         for res in results:
-            if isinstance(res, list):
+            if isinstance(res, asyncio.CancelledError):
+                raise res
+            elif isinstance(res, list):
                 all_offers.extend(res)
             elif isinstance(res, Exception):
                 logger.error(f"[PROVIDER_ERR] Error fetching flight range date: {res}")
