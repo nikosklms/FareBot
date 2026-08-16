@@ -317,8 +317,6 @@ class FastFlightsProvider(AbstractFlightProvider):
                         else:
                             logger.error(f"[PROVIDER_ERR] Max retries reached for {origin} -> {dest_code}: {e}")
                             return []
-                    except asyncio.CancelledError:
-                        raise
                     except Exception as e:
                         logger.error(f"[PROVIDER_ERR] Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
                         return []
@@ -328,9 +326,7 @@ class FastFlightsProvider(AbstractFlightProvider):
 
         all_offers: List[FlightOffer] = []
         for res in results_list:
-            if isinstance(res, asyncio.CancelledError):
-                raise res
-            elif isinstance(res, list):
+            if isinstance(res, list):
                 all_offers.extend(res)
             elif isinstance(res, Exception):
                 logger.error(f"[PROVIDER_ERR] Task exception during gather for {origin} -> {destination}: {res}")
@@ -389,9 +385,7 @@ class FastFlightsProvider(AbstractFlightProvider):
 
         all_offers: List[FlightOffer] = []
         for res in results:
-            if isinstance(res, asyncio.CancelledError):
-                raise res
-            elif isinstance(res, list):
+            if isinstance(res, list):
                 all_offers.extend(res)
             elif isinstance(res, Exception):
                 logger.error(f"[PROVIDER_ERR] Error fetching flight range date: {res}")

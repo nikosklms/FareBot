@@ -41,6 +41,19 @@ async def test_search_flights_range():
         assert offers[0].price == 100.0
 
 @pytest.mark.asyncio
+async def test_search_flights_range_full_99_days():
+    provider = FastFlightsProvider()
+    async def mock_search(origin, destination, departure_date, **kwargs):
+        return [FlightOffer(origin=origin, destination=destination, departure_date=departure_date, price=200.0)]
+
+    with patch.object(provider, "search_flights", side_effect=mock_search):
+        offers = await provider.search_flights_range(
+            origin="ATH", destination="SIN", start_date="2026-08-17", end_date="2026-11-23"
+        )
+        assert len(offers) == 99
+
+
+@pytest.mark.asyncio
 async def test_skg_to_lon_returns_absolute_lowest_price_first():
     """Verify that searching SKG to LON finds low-cost carriers (e.g. Ryanair/easyJet) and sorts strictly ascending by price."""
     provider = FastFlightsProvider()
