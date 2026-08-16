@@ -9,9 +9,12 @@ Searching flight prices manually across multiple dates requires checking Google 
 ## Features
 
 - Single-date and date-range flight search using Google Flights data parsed via fast-flights
-- **Regional Flight Exploration (`/explore`)**: Browse top flight deals across destinations in Europe, Greek Islands, Asia, Middle East, Americas, and Worldwide with optional target budget caps
-- **Weekly Flight Digests (`/digest`)**: Schedule automated weekly reports for regional flight deals on a chosen day and time with customizable deal sorting (`Highest Discount %`, `Cheapest Price`, or `Both`) and deal limits (up to 20)
-- **Flight Type Badges**: Real-time identification of direct flights vs connecting flights with layovers (`🟢 Direct` vs `🟡 Connecting`)
+- **Interactive Inline Calendar (`Custom Date / Range`)**: Visual date-picker widget with month navigation (`«` / `»`) and range-selection support across all search, track, explore, and digest wizards
+- **Regional Flight Exploration (`/explore`)**: Browse top flight deals across global regions (Europe, Greek Islands, Asia, Middle East, North/South America, Africa, Oceania) with customizable deal limits and baseline price comparisons (`XX% OFF! | Avg: ~€YY`)
+- **Weekly Flight Digests (`/digest`)**: Schedule automated weekly reports for regional flight deals on a chosen day and time with customizable deal sorting (`Highest Discount %`, `Cheapest Price`, or `Both`), target departure windows, and deal limits (up to 20)
+- **Flight Type & Price Baseline Badges**: Real-time identification of direct flights vs connecting layovers (`Direct` vs `Connecting`) and Google Flights historical baseline price metrics (`XX% OFF!` vs `+XX% EXPENSIVE`)
+- **Real-Time ETA & Live Cancellation**: Dynamic throughput measurement with wall-clock completion estimates (`(around HH:MM)`) and inline `Cancel` button on execution status messages
+- **Automated Midnight Maintenance Daemon**: Daily background system purging expired trackers, orphan price history, and maintaining database optimization
 - Automated background fare monitoring with configurable polling intervals
 - Price drop notification alerts delivered directly via Telegram messages
 - **Active Trackers & Digest Management (`/mytracks`)**: View, edit budgets, pause, or delete active trackers and weekly digests
