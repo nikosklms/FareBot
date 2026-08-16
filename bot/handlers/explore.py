@@ -290,6 +290,7 @@ async def handle_explore_timeframe_input(update: Update, context: ContextTypes.D
         await update.message.reply_text("❌ Please enter a number between 1 and 330 days ahead (e.g. '30') or tap a button below.")
         return EXPLORE_TIMEFRAME
 
+    context.user_data.pop("explore_departure_date", None)
     context.user_data["explore_timeframe"] = int(text)
     return await _ask_explore_limit(update.message, context)
 
@@ -298,6 +299,7 @@ async def select_explore_timeframe_callback(update: Update, context: ContextType
     query = update.callback_query
     await query.answer()
     days = int(query.data.split("_")[2])
+    context.user_data.pop("explore_departure_date", None)
     context.user_data["explore_timeframe"] = days
     return await _ask_explore_limit(query.message, context, is_callback=True)
 
@@ -363,11 +365,12 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     logger.info(f"[EXPLORE] Executing wizard explore: origin={origin}, region={region}, date={dep_date}, sort={sort_mode}, limit={limit}")
 
     header_text = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({date_display})..."
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
 
     if is_callback:
-        sent_msg = await message.edit_text(header_text, parse_mode="Markdown")
+        sent_msg = await message.edit_text(header_text, parse_mode="Markdown", reply_markup=cancel_markup)
     else:
-        sent_msg = await message.reply_text(header_text, parse_mode="Markdown")
+        sent_msg = await message.reply_text(header_text, parse_mode="Markdown", reply_markup=cancel_markup)
 
     from bot.handlers.common import build_status_estimate_text
 
@@ -380,7 +383,7 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
                 num_airports=num_airports,
                 num_days=num_days
             )
-            await sent_msg.edit_text(status_text, parse_mode="Markdown")
+            await sent_msg.edit_text(status_text, parse_mode="Markdown", reply_markup=cancel_markup)
         except Exception:
             pass
 
