@@ -85,7 +85,7 @@ async def start_digest_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"✅ **Weekly Digest Scheduled!**\n\n"
             f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper().replace('_', ' ')}\n"
             f"🎯 **Target Budget**: {budget_str}\n"
-            f"📅 **Departure Horizon**: {tf} Days Ahead\n"
+            f"📅 **Target Departure Window**: Up to {tf} Days Ahead\n"
             f"⏰ **Delivery Schedule**: Every {schedule_str}\n"
             f"📊 **Max Deals Limit**: {limit}\n\n"
             f"You can view or manage your scheduled digest anytime in `/mytracks`!",
@@ -237,7 +237,7 @@ async def _ask_digest_timeframe(message, context: ContextTypes.DEFAULT_TYPE, is_
 
     msg_text = (
         f"✅ Target Budget set to: **{bud_str}**\n\n"
-        "📅 **Step 5/8**: Select target departure timeframe horizon (or type days ahead, e.g. '30'):"
+        "📅 **Step 5/8**: Select target departure window (or type days ahead, e.g. '30'):"
     )
 
     if is_callback:
@@ -357,7 +357,7 @@ async def _ask_digest_day(message, context: ContextTypes.DEFAULT_TYPE, is_callba
     ]
 
     msg_text = (
-        f"✅ Departure Timeframe set to: **{tf} Days Ahead**\n\n"
+        f"✅ Target Departure Window set to: **Up to {tf} Days Ahead**\n\n"
         "📅 **Step 6/8**: Select weekly delivery day of week (or type any day, e.g. 'Tuesday'):"
     )
 
@@ -496,7 +496,7 @@ async def _execute_wizard_digest(message, context: ContextTypes.DEFAULT_TYPE, us
         f"✅ **Weekly Digest Scheduled!**\n\n"
         f"🗞️ **Digest #{digest_tracker_id}**: {origin} ✈️ {region.upper().replace('_', ' ')}\n"
         f"🎯 **Target Budget**: {budget_str}\n"
-        f"📅 **Departure Horizon**: {tf} Days Ahead\n"
+        f"📅 **Target Departure Window**: Up to {tf} Days Ahead\n"
         f"⏰ **Delivery Schedule**: Every {day} at {time_str}\n"
         f"📊 **Max Deals Limit**: {limit}\n\n"
         f"You can view, edit budget, pause, or delete your scheduled digest anytime in `/mytracks`!"
