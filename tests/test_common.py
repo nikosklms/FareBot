@@ -17,3 +17,10 @@ async def test_cancel_callback_edits_message():
     assert res == ConversationHandler.END
     query.answer.assert_called_once()
     query.message.edit_text.assert_called_once_with("❌ Action cancelled.")
+
+def test_build_status_estimate_text_includes_clock_for_seconds():
+    from bot.handlers.common import build_status_estimate_text
+    text = build_status_estimate_text("Header", est_seconds=30.0, total_queries=5)
+    assert "around" in text
+    assert "secs" in text
+

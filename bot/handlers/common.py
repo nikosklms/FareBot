@@ -85,17 +85,18 @@ def build_status_estimate_text(
     num_days: int = 1
 ) -> str:
     """Format status text with dynamic execution time estimate and ETA clock."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+    completion_dt = datetime.now().astimezone() + timedelta(seconds=est_seconds)
+    completion_clock = completion_dt.strftime("%H:%M")
+
     if est_seconds >= 60:
         mins_lower = max(1, int(est_seconds // 60))
         mins_upper = mins_lower + 2
-        completion_dt = datetime.now().astimezone() + timedelta(seconds=est_seconds)
-        completion_clock = completion_dt.strftime("%H:%M")
         time_text = f"⏱️ **Estimated Completion**: ~{mins_lower}–{mins_upper} mins (around **{completion_clock}**)"
     else:
         secs_lower = max(5, int(est_seconds))
         secs_upper = secs_lower + 5
-        time_text = f"⏱️ **Estimated Completion**: ~{secs_lower}–{secs_upper} secs"
+        time_text = f"⏱️ **Estimated Completion**: ~{secs_lower}–{secs_upper} secs (around **{completion_clock}**)"
 
     if total_queries > 1:
         if num_days > 1:
