@@ -196,7 +196,7 @@ def parse_google_flights_payload_generic(
             dest_val = valid_legs[-1][6] if valid_legs and len(valid_legs[-1]) > 6 else None
 
             sub_segments = first_leg[22] if (len(first_leg) > 22 and isinstance(first_leg[22], list)) else []
-            valid_sub_segs = [s for s in sub_segments if isinstance(s, list)] if sub_segments else []
+            valid_sub_segs = [s for s in sub_segments if isinstance(s, list) and len(s) > 5] if sub_segments else []
             if len(valid_legs) > 1:
                 is_direct_flight = False
             elif valid_sub_segs:
@@ -204,7 +204,7 @@ def parse_google_flights_payload_generic(
             elif valid_legs:
                 is_direct_flight = (len(valid_legs) == 1)
             else:
-                is_direct_flight = True if direct_only else False
+                is_direct_flight = False
 
             def _fmt_t(t_list):
                 if isinstance(t_list, list) and len(t_list) >= 2 and isinstance(t_list[0], int) and isinstance(t_list[1], int):
@@ -347,16 +347,18 @@ class FastFlightsProvider(AbstractFlightProvider):
             logger.info(f"[PROVIDER] Finished search {origin} -> {destination} in {elapsed_ms:.1f}ms: 0 offers found.")
             return []
 
-        # Deduplicate offers by (price, departure_date, origin, destination, departure_time)
-        # Prefer specific airline name and detailed metadata over generic summary cards
-        unique_dict: Dict[Tuple[float, str, str, str, Optional[str]], FlightOffer] = {}
+        # Deduplicate offers by (price, departure_date, origin, destination)
+        # Prefer specific airline details and departure_time over generic summary cards ("Various Airlines")
+        unique_dict: Dict[Tuple[float, str, str, str], FlightOffer] = {}
         for offer in all_offers:
-            key = (offer.price, offer.departure_date, offer.origin, offer.destination, offer.departure_time)
+            key = (offer.price, offer.departure_date, offer.origin, offer.destination)
             if key not in unique_dict:
                 unique_dict[key] = offer
             else:
                 existing = unique_dict[key]
                 if existing.airline == "Various Airlines" and offer.airline != "Various Airlines":
+                    unique_dict[key] = offer
+                elif existing.departure_time is None and offer.departure_time is not None:
                     unique_dict[key] = offer
 
         unique_offers: List[FlightOffer] = list(unique_dict.values())
