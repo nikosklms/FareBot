@@ -84,7 +84,7 @@ async def run_explore_query(
     num_airports = len(airports)
     total_queries = num_airports * num_days
     num_batches = math.ceil(total_queries / 3)
-    est_seconds = num_batches * 1.25
+    est_seconds = num_batches * 1.85
 
     if status_callback:
         try:
