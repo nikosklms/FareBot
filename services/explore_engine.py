@@ -83,8 +83,9 @@ async def run_explore_query(
     num_days = len(dates)
     num_airports = len(airports)
     total_queries = num_airports * num_days
-    num_batches = math.ceil(total_queries / 3)
-    est_seconds = num_batches * 1.85
+    from providers.fast_flights import get_average_query_latency
+    initial_sec_per_query = get_average_query_latency()
+    est_seconds = (total_queries / 3) * initial_sec_per_query
 
     completed_queries = 0
     last_callback_time = 0.0

@@ -20,6 +20,18 @@ class GoogleRateLimitException(Exception):
 
 # Class-level shared semaphore to limit concurrent Google Flights HTTP requests across all callers
 _GLOBAL_SEMAPHORE: Optional[asyncio.Semaphore] = None
+_LATENCY_HISTORY: List[float] = []
+
+def record_query_latency(elapsed_seconds: float) -> None:
+    global _LATENCY_HISTORY
+    _LATENCY_HISTORY.append(elapsed_seconds)
+    if len(_LATENCY_HISTORY) > 100:
+        _LATENCY_HISTORY.pop(0)
+
+def get_average_query_latency() -> float:
+    if not _LATENCY_HISTORY:
+        return 0.5
+    return sum(_LATENCY_HISTORY) / len(_LATENCY_HISTORY)
 
 def get_shared_semaphore(limit: int = 3) -> asyncio.Semaphore:
     global _GLOBAL_SEMAPHORE
@@ -315,10 +327,12 @@ class FastFlightsProvider(AbstractFlightProvider):
                 q = create_query(**query_kwargs)
 
                 max_retries = 2
+                t0_q = time.perf_counter()
                 for attempt in range(max_retries + 1):
                     try:
                         html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
                         res_offers = parse_google_flights_payload_generic(html, origin, dest_code, departure_date, return_date, currency)
+                        record_query_latency(time.perf_counter() - t0_q)
                         return res_offers
                     except GoogleRateLimitException as e:
                         if attempt < max_retries:
