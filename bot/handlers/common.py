@@ -80,7 +80,7 @@ def build_status_estimate_text(
     if est_seconds >= 60:
         mins_lower = max(1, int(est_seconds // 60))
         mins_upper = mins_lower + 2
-        completion_dt = datetime.now(timezone.utc) + timedelta(seconds=est_seconds)
+        completion_dt = datetime.now().astimezone() + timedelta(seconds=est_seconds)
         completion_clock = completion_dt.strftime("%H:%M")
         time_text = f"⏱️ **Estimated Completion**: ~{mins_lower}–{mins_upper} mins (around **{completion_clock}**)"
     else:

@@ -35,3 +35,13 @@ async def test_cancel_command():
     res = await cancel_command(update, context)
     assert res == -1  # ConversationHandler.END is -1
     update.message.reply_text.assert_called_once()
+
+def test_build_status_estimate_text_local_time():
+    from bot.handlers.common import build_status_estimate_text
+    from datetime import datetime, timedelta
+    now_local = datetime.now().astimezone()
+    completion_clock = (now_local + timedelta(seconds=180)).strftime("%H:%M")
+
+    res = build_status_estimate_text("Test Header", est_seconds=180.0, total_queries=10, num_airports=2, num_days=5)
+    assert f"around **{completion_clock}**" in res
+
