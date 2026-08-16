@@ -8,19 +8,13 @@ Searching flight prices manually across multiple dates requires checking Google 
 
 ## Features
 
-- Single-date and date-range flight search using Google Flights data parsed via fast-flights
-- **Interactive Inline Calendar (`Custom Date / Range`)**: Visual date-picker widget with month navigation (`«` / `»`) and range-selection support across all search, track, explore, and digest wizards
-- **Regional Flight Exploration (`/explore`)**: Browse top flight deals across global regions (Europe, Greek Islands, Asia, Middle East, North/South America, Africa, Oceania) with customizable deal limits and baseline price comparisons (`XX% OFF! | Avg: ~€YY`)
-- **Weekly Flight Digests (`/digest`)**: Schedule automated weekly reports for regional flight deals on a chosen day and time with customizable deal sorting (`Highest Discount %`, `Cheapest Price`, or `Both`), target departure windows, and deal limits (up to 20)
-- **Flight Type & Price Baseline Badges**: Real-time identification of direct flights vs connecting layovers (`Direct` vs `Connecting`) and Google Flights historical baseline price metrics (`XX% OFF!` vs `+XX% EXPENSIVE`)
-- **Real-Time ETA & Live Cancellation**: Dynamic throughput measurement with wall-clock completion estimates (`(around HH:MM)`) and inline `Cancel` button on execution status messages
-- **Automated Midnight Maintenance Daemon**: Daily background system purging expired trackers, orphan price history, and maintaining database optimization
-- Automated background fare monitoring with configurable polling intervals
-- Price drop notification alerts delivered directly via Telegram messages
-- **Active Trackers & Digest Management (`/mytracks`)**: View, edit budgets, pause, or delete active trackers and weekly digests
-- Whitelisted user authentication based on Telegram user IDs
-- Embedded HTTP health check server for cloud deployments on Render or Railway
-- SQLite persistent storage for active trackers, scheduled digests, and price history
+- **Instant Flight Search (`/search`)**: Search single-date or date-range fares using Google Flights data, with direct/connecting badges and historical price baselines (`XX% OFF`).
+- **Interactive Date Picker**: Visual inline calendar with month navigation and range-selection mode across all wizards.
+- **Regional Deal Exploration (`/explore`)**: Discover top flight deals across 8 global regions with customizable sorting (`Highest Discount %`, `Cheapest Price`, or `Both`).
+- **Automated Weekly Digests (`/digest`)**: Schedule recurring weekly deal reports delivered directly via Telegram on your chosen day and time.
+- **Background Price Tracking (`/track` & `/mytracks`)**: Monitor routes in the background with instant push notifications when prices drop below your budget.
+- **Live ETAs & Search Cancellation**: Real-time progress updates with wall-clock completion times (`around HH:MM`) and 1-tap cancellation.
+- **Self-Hosted Infrastructure**: Whitelisted user access control, SQLite storage, automated daily database cleanup, and embedded HTTP health checks for Render/Railway.
 
 ## Requirements
 
