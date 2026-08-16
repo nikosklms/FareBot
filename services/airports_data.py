@@ -69,33 +69,49 @@ GLOBAL_REGIONS_AIRPORTS = {
         {"code": "JED", "name": "Jeddah King Abdulaziz", "country": "Saudi Arabia"},
         {"code": "MCT", "name": "Muscat International", "country": "Oman"},
         {"code": "BAH", "name": "Bahrain International", "country": "Bahrain"},
-        {"code": "KWI", "name": "Kuwait International", "country": "Kuwait"}
+        {"code": "KWI", "name": "Kuwait International", "country": "Kuwait"},
+        {"code": "IST", "name": "Istanbul Airport", "country": "Turkey"},
+        {"code": "SAW", "name": "Istanbul Sabiha Gökçen", "country": "Turkey"},
+        {"code": "BEY", "name": "Beirut Rafic Hariri", "country": "Lebanon"},
+        {"code": "MED", "name": "Madinah Prince Mohammad bin Abdulaziz", "country": "Saudi Arabia"}
     ],
     "asia": [
         {"code": "HND", "name": "Tokyo Haneda", "country": "Japan"},
+        {"code": "NRT", "name": "Tokyo Narita", "country": "Japan"},
+        {"code": "KIX", "name": "Osaka Kansai", "country": "Japan"},
         {"code": "BKK", "name": "Bangkok Suvarnabhumi", "country": "Thailand"},
+        {"code": "CNX", "name": "Chiang Mai", "country": "Thailand"},
         {"code": "SIN", "name": "Singapore Changi", "country": "Singapore"},
         {"code": "ICN", "name": "Seoul Incheon", "country": "South Korea"},
         {"code": "DPS", "name": "Bali Denpasar Ngurah Rai", "country": "Indonesia"},
+        {"code": "CGK", "name": "Jakarta Soekarno-Hatta", "country": "Indonesia"},
         {"code": "DEL", "name": "New Delhi Indira Gandhi", "country": "India"},
+        {"code": "BOM", "name": "Mumbai Chhatrapati Shivaji Maharaj", "country": "India"},
         {"code": "PVG", "name": "Shanghai Pudong", "country": "China"},
+        {"code": "PEK", "name": "Beijing Capital", "country": "China"},
         {"code": "HKG", "name": "Hong Kong International", "country": "Hong Kong"},
+        {"code": "TPE", "name": "Taipei Taoyuan", "country": "Taiwan"},
         {"code": "KUL", "name": "Kuala Lumpur International", "country": "Malaysia"},
         {"code": "MNL", "name": "Manila Ninoy Aquino", "country": "Philippines"},
         {"code": "SGN", "name": "Ho Chi Minh City Tan Son Nhat", "country": "Vietnam"},
-        {"code": "BOM", "name": "Mumbai Chhatrapati Shivaji Maharaj", "country": "India"}
+        {"code": "HAN", "name": "Hanoi Noi Bai", "country": "Vietnam"}
     ],
     "africa": [
         {"code": "CAI", "name": "Cairo International", "country": "Egypt"},
+        {"code": "SSH", "name": "Sharm El-Sheikh", "country": "Egypt"},
+        {"code": "HRG", "name": "Hurghada", "country": "Egypt"},
         {"code": "RAK", "name": "Marrakech Menara", "country": "Morocco"},
-        {"code": "JNB", "name": "Johannesburg O R Tambo", "country": "South Africa"},
-        {"code": "NBO", "name": "Nairobi Jomo Kenyatta", "country": "Kenya"},
-        {"code": "CPT", "name": "Cape Town International", "country": "South Africa"},
-        {"code": "TUN", "name": "Tunis Carthage", "country": "Tunisia"},
         {"code": "CMN", "name": "Casablanca Mohammed V", "country": "Morocco"},
+        {"code": "JNB", "name": "Johannesburg O R Tambo", "country": "South Africa"},
+        {"code": "CPT", "name": "Cape Town International", "country": "South Africa"},
+        {"code": "NBO", "name": "Nairobi Jomo Kenyatta", "country": "Kenya"},
+        {"code": "TUN", "name": "Tunis Carthage", "country": "Tunisia"},
         {"code": "ADD", "name": "Addis Ababa Bole", "country": "Ethiopia"},
         {"code": "LOS", "name": "Lagos Murtala Muhammed", "country": "Nigeria"},
-        {"code": "MRU", "name": "Mauritius Sir Seewoosagur Ramgoolam", "country": "Mauritius"}
+        {"code": "MRU", "name": "Mauritius Sir Seewoosagur Ramgoolam", "country": "Mauritius"},
+        {"code": "ZNZ", "name": "Zanzibar Abeid Amani Karume", "country": "Tanzania"},
+        {"code": "SEZ", "name": "Seychelles International", "country": "Seychelles"},
+        {"code": "DKR", "name": "Dakar Blaise Diagne", "country": "Senegal"}
     ],
     "oceania": [
         {"code": "SYD", "name": "Sydney Kingsford Smith", "country": "Australia"},
@@ -108,26 +124,36 @@ GLOBAL_REGIONS_AIRPORTS = {
     "latin_america": [
         {"code": "MEX", "name": "Mexico City Benito Juarez", "country": "Mexico"},
         {"code": "CUN", "name": "Cancun International", "country": "Mexico"},
+        {"code": "GDL", "name": "Guadalajara", "country": "Mexico"},
         {"code": "GRU", "name": "Sao Paulo Guarulhos", "country": "Brazil"},
+        {"code": "GIG", "name": "Rio de Janeiro Galeão", "country": "Brazil"},
         {"code": "EZE", "name": "Buenos Aires Ezeiza", "country": "Argentina"},
         {"code": "BOG", "name": "Bogota El Dorado", "country": "Colombia"},
+        {"code": "MDE", "name": "Medellín José María Córdova", "country": "Colombia"},
         {"code": "LIM", "name": "Lima Jorge Chavez", "country": "Peru"},
         {"code": "SCL", "name": "Santiago Arturo Merino Benitez", "country": "Chile"},
         {"code": "PTY", "name": "Panama City Tocumen", "country": "Panama"},
         {"code": "UIO", "name": "Quito Mariscal Sucre", "country": "Ecuador"},
-        {"code": "SJO", "name": "San Jose Juan Santamaria", "country": "Costa Rica"}
+        {"code": "SJO", "name": "San Jose Juan Santamaria", "country": "Costa Rica"},
+        {"code": "MVD", "name": "Montevideo Carrasco", "country": "Uruguay"},
+        {"code": "HAV", "name": "Havana José Martí", "country": "Cuba"}
     ],
     "north_america": [
         {"code": "JFK", "name": "New York John F Kennedy", "country": "United States"},
+        {"code": "EWR", "name": "New York Newark Liberty", "country": "United States"},
         {"code": "MIA", "name": "Miami International", "country": "United States"},
         {"code": "LAX", "name": "Los Angeles International", "country": "United States"},
         {"code": "ORD", "name": "Chicago O'Hare", "country": "United States"},
-        {"code": "YYZ", "name": "Toronto Pearson", "country": "Canada"},
-        {"code": "YVR", "name": "Vancouver International", "country": "Canada"},
         {"code": "SFO", "name": "San Francisco International", "country": "United States"},
+        {"code": "SEA", "name": "Seattle Tacoma", "country": "United States"},
         {"code": "ATL", "name": "Atlanta Hartsfield Jackson", "country": "United States"},
         {"code": "BOS", "name": "Boston Logan", "country": "United States"},
-        {"code": "IAD", "name": "Washington Dulles", "country": "United States"}
+        {"code": "IAD", "name": "Washington Dulles", "country": "United States"},
+        {"code": "DFW", "name": "Dallas Fort Worth", "country": "United States"},
+        {"code": "MCO", "name": "Orlando International", "country": "United States"},
+        {"code": "YYZ", "name": "Toronto Pearson", "country": "Canada"},
+        {"code": "YVR", "name": "Vancouver International", "country": "Canada"},
+        {"code": "YUL", "name": "Montreal Trudeau", "country": "Canada"}
     ]
 }
 
