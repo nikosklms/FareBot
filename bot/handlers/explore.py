@@ -10,7 +10,7 @@ from config import DB_PATH, MAX_TRACKERS_PER_USER
 from database.db import DatabaseManager
 from bot.handlers.auth import restricted
 from bot.inline_calendar import create_calendar
-from services.explore_engine import run_explore_query
+from services.explore_engine import run_explore_query, build_timeframe_date_range, format_explore_deal_item
 from services.resolver import LocationResolver
 
 logger = logging.getLogger(__name__)
@@ -50,10 +50,8 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
         if len(args) > 3 and max_budget is None and args[3].isdigit():
             max_budget = float(args[3])
 
-        today = datetime.now(timezone.utc).date()
-        start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
-        end_date = (today + timedelta(days=tf)).strftime("%Y-%m-%d")
-        dep_date = f"{start_date}..{end_date}"
+        dep_date = build_timeframe_date_range(tf)
+        start_date, end_date = dep_date.split("..")
         header_text = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({start_date} ➔ {end_date})..."
         sent_msg = await update.message.reply_text(header_text, parse_mode="Markdown")
 
@@ -358,9 +356,8 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
         else:
             date_display = custom_dep_date
     else:
-        start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
-        end_date = (today + timedelta(days=tf)).strftime("%Y-%m-%d")
-        dep_date = f"{start_date}..{end_date}"
+        dep_date = build_timeframe_date_range(tf)
+        start_date, end_date = dep_date.split("..")
         date_display = f"{start_date} ➔ {end_date}"
 
     logger.info(f"[EXPLORE] Executing wizard explore: origin={origin}, region={region}, date={dep_date}, sort={sort_mode}, limit={limit}")
@@ -398,28 +395,7 @@ async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, l
     return ConversationHandler.END
 
 def _format_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True) -> tuple[str, InlineKeyboardButton]:
-    from providers.fast_flights import build_google_flights_url
-
-    disc_pct = d.get("discount_pct", 0.0)
-    base_price = d.get("baseline_price")
-
-    if show_percentage and base_price and disc_pct > 15:
-        disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-    elif base_price:
-        disc_text = f" (Avg: ~€{base_price:.2f})"
-    elif show_percentage and disc_pct > 15:
-        disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
-    else:
-        disc_text = ""
-
-    flights_url = build_google_flights_url(d["origin_code"], d["destination_code"], d["departure_date"])
-    price_str = f"[€{d['price']:.2f}]({flights_url})"
-    stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
-
-    line = (
-        f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-        f"💶 **{price_str}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
-    )
+    line = format_explore_deal_item(d, idx, show_percentage=show_percentage)
     cb_data = f"track_deal_{d['origin_code']}_{d['destination_code']}_{d['departure_date']}_{d['price']}"
     btn = InlineKeyboardButton(f"🔔 Track Deal #{idx} (€{d['price']:.0f})", callback_data=cb_data)
     return line, btn

@@ -176,4 +176,32 @@ async def test_run_explore_query_sort_by_both():
         assert res["discount_deals"][0]["destination_code"] == "CDG"  # 50% discount first
         assert res["cheapest_deals"][0]["destination_code"] == "SOF"    # €20 lowest price first
 
+def test_build_timeframe_date_range():
+    from services.explore_engine import build_timeframe_date_range
+    res = build_timeframe_date_range(30)
+    assert ".." in res
+    start, end = res.split("..")
+    assert len(start) == 10 and len(end) == 10
+
+def test_render_explore_report_text():
+    from services.explore_engine import render_explore_report_text
+    deals = {
+        "discount_deals": [{
+            "origin_code": "ATH", "destination_code": "BUD", "destination_name": "Budapest",
+            "departure_date": "2026-09-15", "price": 30.0, "airline": "Wizz Air",
+            "baseline_price": 80.0, "discount_pct": 62.5, "is_direct": True
+        }],
+        "cheapest_deals": [{
+            "origin_code": "ATH", "destination_code": "BUD", "destination_name": "Budapest",
+            "departure_date": "2026-09-15", "price": 30.0, "airline": "Wizz Air",
+            "baseline_price": 80.0, "discount_pct": 62.5, "is_direct": True
+        }]
+    }
+    msg = render_explore_report_text("ATH", "europe", deals, title_prefix="🗞️ Weekly Flight Digest for ATH → EUROPE")
+    assert "Weekly Flight Digest" in msg
+    assert "BUD" in msg
+    assert "€30.00" in msg
+    assert "https://www.google.com/travel/flights" in msg
+
+
 

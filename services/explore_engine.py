@@ -192,3 +192,78 @@ async def run_explore_query(
     logger.info(f"[EXPLORE] Final output: {len(final_deals)} deals selected for user display.")
     return final_deals
 
+def build_timeframe_date_range(timeframe_days: int) -> str:
+    """Calculates ISO date range string start_date..end_date from tomorrow to timeframe_days ahead."""
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    end_date = (today + timedelta(days=timeframe_days)).strftime("%Y-%m-%d")
+    return f"{start_date}..{end_date}"
+
+def format_explore_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True) -> str:
+    """Formats a single explore/digest deal entry with Markdown hyperlink to Google Flights."""
+    from providers.fast_flights import build_google_flights_url
+
+    disc_pct = d.get("discount_pct", 0.0)
+    base_price = d.get("baseline_price")
+    if show_percentage and base_price and disc_pct > 15:
+        disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
+    elif base_price:
+        disc_text = f" (Avg: ~€{base_price:.2f})"
+    elif show_percentage and disc_pct > 15:
+        disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
+    else:
+        disc_text = ""
+
+    flights_url = build_google_flights_url(d["origin_code"], d["destination_code"], d["departure_date"])
+    price_str = f"[€{d['price']:.2f}]({flights_url})"
+    stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
+    return (
+        f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
+        f"💶 **{price_str}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
+    )
+
+def render_explore_report_text(
+    origin: str,
+    region: str,
+    deals: Dict[str, Any] | List[Dict[str, Any]],
+    title_prefix: Optional[str] = None
+) -> str:
+    """Renders the full Markdown text report for an explore or digest result."""
+    reg_disp = region.upper().replace("_", " ")
+    title = title_prefix or f"🌟 **Top Flight Deals for {origin} → {reg_disp}**"
+
+    has_deals = False
+    if isinstance(deals, dict):
+        has_deals = bool(deals.get("discount_deals") or deals.get("cheapest_deals"))
+    elif isinstance(deals, list):
+        has_deals = bool(deals)
+
+    if not has_deals:
+        return f"ℹ️ **No flight deals found for {origin} → {reg_disp}** matching criteria."
+
+    msg_lines = [f"{title}\n"]
+
+    if isinstance(deals, dict):
+        discount_deals = deals.get("discount_deals", [])
+        cheapest_deals = deals.get("cheapest_deals", [])
+
+        idx_cnt = 1
+        if discount_deals:
+            msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
+            for d in discount_deals:
+                msg_lines.append(format_explore_deal_item(d, idx_cnt, show_percentage=True))
+                idx_cnt += 1
+
+        if cheapest_deals:
+            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
+            for d in cheapest_deals:
+                msg_lines.append(format_explore_deal_item(d, idx_cnt, show_percentage=False))
+                idx_cnt += 1
+    else:
+        for idx, d in enumerate(deals, start=1):
+            msg_lines.append(format_explore_deal_item(d, idx, show_percentage=False))
+
+    return "\n".join(msg_lines)
+
+

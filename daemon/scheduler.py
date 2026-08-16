@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Forbidden, TelegramError, RetryAfter
 from database.db import DatabaseManager
@@ -291,9 +291,9 @@ async def run_digest_weekly_job(context):
         if tf_part.endswith("d") and tf_part[:-1].isdigit():
             offset_days = int(tf_part[:-1])
 
-    from services.explore_engine import run_explore_query
-    from datetime import datetime, timedelta, timezone
-    dep_date = (datetime.now(timezone.utc) + timedelta(days=offset_days)).strftime("%Y-%m-%d")
+    from services.explore_engine import run_explore_query, build_timeframe_date_range, render_explore_report_text
+
+    dep_date = build_timeframe_date_range(offset_days)
     deals = await run_explore_query(origin, region, dep_date, max_budget=budget, sort_by=sort_mode, max_results=limit)
 
     if not user_id:
@@ -320,63 +320,20 @@ async def run_digest_weekly_job(context):
             logger.error(f"Failed to send empty digest notice to user {user_id}: {e}")
         return
 
-    msg_lines = [f"🗞️ **Weekly Flight Digest for {origin} → {region.upper()}**\n"]
-    if isinstance(deals, dict):
-        discount_deals = deals.get("discount_deals", [])
-        cheapest_deals = deals.get("cheapest_deals", [])
-
-        idx_cnt = 1
-        if discount_deals:
-            msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
-            for d in discount_deals[:limit]:
-                base_price = d.get("baseline_price")
-                disc_pct = d.get("discount_pct", 0)
-                if base_price and disc_pct > 15:
-                    disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-                elif base_price:
-                    disc_text = f" (Avg: ~€{base_price:.2f})"
-                elif disc_pct > 15:
-                    disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
-                else:
-                    disc_text = ""
-                stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
-                msg_lines.append(
-                    f"{idx_cnt}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-                    f"💶 **€{d['price']:.2f}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
-                )
-                idx_cnt += 1
-
-        if cheapest_deals:
-            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
-            for d in cheapest_deals[:limit]:
-                base_price = d.get("baseline_price")
-                disc_text = f" (Avg: ~€{base_price:.2f})" if base_price else ""
-                stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
-                msg_lines.append(
-                    f"{idx_cnt}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-                    f"💶 **€{d['price']:.2f}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
-                )
-                idx_cnt += 1
-    else:
-        for idx, d in enumerate(deals[:limit], start=1):
-            base_price = d.get("baseline_price")
-            disc_pct = d.get("discount_pct", 0)
-            if base_price and disc_pct > 15:
-                disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-            elif base_price:
-                disc_text = f" (Avg: ~€{base_price:.2f})"
-            elif disc_pct > 15:
-                disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
-            else:
-                disc_text = ""
-            stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
-            msg_lines.append(
-                f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-                f"💶 **€{d['price']:.2f}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
-            )
+    msg_text = render_explore_report_text(
+        origin=origin,
+        region=region,
+        deals=deals,
+        title_prefix=f"🗞️ **Weekly Flight Digest for {origin} → {reg_disp}**"
+    )
 
     try:
-        await context.bot.send_message(chat_id=user_id, text="\n".join(msg_lines), parse_mode="Markdown")
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=msg_text,
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
     except Exception as e:
         logger.error(f"Failed to send digest report to user {user_id}: {e}")
 

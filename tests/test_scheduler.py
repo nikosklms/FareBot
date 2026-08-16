@@ -9,7 +9,7 @@ async def test_scheduler_check_price_match():
     db_mock = MagicMock()
     db_mock.get_tracker_by_id = AsyncMock(return_value={
         "id": 1, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-08-15", "max_budget": 200.0, "consecutive_failures": 0, "status": "ACTIVE"
+        "departure_date": "2026-10-15", "max_budget": 200.0, "consecutive_failures": 0, "status": "ACTIVE"
     })
     db_mock.log_price = AsyncMock()
     db_mock.update_tracker_status = AsyncMock()
@@ -17,7 +17,7 @@ async def test_scheduler_check_price_match():
 
     provider_mock = MagicMock()
     provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-08-15", price=180.0, airline="Aegean")
+        FlightOffer("ATH", "LON", "2026-10-15", price=180.0, airline="Aegean")
     ])
 
     bot_mock = MagicMock()
@@ -64,7 +64,7 @@ async def test_scheduler_3_failures_triggers_pause():
     db_mock = MagicMock()
     db_mock.get_tracker_by_id = AsyncMock(return_value={
         "id": 2, "user_id": 101, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-08-15", "max_budget": 200.0, "consecutive_failures": 2, "status": "ACTIVE"
+        "departure_date": "2026-10-15", "max_budget": 200.0, "consecutive_failures": 2, "status": "ACTIVE"
     })
     db_mock.increment_failure_count = AsyncMock(return_value=3)
     db_mock.update_tracker_status = AsyncMock()
@@ -108,7 +108,7 @@ async def test_scheduler_notification_button_payloads():
     db_mock = MagicMock()
     db_mock.get_tracker_by_id = AsyncMock(return_value={
         "id": 4, "user_id": 103, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-08-15", "max_budget": 250.0, "consecutive_failures": 0, "status": "ACTIVE"
+        "departure_date": "2026-10-15", "max_budget": 250.0, "consecutive_failures": 0, "status": "ACTIVE"
     })
     db_mock.log_price = AsyncMock()
     db_mock.update_tracker_status = AsyncMock()
@@ -116,7 +116,7 @@ async def test_scheduler_notification_button_payloads():
 
     provider_mock = MagicMock()
     provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-08-15", price=210.0, airline="British Airways", booking_url="http://test.url")
+        FlightOffer("ATH", "LON", "2026-10-15", price=210.0, airline="British Airways", booking_url="http://test.url")
     ])
 
     bot_mock = MagicMock()
@@ -141,7 +141,7 @@ async def test_scheduler_handles_forbidden_user_blocks_bot():
     db_mock = MagicMock()
     db_mock.get_tracker_by_id = AsyncMock(return_value={
         "id": 5, "user_id": 104, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-08-15", "max_budget": 250.0, "consecutive_failures": 0, "status": "ACTIVE"
+        "departure_date": "2026-10-15", "max_budget": 250.0, "consecutive_failures": 0, "status": "ACTIVE"
     })
     db_mock.log_price = AsyncMock()
     db_mock.update_tracker_status = AsyncMock()
@@ -149,7 +149,7 @@ async def test_scheduler_handles_forbidden_user_blocks_bot():
 
     provider_mock = MagicMock()
     provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-08-15", price=200.0, airline="Aegean")
+        FlightOffer("ATH", "LON", "2026-10-15", price=200.0, airline="Aegean")
     ])
 
     bot_mock = MagicMock()
@@ -198,7 +198,7 @@ async def test_scheduler_polls_with_direct_only_flag():
     db_mock = MagicMock()
     db_mock.get_tracker_by_id = AsyncMock(return_value={
         "id": 50, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-08-15", "max_budget": 200.0, "direct_only": 1,
+        "departure_date": "2026-10-15", "max_budget": 200.0, "direct_only": 1,
         "consecutive_failures": 0, "status": "ACTIVE"
     })
     db_mock.log_price = AsyncMock()
@@ -207,7 +207,7 @@ async def test_scheduler_polls_with_direct_only_flag():
 
     provider_mock = MagicMock()
     provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-08-15", price=180.0, airline="Aegean", is_direct=True)
+        FlightOffer("ATH", "LON", "2026-10-15", price=180.0, airline="Aegean", is_direct=True)
     ])
 
     bot_mock = MagicMock()
@@ -217,7 +217,7 @@ async def test_scheduler_polls_with_direct_only_flag():
     await scheduler.poll_tracker(tracker_id=50, bot=bot_mock)
 
     provider_mock.search_flights.assert_called_once_with(
-        origin="ATH", destination="LON", departure_date="2026-08-15", direct_only=True
+        origin="ATH", destination="LON", departure_date="2026-10-15", direct_only=True
     )
 
 
@@ -257,7 +257,7 @@ async def test_scheduler_alert_shows_top_5_offers():
     db_mock = MagicMock()
     db_mock.get_tracker_by_id = AsyncMock(return_value={
         "id": 70, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-08-15", "max_budget": 300.0, "direct_only": 0,
+        "departure_date": "2026-10-15", "max_budget": 300.0, "direct_only": 0,
         "consecutive_failures": 0, "status": "ACTIVE"
     })
     db_mock.log_price = AsyncMock()
@@ -265,9 +265,9 @@ async def test_scheduler_alert_shows_top_5_offers():
     db_mock.reset_failure_count = AsyncMock()
 
     offers = [
-        FlightOffer("ATH", "LON", "2026-08-15", price=180.0, airline="Aegean", is_direct=True, departure_time="08:00", arrival_time="10:30", booking_url="http://url1"),
-        FlightOffer("ATH", "LON", "2026-08-15", price=200.0, airline="BA", is_direct=False, departure_time="12:00", arrival_time="16:00", booking_url="http://url2"),
-        FlightOffer("ATH", "LON", "2026-08-15", price=220.0, airline="Ryanair", is_direct=True, departure_time="15:00", arrival_time="17:30", booking_url="http://url3"),
+        FlightOffer("ATH", "LON", "2026-10-15", price=180.0, airline="Aegean", is_direct=True, departure_time="08:00", arrival_time="10:30", booking_url="http://url1"),
+        FlightOffer("ATH", "LON", "2026-10-15", price=200.0, airline="BA", is_direct=False, departure_time="12:00", arrival_time="16:00", booking_url="http://url2"),
+        FlightOffer("ATH", "LON", "2026-10-15", price=220.0, airline="Ryanair", is_direct=True, departure_time="15:00", arrival_time="17:30", booking_url="http://url3"),
     ]
 
     provider_mock = MagicMock()
