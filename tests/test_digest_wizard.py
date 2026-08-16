@@ -213,8 +213,13 @@ async def test_digest_wizard_calendar_callbacks():
         assert state == DIGEST_TIMEFRAME
         assert context.user_data["cal_mode"] == "range"
 
-        query.data = "cal_day_2026-10-15"
+        query.data = "cal_day_2026-08-16"
         state2 = await handle_digest_calendar_date_selection(update, context)
         assert state2 == DIGEST_TIMEFRAME
-        assert context.user_data["cal_start_date"] == "2026-10-15"
+        assert context.user_data["cal_start_date"] == "2026-08-16"
+
+        query.data = "cal_day_2026-11-30"
+        state3 = await handle_digest_calendar_date_selection(update, context)
+        assert state3 == 5  # DIGEST_DAY
+        assert context.user_data["digest_timeframe"] > 100
 

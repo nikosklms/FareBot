@@ -334,13 +334,14 @@ async def handle_digest_calendar_date_selection(update: Update, context: Context
             return DIGEST_TIMEFRAME
         else:
             context.user_data.pop("cal_start_date", None)
-            target_start = start_date
+            dates = sorted([start_date, clicked_date])
+            target_end = dates[1]
     else:
-        target_start = clicked_date
+        target_end = clicked_date
 
     today = datetime.now(timezone.utc).date()
-    start_dt = datetime.strptime(target_start, "%Y-%m-%d").date()
-    days_diff = max(1, (start_dt - today).days)
+    end_dt = datetime.strptime(target_end, "%Y-%m-%d").date()
+    days_diff = max(1, (end_dt - today).days)
     context.user_data["digest_timeframe"] = days_diff
     return await _ask_digest_day(query.message, context, is_callback=True)
 

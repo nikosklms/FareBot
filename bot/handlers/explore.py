@@ -283,15 +283,16 @@ async def handle_explore_calendar_date_selection(update: Update, context: Contex
         else:
             context.user_data.pop("cal_start_date", None)
             dep_date = start_date if start_date == clicked_date else f"{start_date}..{clicked_date}"
-            target_start = start_date
+            dates = sorted([start_date, clicked_date])
+            target_end = dates[1]
     else:
         dep_date = clicked_date
-        target_start = clicked_date
+        target_end = clicked_date
 
     context.user_data["explore_departure_date"] = dep_date
     today = datetime.now(timezone.utc).date()
-    start_dt = datetime.strptime(target_start, "%Y-%m-%d").date()
-    days_diff = max(1, (start_dt - today).days)
+    end_dt = datetime.strptime(target_end, "%Y-%m-%d").date()
+    days_diff = max(1, (end_dt - today).days)
     context.user_data["explore_timeframe"] = days_diff
 
     return await _ask_explore_limit(query.message, context, is_callback=True)
