@@ -5,7 +5,7 @@ import urllib.parse
 import urllib.error
 import time
 import json
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Callable, Awaitable
 from selectolax.lexbor import LexborHTMLParser
 from fast_flights import create_query, FlightQuery, Passengers
 from fast_flights.integrations.base import FetchIntegration
@@ -382,23 +382,33 @@ class FastFlightsProvider(AbstractFlightProvider):
         end_date: str,
         currency: str = "EUR",
         direct_only: bool = False,
-        max_days: Optional[int] = 330
+        max_days: Optional[int] = 330,
+        on_query_complete: Optional[Callable[[], Awaitable[None]]] = None
     ) -> List[FlightOffer]:
         from utils.date_parser import generate_date_sequence
         dates = generate_date_sequence(start_date, end_date, max_days=max_days)
         logger.info(f"[PROVIDER] Starting range search: {origin} -> {destination} across {len(dates)} dates ({start_date} to {end_date})")
 
         t_start = time.perf_counter()
-        tasks = [
-            self.search_flights(
-                origin=origin,
-                destination=destination,
-                departure_date=d,
-                currency=currency,
-                direct_only=direct_only
-            )
-            for d in dates
-        ]
+
+        async def _fetch_single_date(d: str) -> List[FlightOffer]:
+            try:
+                res = await self.search_flights(
+                    origin=origin,
+                    destination=destination,
+                    departure_date=d,
+                    currency=currency,
+                    direct_only=direct_only
+                )
+                return res
+            finally:
+                if on_query_complete:
+                    try:
+                        await on_query_complete()
+                    except Exception:
+                        pass
+
+        tasks = [_fetch_single_date(d) for d in dates]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_offers: List[FlightOffer] = []

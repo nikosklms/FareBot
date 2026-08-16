@@ -86,6 +86,26 @@ async def run_explore_query(
     num_batches = math.ceil(total_queries / 3)
     est_seconds = num_batches * 1.85
 
+    completed_queries = 0
+    last_callback_time = 0.0
+
+    async def on_single_query_done() -> None:
+        nonlocal completed_queries, last_callback_time
+        completed_queries += 1
+        now = time.perf_counter()
+
+        if status_callback and (now - last_callback_time >= 3.0 or completed_queries == total_queries):
+            last_callback_time = now
+            elapsed = max(0.1, now - t_start)
+            measured_sec_per_query = elapsed / completed_queries
+            remaining_queries = max(0, total_queries - completed_queries)
+            dynamic_est_seconds = remaining_queries * measured_sec_per_query
+
+            try:
+                await status_callback(dynamic_est_seconds, total_queries, num_airports, num_days)
+            except Exception as e:
+                logger.warning(f"[EXPLORE] Dynamic status_callback error: {e}")
+
     if status_callback:
         try:
             await status_callback(est_seconds, total_queries, num_airports, num_days)
@@ -110,9 +130,14 @@ async def run_explore_query(
 
         try:
             if end_date:
-                offers = await provider.search_flights_range(origin, dst_code, start_date, end_date, currency="EUR")
+                offers = await provider.search_flights_range(
+                    origin, dst_code, start_date, end_date, currency="EUR", on_query_complete=on_single_query_done
+                )
             else:
-                offers = await provider.search_flights(origin, dst_code, departure_date, currency="EUR")
+                try:
+                    offers = await provider.search_flights(origin, dst_code, departure_date, currency="EUR")
+                finally:
+                    await on_single_query_done()
 
             if not offers:
                 logger.debug(f"[EXPLORE] {origin} -> {dst_code}: 0 flight offers returned")
