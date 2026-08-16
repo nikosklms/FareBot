@@ -53,7 +53,8 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
         dep_date = build_timeframe_date_range(tf)
         start_date, end_date = dep_date.split("..")
         header_text = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({start_date} ➔ {end_date})..."
-        sent_msg = await update.message.reply_text(header_text, parse_mode="Markdown")
+        cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]])
+        sent_msg = await update.message.reply_text(header_text, parse_mode="Markdown", reply_markup=cancel_markup)
 
         from bot.handlers.common import build_status_estimate_text
 
@@ -66,7 +67,7 @@ async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYP
                     num_airports=num_airports,
                     num_days=num_days
                 )
-                await sent_msg.edit_text(status_text, parse_mode="Markdown")
+                await sent_msg.edit_text(status_text, parse_mode="Markdown", reply_markup=cancel_markup)
             except Exception:
                 pass
 
