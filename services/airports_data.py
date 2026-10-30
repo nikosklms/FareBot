@@ -332,6 +332,17 @@ REGION_LABELS = {
 def region_display_name(region: str) -> str:
     return region.replace("_", " ").title()
 
+
+REGION_ALIASES = {"greek islands": "islands", "south america": "latin_america", "usa": "north_america"}
+
+
+def find_region(text: str) -> Optional[str]:
+    """'Europe', 'latin america' or 'Greek Islands' -> the region key, else None."""
+    words = " ".join(text.lower().replace("_", " ").split())
+    if words in REGION_ALIASES:
+        return REGION_ALIASES[words]
+    return next((key for key in REGION_LABELS if key.replace("_", " ") == words), None)
+
 # City codes that search every airport in the city (see MULTI_AIRPORT_CITIES).
 CITY_AIRPORTS = [
     ("NYC", "New York All Airports", "United States"),

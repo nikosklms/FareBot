@@ -5,17 +5,21 @@ from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
-from telegram.ext import CommandHandler, ConversationHandler
+from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler
 
 from bot.formatting import flight_type_label, offers_block, progress_text, query_scope, short_window
 from bot.lifecycle import RESTART_NOTICE
-from bot.keyboards import button, flight_types, markup, stop_markup, track_button_data
+from bot.keyboards import (
+    EXPLORE_FROM_SEARCH, button, explore_from_search_prefix, flight_types, markup, regions, stop_markup,
+    track_button_data,
+)
 from bot.services import Services, get_services
 from bot.wizard import (
     DATES_PROMPT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
     Steps, run_in_background, start_draft, wizard_conversation,
 )
 from providers.fast_flights import build_google_flights_url
+from services.airports_data import region_display_name
 from services.progress import Progress
 from utils.date_parser import describe_window, generate_date_sequence, is_past, parse_date_or_range
 
@@ -66,8 +70,42 @@ async def ask_origin(update: Update, context: Context) -> int:
 async def ask_destination(update: Update, context: Context) -> int:
     d = draft(context, DRAFT)
     await respond(update, f"🛫 <b>From</b>: {d['origin']}\n\n🛬 <b>Step 2/4</b>: Where are you flying to? "
-                          "(e.g. London, LON)", markup(back=True))
+                          "(e.g. London, LON, or a region like Europe)",
+                  markup([button("🌍 Whole Region Instead", REGION_PICKER)], back=True))
     return DESTINATION
+
+
+# A region as destination continues in /explore, which starts from these buttons.
+REGION_PICKER = "src:regions"
+
+
+async def show_region_picker(update: Update, context: Context) -> int:
+    await update.callback_query.answer()
+    origin = draft(context, DRAFT)["origin"]
+    await respond(update, f"🛫 <b>From</b>: {origin}\n\n🌍 Which region? I'll find the best deals across all of it.",
+                  regions(explore_from_search_prefix(origin), back_data=f"{REGION_PICKER}:close"))
+    return DESTINATION
+
+
+async def close_region_picker(update: Update, context: Context) -> int:
+    await update.callback_query.answer()
+    return await STEPS.again(update, context)
+
+
+async def region_typed(update: Update, context: Context, region: str) -> int:
+    origin = draft(context, DRAFT)["origin"]
+    await update.message.reply_text(
+        f"🌍 <b>{region_display_name(region)}</b> is a whole region. Want the best deals from {origin} "
+        "to every airport in it? (Or type a city instead.)",
+        reply_markup=markup([button(f"🌍 Explore {region_display_name(region)}",
+                                    f"{explore_from_search_prefix(origin)}:{region}")], back=True),
+    )
+    return DESTINATION
+
+
+async def handed_to_explore(update: Update, context: Context) -> int:
+    """/explore takes over from the same button press."""
+    return ConversationHandler.END
 
 
 async def ask_dates(update: Update, context: Context) -> int:
@@ -182,7 +220,12 @@ async def _edit_quietly(message: Message, text: str, reply_markup: Optional[Inli
 def conversation() -> ConversationHandler:
     return wizard_conversation("search", CommandHandler("search", start), {
         ORIGIN: airport_step("src:org", ORIGIN, origin_picked, back=False),
-        DESTINATION: airport_step("src:dst", DESTINATION, destination_picked),
+        DESTINATION: [
+            *airport_step("src:dst", DESTINATION, destination_picked, on_region=region_typed),
+            CallbackQueryHandler(show_region_picker, pattern=f"^{REGION_PICKER}$"),
+            CallbackQueryHandler(close_region_picker, pattern=f"^{REGION_PICKER}:close$"),
+            CallbackQueryHandler(handed_to_explore, pattern=EXPLORE_FROM_SEARCH),
+        ],
         DATES: dates_step("src:date", DATES, dates_picked, STEPS.again),
         FLIGHT_TYPE: [choice_step("src:direct", flight_type_picked, "0|1")],
     }, STEPS.back)

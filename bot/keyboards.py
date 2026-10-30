@@ -10,6 +10,8 @@ BACK = "back"
 NOOP = "noop"
 STOP_TASK = "task:stop"
 TRACK_ADD = "trk:add"
+# '/search' hands a region destination to '/explore' with 'exp:from:<ORIGIN>:<region>'.
+EXPLORE_FROM_SEARCH = rf"^exp:from:[A-Z]{{3}}:({'|'.join(REGION_LABELS)})$"
 
 QUICK_ORIGINS = [("ATH", "Athens"), ("SKG", "Thessaloniki"), ("HER", "Heraklion"), ("LON", "London")]
 RESULT_LIMITS = [5, 10, 15, 20]
@@ -24,14 +26,15 @@ def cancel_button() -> InlineKeyboardButton:
     return button("❌ Cancel", CANCEL)
 
 
-def back_button() -> InlineKeyboardButton:
-    return button("⬅️ Back", BACK)
+def back_button(data: str = BACK) -> InlineKeyboardButton:
+    return button("⬅️ Back", data)
 
 
-def markup(*rows: list[InlineKeyboardButton], cancel: bool = True, back: bool = False) -> InlineKeyboardMarkup:
+def markup(*rows: list[InlineKeyboardButton], cancel: bool = True, back: bool = False,
+           back_data: str = BACK) -> InlineKeyboardMarkup:
     """Rows of buttons, ending with [⬅️ Back] [❌ Cancel] when asked for."""
     keyboard = [row for row in rows if row]
-    last_row = ([back_button()] if back else []) + ([cancel_button()] if cancel else [])
+    last_row = ([back_button(back_data)] if back else []) + ([cancel_button()] if cancel else [])
     if last_row:
         keyboard.append(last_row)
     return InlineKeyboardMarkup(keyboard)
@@ -50,8 +53,9 @@ def quick_origins(prefix: str) -> InlineKeyboardMarkup:
     return markup(*pairs([button(f"{code} - {name}", f"{prefix}:{code}") for code, name in QUICK_ORIGINS]))
 
 
-def regions(prefix: str) -> InlineKeyboardMarkup:
-    return markup(*pairs([button(label, f"{prefix}:{key}") for key, label in REGION_LABELS.items()]), back=True)
+def regions(prefix: str, back_data: str = BACK) -> InlineKeyboardMarkup:
+    return markup(*pairs([button(label, f"{prefix}:{key}") for key, label in REGION_LABELS.items()]),
+                  back=True, back_data=back_data)
 
 
 def sort_modes(prefix: str, default: Optional[str] = None) -> InlineKeyboardMarkup:
@@ -86,3 +90,8 @@ def track_button_data(origin: str, destination: str, start: str, end: Optional[s
                       budget: float, direct_only: bool = False) -> str:
     """Callback data for a button that starts tracking a route at a given budget."""
     return f"{TRACK_ADD}:{origin}:{destination}:{start}:{end or ''}:{budget:.2f}:{int(direct_only)}"
+
+
+def explore_from_search_prefix(origin: str) -> str:
+    return f"exp:from:{origin}"
+

@@ -5,13 +5,14 @@ from typing import Optional
 
 from telegram import Message, Update
 from telegram.error import BadRequest
-from telegram.ext import CommandHandler, ConversationHandler, MessageHandler
+from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler, MessageHandler
 
 from bot.deal_buttons import COLLAPSED, remember_deal_buttons
 from bot.formatting import deal_report, eur, progress_text, query_scope, short_window, split_message
 from bot.lifecycle import RESTART_NOTICE
 from bot.keyboards import (
-    DEFAULT_RESULT_LIMIT, markup, quick_origins, regions, result_limits, sort_modes, stop_markup,
+    DEFAULT_RESULT_LIMIT, EXPLORE_FROM_SEARCH, markup, quick_origins, regions, result_limits, sort_modes,
+    stop_markup,
 )
 from bot.services import Services, get_services
 from bot.wizard import (
@@ -58,6 +59,15 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     start_date, end_date = days_ahead_window(max(1, days))
     await run_explore(update, context, matches[0][0], region, start_date, end_date, "both",
                       min(max(limit, 1), MAX_RESULTS), budget or None)
+
+
+async def start_from_search(update: Update, context: Context) -> int:
+    """A region picked as the destination in /search: continue here with origin and region set."""
+    await update.callback_query.answer()
+    _, _, origin, region = update.callback_query.data.split(":")
+    d = start_draft(context, DRAFT)
+    d["origin"], d["region"] = origin, region
+    return await STEPS.ask(update, context, 2)
 
 
 async def ask_origin(update: Update, context: Context) -> int:
@@ -186,7 +196,10 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
 
 
 def conversation() -> ConversationHandler:
-    return wizard_conversation("explore", CommandHandler("explore", start), {
+    return wizard_conversation("explore", [
+        CommandHandler("explore", start),
+        CallbackQueryHandler(start_from_search, pattern=EXPLORE_FROM_SEARCH),
+    ], {
         ORIGIN: airport_step("exp:org", ORIGIN, origin_picked, back=False),
         REGION: [choice_step("exp:reg", region_picked, "|".join(REGION_LABELS))],
         SORT: [choice_step("exp:sort", sort_picked, "discount|price|both")],

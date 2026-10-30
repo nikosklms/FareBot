@@ -22,6 +22,7 @@ from bot.date_picker import RANGE, SINGLE, calendar_markup
 from bot.keyboards import BACK, CANCEL, button, markup, pairs
 from bot.lifecycle import track_task
 from bot.services import get_services
+from services.airports_data import find_region
 from utils.date_parser import MAX_RANGE_DAYS, PRESETS, get_preset_range, is_past, parse_date_or_range, today_utc
 
 logger = logging.getLogger(__name__)
@@ -163,10 +164,17 @@ def cancel_running_task(context: Context) -> bool:
 # Airport step
 # ----------------------------------------------------------------------
 
-def airport_step(prefix: str, state: int, on_pick: OnAirport, back: bool = True) -> list[BaseHandler]:
-    """Typed city or code -> up to 4 matching airports as buttons -> on_pick(code)."""
+def airport_step(prefix: str, state: int, on_pick: OnAirport, back: bool = True,
+                 on_region: Optional[Callable[[Update, Context, str], Awaitable[int]]] = None) -> list[BaseHandler]:
+    """Typed city or code -> up to 4 matching airports as buttons -> on_pick(code).
+
+    With on_region, typing a region name ('Europe') calls it instead of guessing airports.
+    """
 
     async def typed(update: Update, context: Context) -> int:
+        region = find_region(update.message.text) if on_region else None
+        if region:
+            return await on_region(update, context, region)
         matches = get_services(context).resolver.resolve(update.message.text)
         if not matches:
             await update.message.reply_text(
