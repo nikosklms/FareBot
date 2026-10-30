@@ -228,9 +228,11 @@ def parse_google_flights_payload_generic(
                 is_direct_flight = False
 
             def _fmt_t(t_list):
-                if isinstance(t_list, list) and len(t_list) >= 2 and isinstance(t_list[0], int) and isinstance(t_list[1], int):
-                    return f"{t_list[0]:02d}:{t_list[1]:02d}"
-                return None
+                # Google drops zero parts: [8] is 08:00 and [None, 31] is 00:31.
+                if not isinstance(t_list, list) or not t_list or not any(isinstance(v, int) for v in t_list[:2]):
+                    return None
+                hour, minute = (list(t_list[:2]) + [None, None])[:2]
+                return f"{hour or 0:02d}:{minute or 0:02d}"
 
             def _calc_day_offset(dep_d_list, arr_d_list):
                 try:

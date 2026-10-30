@@ -166,6 +166,16 @@ async def test_parse_google_flights_overnight_flight_day_offset():
     assert offers[0].arrival_time == "04:15"
     assert offers[0].day_offset == 1
 
+
+def test_parse_times_with_omitted_zero_parts():
+    """Google sends 08:00 as [8] and 00:31 as [None, 31]; those must not look like time-less summary cards."""
+    leg = [None]*8 + [[8], None, [None, 31]] + [None]*9 + [[2027, 4, 3], [2027, 4, 4], [["flight_meta"]]]
+    payload = [[None, ["Aegean"], [leg]], [[None, 120.0]]]
+    html = f"<script class=\"ds:1\">data:{json.dumps([payload])},</script>"
+
+    [offer] = parse_google_flights_payload_generic(html, "ATH", "LON", "2027-04-03")
+    assert (offer.departure_time, offer.arrival_time) == ("08:00", "00:31")
+
 @pytest.mark.asyncio
 async def test_google_flights_url_generation_and_stateless_booking_links():
     """Verify that generated booking URLs use Google Flights /search?tfs= format from stateless IATA+date encoding, not session-bound tokens."""
