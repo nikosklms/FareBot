@@ -151,10 +151,9 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
     await db.record_price(tracker.id, lowest.price, lowest.airline)
     logger.info("[TRACKER] #%d %s -> %s lowest %s (budget %s)", tracker.id, tracker.origin_code,
                 tracker.destination_code, eur(lowest.price), eur(tracker.max_budget))
-    if lowest.price > tracker.max_budget:
+    if lowest.price >= tracker.max_budget:
         return True
 
-    await db.set_tracker_status(tracker.id, PAUSED)
     text = "\n".join([
         "🚨 <b>PRICE DROP ALERT!</b> 🚨",
         "",
@@ -175,19 +174,24 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
         [InlineKeyboardButton("🔗 View Best Offer on Google Flights", url=best_url)],
         [button("✏️ Set Lower Budget", f"dash:budget:t:{tracker.id}"), button("🗑️ Delete", f"dash:del:t:{tracker.id}")],
     ])
-    await _notify(services, bot, tracker, text, buttons)
+    if not await _notify(services, bot, tracker, text, buttons):
+        return True  # not delivered: stay active and alert at the next check
+    await db.set_tracker_status(tracker.id, PAUSED)
     return False
 
 
 async def _notify(services: Services, bot: Bot, tracker: Tracker, text: str,
-                  reply_markup: Optional[InlineKeyboardMarkup] = None) -> None:
+                  reply_markup: Optional[InlineKeyboardMarkup] = None) -> bool:
+    """Send a tracker message; True if it was delivered."""
     try:
         await bot.send_message(chat_id=tracker.user_id, text=text, reply_markup=reply_markup)
+        return True
     except Forbidden:
         logger.warning("User %s blocked the bot; pausing tracker #%d", tracker.user_id, tracker.id)
         await services.db.set_tracker_status(tracker.id, PAUSED)
     except TelegramError:
         logger.exception("Failed to send tracker #%d notification", tracker.id)
+    return False
 
 
 # ----------------------------------------------------------------------
@@ -287,5 +291,18 @@ async def _edit(message: Optional[Message], text: str,
 # ----------------------------------------------------------------------
 
 async def cleanup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    stats = await get_services(context).db.purge_stale()
-    logger.info("Daily cleanup: %d expired, %d purged", stats["expired"], stats["purged"])
+    services = get_services(context)
+    result = await services.db.purge_stale(today_utc())
+    for tracker in result.expired_trackers:
+        unschedule_tracker(context.job_queue, tracker.id)
+        dates = describe_window(tracker.departure_date, tracker.departure_date_end)
+        await _notify(services, context.bot, tracker,
+                      f"ℹ️ Your tracker for <b>{tracker.origin_code} ✈️ {tracker.destination_code}</b> on "
+                      f"<b>{dates}</b> expired: the departure date has passed.")
+    for digest in result.expired_digests:
+        unschedule_digest(context.job_queue, digest.id)
+        await _send(context.bot, digest.user_id,
+                    f"🗞️ <b>Weekly Flight Digest: {digest.origin_code} → {region_display_name(digest.region)}</b>"
+                    "\n\nℹ️ The travel dates for this digest have passed, so it has been stopped.")
+    logger.info("Daily cleanup: %d trackers and %d digests expired, %d deleted",
+                len(result.expired_trackers), len(result.expired_digests), result.purged)

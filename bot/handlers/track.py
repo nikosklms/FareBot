@@ -75,7 +75,7 @@ def tracker_created_text(tracker: Tracker, note: str = "") -> str:
         f"🎯 <b>Target budget</b>: {eur(tracker.max_budget)}{note}",
         f"🔄 <b>Checks</b>: every {tracker.frequency_hours} hours",
         "",
-        "I'll message you as soon as a price drops to your budget.",
+        "I'll message you as soon as a price drops below your budget.",
     ])
 
 
@@ -113,9 +113,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(USAGE)
         return
     resolver = get_services(context).resolver
-    origin_matches, destination_matches = resolver.resolve(args[0]), resolver.resolve(args[1])
-    if not origin_matches or not destination_matches:
-        unknown = args[0] if not origin_matches else args[1]
+    origin, destination = resolver.best_guess(args[0]), resolver.best_guess(args[1])
+    if not origin or not destination:
+        unknown = args[0] if not origin else args[1]
         await update.message.reply_text(f"❌ I don't know '{unknown}'.")
         return
     try:
@@ -130,7 +130,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     direct_only = len(args) > 4 and args[4].lower() in ("direct", "-d", "--direct")
     try:
         tracker = await create_tracker_for_user(
-            context, update.effective_user.id, origin_matches[0][0], destination_matches[0][0],
+            context, update.effective_user.id, origin, destination,
             start_date, end_date, budget, direct_only=direct_only,
         )
     except TrackerRejected as rejected:

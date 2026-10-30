@@ -274,3 +274,22 @@ async def test_server_errors_give_no_offers_instead_of_crashing():
     provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(500)))
     assert await provider.search_flights("SKG", "VIE", "2026-10-31") == []
     await provider.close()
+
+
+def test_merge_keeps_different_flights_at_the_same_price():
+    from providers.fast_flights import merge_duplicate_offers
+    def offer(airline, time, direct=True):
+        return FlightOffer("ATH", "LGW", "2027-01-01", 49.0, airline=airline, departure_time=time, is_direct=direct)
+    summary = FlightOffer("ATH", "LGW", "2027-01-01", 49.0, airline="Various Airlines")
+    merged = merge_duplicate_offers([summary, offer("easyJet", "06:00"), offer("BA", "14:00"), offer("BA", "14:00")])
+    assert [o.airline for o in merged] == ["easyJet", "BA"]
+    assert merge_duplicate_offers([summary]) == [summary]
+
+
+@pytest.mark.asyncio
+async def test_direct_only_never_loses_a_direct_flight_to_a_same_price_connection():
+    connecting = FlightOffer("ATH", "LGW", "2027-01-01", 49.0, airline="easyJet", departure_time="06:00", is_direct=False)
+    direct = FlightOffer("ATH", "LGW", "2027-01-01", 49.0, airline="Aegean", departure_time="18:00", is_direct=True)
+    provider = FastFlightsProvider(client=StaticClient())
+    with patch("providers.fast_flights.parse_google_flights_payload_generic", return_value=[connecting, direct]):
+        assert [o.airline for o in await provider.search_flights("ATH", "LGW", "2027-01-01", direct_only=True)] == ["Aegean"]

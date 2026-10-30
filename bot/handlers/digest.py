@@ -60,15 +60,15 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
             or not all(n.replace(".", "", 1).isdigit() for n in numbers)):
         await update.message.reply_text(USAGE)
         return
-    matches = get_services(context).resolver.resolve(args[0])
-    if not matches:
+    origin = get_services(context).resolver.best_guess(args[0])
+    if not origin:
         await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
     budget = float(numbers[1]) if len(numbers) > 1 else 0
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
     await create_digest(update, context, {
-        "origin": matches[0][0], "region": region, "sort": "both", "budget": budget or None,
+        "origin": origin, "region": region, "sort": "both", "budget": budget or None,
         "days": max(1, days), "start": None, "end": None, "day": day, "time": clock,
         "limit": min(max(limit, 1), MAX_RESULTS),
     })

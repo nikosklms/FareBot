@@ -278,11 +278,11 @@ def parse_google_flights_payload_generic(
 
     _walk(payload)
 
-    # Deduplicate offers by (price, airline, origin, destination)
+    # The payload lists some flights more than once; different flights at the same price stay.
     unique_offers: List[FlightOffer] = []
     seen = set()
     for offer in offers:
-        key = (offer.price, offer.airline, offer.origin, offer.destination)
+        key = (offer.price, offer.airline, offer.origin, offer.destination, offer.departure_time, offer.arrival_time)
         if key not in seen:
             seen.add(key)
             unique_offers.append(offer)
@@ -291,6 +291,32 @@ def parse_google_flights_payload_generic(
     unique_offers.sort(key=lambda x: x.price)
     logger.debug(f"[PARSER] {default_origin} -> {default_destination}: Extracted {len(offers)} raw offers, {len(unique_offers)} unique offers")
     return unique_offers
+
+def _is_summary(offer: FlightOffer) -> bool:
+    return offer.airline == "Various Airlines" or offer.departure_time is None
+
+
+def merge_duplicate_offers(offers: List[FlightOffer]) -> List[FlightOffer]:
+    """Drop repeats of the same flight while keeping different flights that share a price.
+
+    Google often lists a fare twice: as a summary card ("Various Airlines", no times)
+    and as a detailed card. A summary card is kept only when no detailed card has its price.
+    """
+    groups: dict[tuple[float, str, str, str], List[FlightOffer]] = {}
+    for offer in offers:
+        groups.setdefault((offer.price, offer.departure_date, offer.origin, offer.destination), []).append(offer)
+
+    merged: List[FlightOffer] = []
+    for group in groups.values():
+        detailed = [o for o in group if not _is_summary(o)]
+        seen = set()
+        for offer in detailed or group[:1]:
+            key = (offer.airline, offer.departure_time, offer.arrival_time, offer.is_direct)
+            if key not in seen:
+                seen.add(key)
+                merged.append(offer)
+    return merged
+
 
 class FastFlightsProvider(AbstractFlightProvider):
     """Google Flights scraper built on fast-flights query encoding."""
@@ -335,18 +361,7 @@ class FastFlightsProvider(AbstractFlightProvider):
         ))
         all_offers = [offer for batch in results for offer in batch]
 
-        # The same fare often appears twice: as a summary card ("Various Airlines")
-        # and as a detailed card. Keep the detailed one.
-        unique: dict[tuple[float, str, str, str], FlightOffer] = {}
-        for offer in all_offers:
-            key = (offer.price, offer.departure_date, offer.origin, offer.destination)
-            existing = unique.get(key)
-            if (existing is None
-                    or (existing.airline == "Various Airlines" and offer.airline != "Various Airlines")
-                    or (existing.departure_time is None and offer.departure_time is not None)):
-                unique[key] = offer
-
-        offers = [o for o in unique.values() if o.is_direct or not direct_only]
+        offers = merge_duplicate_offers([o for o in all_offers if o.is_direct or not direct_only])
         offers.sort(key=lambda o: o.price)
         logger.debug(
             f"[PROVIDER] {origin} -> {destination} on {departure_date}: {len(offers)} offers "

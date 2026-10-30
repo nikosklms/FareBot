@@ -162,3 +162,15 @@ async def test_only_the_newest_wizard_answers_typed_text(bot):
 
     assert (await bot.services.db.get_tracker(tracker.id)).max_budget == 45.0
     assert len(bot.telegram.texts) == replies + 1  # only the editor replied; /search stayed quiet
+
+
+async def test_warns_when_new_budget_is_above_last_price(bot):
+    tracker = await make_tracker(bot)
+    await bot.services.db.record_price(tracker.id, 499.0, "Asiana")
+    await bot.press(f"dash:edit:t:{tracker.id}")
+    await bot.press("edit:field:budget")
+    await bot.send("949")
+    assert "last price found was €499.00, already below this budget" in bot.telegram.last_text
+    await bot.press("edit:field:budget")
+    await bot.send("450")
+    assert "already below" not in bot.telegram.last_text

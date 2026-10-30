@@ -49,15 +49,15 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     if region not in REGION_LABELS or not all(n.replace(".", "", 1).isdigit() for n in numbers):
         await update.message.reply_text(USAGE)
         return
-    matches = get_services(context).resolver.resolve(args[0])
-    if not matches:
+    origin = get_services(context).resolver.best_guess(args[0])
+    if not origin:
         await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
     budget = float(numbers[1]) if len(numbers) > 1 else 0
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
     start_date, end_date = days_ahead_window(max(1, days))
-    await run_explore(update, context, matches[0][0], region, start_date, end_date, "both",
+    await run_explore(update, context, origin, region, start_date, end_date, "both",
                       min(max(limit, 1), MAX_RESULTS), budget or None)
 
 

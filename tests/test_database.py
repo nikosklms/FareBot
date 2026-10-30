@@ -98,30 +98,35 @@ async def test_digest_window_rolling_and_fixed(db):
     assert fixed.window(date(2027, 1, 1)) == ("2027-01-05", None)
 
 
-async def test_purge_stale_expires_and_deletes(db):
-    past = (await make_tracker(db, start="2020-01-01")).id
-    range_still_open = (await make_tracker(db, start="2020-01-01", departure_date_end=future(5))).id
-    upcoming = (await make_tracker(db, start=future(5))).id
-    old_expired = (await make_tracker(db, start="2020-01-01")).id
-    old_paused = (await make_tracker(db, start=future(5))).id
-    past_digest = (await db.create_digest(user_id=1, origin_code="ATH", region="asia", departure_date="2020-01-01")).id
+async def test_purge_stale_expires_by_travel_date_and_keeps_paused_future_items(db):
+    from datetime import date, timedelta
+    today = date.today()
+    long_ago = (today - timedelta(days=45)).isoformat()
+    past = (await make_tracker(db, start=(today - timedelta(days=2)).isoformat())).id
+    paused_past = (await make_tracker(db, destination="PAR", start=(today - timedelta(days=3)).isoformat())).id
+    await db.set_tracker_status(paused_past, PAUSED)
+    range_still_open = (await make_tracker(db, start=long_ago, departure_date_end=future(5))).id
+    old_paused_future = (await make_tracker(db, destination="ROM", start=future(90))).id
+    await db.set_tracker_status(old_paused_future, PAUSED)
+    long_expired = (await make_tracker(db, destination="MAD", start=long_ago)).id
+    await db.set_tracker_status(long_expired, EXPIRED)
+    past_digest = (await db.create_digest(user_id=1, origin_code="ATH", region="asia", departure_date=long_ago)).id
     rolling_digest = (await db.create_digest(user_id=1, origin_code="ATH", region="europe", days_ahead=30)).id
-
     async with aiosqlite.connect(db.path) as conn:
-        await conn.execute("UPDATE trackers SET status = 'EXPIRED', created_at = '2000-01-01' WHERE id = ?", (old_expired,))
-        await conn.execute("UPDATE trackers SET status = 'PAUSED', created_at = '2000-01-01' WHERE id = ?", (old_paused,))
+        await conn.execute("UPDATE trackers SET created_at = '2000-01-01'")
+        await conn.execute("UPDATE digests SET created_at = '2000-01-01'")
         await conn.commit()
 
-    stats = await db.purge_stale()
+    result = await db.purge_stale(today)
 
+    assert {t.id for t in result.expired_trackers} == {past, paused_past}
+    assert [d.id for d in result.expired_digests] == [past_digest]
     assert (await db.get_tracker(past)).status == EXPIRED
     assert (await db.get_tracker(range_still_open)).status == ACTIVE
-    assert (await db.get_tracker(upcoming)).status == ACTIVE
-    assert await db.get_tracker(old_expired) is None
-    assert await db.get_tracker(old_paused) is None
-    assert (await db.get_digest(past_digest)).status == EXPIRED
+    assert (await db.get_tracker(old_paused_future)).status == PAUSED  # old but still wanted: kept
+    assert await db.get_tracker(long_expired) is None  # travel dates over 30 days ago
     assert (await db.get_digest(rolling_digest)).status == ACTIVE
-    assert stats == {"expired": 2, "purged": 2}
+    assert result.purged == 2  # long_expired and past_digest (expired now, dates 45 days ago)
 
 
 async def test_log_unauthorized_attempt(db):

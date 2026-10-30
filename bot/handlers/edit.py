@@ -10,7 +10,7 @@ from typing import Any, Optional
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler
 
-from bot.formatting import budget_text, digest_card, digest_window_text, flight_type_label, tracker_card
+from bot.formatting import budget_text, digest_card, digest_window_text, eur, flight_type_label, tracker_card
 from bot.handlers.dashboard import DIGEST, TRACKER, Item, item_buttons, label_for, load_owned, set_active
 from bot.handlers.digest import BUDGET_OPTIONS, DAY_OPTIONS, DEFAULT_DAYS, MAX_RESULTS, TIME_OPTIONS, parse_clock
 from bot.handlers.track import FREQUENCIES
@@ -119,6 +119,9 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
 
     if kind == TRACKER:
         item = await services.db.update_tracker(item.id, **changes)
+        if "max_budget" in changes and item.last_price_found and item.last_price_found < item.max_budget:
+            notes.append(f"⚠️ The last price found was {eur(item.last_price_found)}, already below this "
+                         "budget, so you'll get an alert at the next check.")
         if "max_budget" in changes and item.status == PAUSED:
             await set_active(services, context, kind, item, active=True)
             notes.append("It was paused, so I've resumed it.")

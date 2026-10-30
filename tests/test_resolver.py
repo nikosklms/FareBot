@@ -69,3 +69,14 @@ def test_always_guesses_and_offers_unlisted_codes():
     assert resolver.resolve("bhx")[0][0] == "BHX"
     assert [m[0] for m in resolver.resolve("kos")][:2] == ["KGS", "KOS"]
     assert resolver.resolve("   ") == []
+
+
+@pytest.mark.parametrize("typed, code", [("HAM", "HAM"), ("san", "SAN"), ("BRI", "BRI"), ("ath", "ATH")])
+def test_shortcuts_take_three_letters_as_a_code(typed, code):
+    assert LocationResolver().best_guess(typed) == code
+
+
+def test_shortcut_names_use_the_best_match():
+    resolver = LocationResolver()
+    assert resolver.best_guess("thessaloniki") == "SKG"
+    assert resolver.best_guess("Los Angeles") == "LAX"

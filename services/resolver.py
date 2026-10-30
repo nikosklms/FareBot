@@ -64,6 +64,14 @@ class LocationResolver:
             matches.insert(position, unlisted)
         return matches[:limit]
 
+    def best_guess(self, query: str) -> Optional[str]:
+        """One airport code for command shortcuts: 3 letters are always taken as a code."""
+        code = normalize(query).replace(" ", "").upper()
+        if len(code) == 3 and code.isalpha():
+            return code
+        matches = self.resolve(query, limit=1)
+        return matches[0][0] if matches else None
+
     def _direct_score(self, text: str, index: int, airport_code: str) -> float:
         bonus = CITY_BONUS if airport_code in MULTI_AIRPORT_CITIES else 0
         name = self._names[index]

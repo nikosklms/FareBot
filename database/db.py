@@ -1,7 +1,8 @@
 import logging
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
@@ -83,6 +84,17 @@ DIGEST_EDITABLE = {"max_budget", "days_ahead", "departure_date", "departure_date
 
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CLOCK = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+EXPIRED_KEPT_DAYS = 30
+
+
+@dataclass
+class StaleCleanup:
+    """What purge_stale changed; expired items were active or paused until now."""
+    expired_trackers: list[Tracker]
+    expired_digests: list[Digest]
+    purged: int
 
 
 def _now() -> str:
@@ -326,39 +338,37 @@ class Database:
             (user_id or 0, username, full_name, input_text),
         )
 
-    async def purge_stale(self) -> dict[str, int]:
-        """Expire past-dated trackers and fixed-window digests, then delete old leftovers.
-
-        Expired rows are deleted 30 days after creation, paused rows after 60.
+    async def purge_stale(self, today: date) -> StaleCleanup:
+        """Expire trackers and fixed-date digests whose travel dates have passed, and delete
+        expired ones 30 days after their last travel date. Paused items with future dates
+        and rolling digests are never removed automatically.
         """
-        today = datetime.now(timezone.utc).date().isoformat()
-        expired_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
-        paused_cutoff = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S")
+        today_str = today.isoformat()
+        delete_before = (today - timedelta(days=EXPIRED_KEPT_DAYS)).isoformat()
+        last_date = "COALESCE(departure_date_end, departure_date)"
 
         async with self._connect() as db:
-            expired = 0
-            cur = await db.execute(
-                "UPDATE trackers SET status = ? WHERE status = ? AND COALESCE(departure_date_end, departure_date) < ?",
-                (EXPIRED, ACTIVE, today),
-            )
-            expired += cur.rowcount
-            cur = await db.execute(
-                "UPDATE digests SET status = ? WHERE status = ? AND days_ahead IS NULL"
-                " AND COALESCE(departure_date_end, departure_date) < ?",
-                (EXPIRED, ACTIVE, today),
-            )
-            expired += cur.rowcount
+            async with db.execute(
+                f"SELECT * FROM trackers WHERE status IN (?, ?) AND {last_date} < ?", (ACTIVE, PAUSED, today_str)
+            ) as cur:
+                trackers = [_tracker(r) for r in await cur.fetchall()]
+            async with db.execute(
+                f"SELECT * FROM digests WHERE status IN (?, ?) AND days_ahead IS NULL AND {last_date} < ?",
+                (ACTIVE, PAUSED, today_str),
+            ) as cur:
+                digests = [_digest(r) for r in await cur.fetchall()]
+            for table, items in (("trackers", trackers), ("digests", digests)):
+                await db.executemany(f"UPDATE {table} SET status = ? WHERE id = ?", [(EXPIRED, i.id) for i in items])
 
             purged = 0
             for table in ("trackers", "digests"):
                 cur = await db.execute(
-                    f"DELETE FROM {table} WHERE (status = ? AND created_at < ?) OR (status = ? AND created_at < ?)",
-                    (EXPIRED, expired_cutoff, PAUSED, paused_cutoff),
+                    f"DELETE FROM {table} WHERE status = ? AND {last_date} < ?", (EXPIRED, delete_before)
                 )
                 purged += cur.rowcount
             await db.commit()
 
-        return {"expired": expired, "purged": purged}
+        return StaleCleanup(expired_trackers=trackers, expired_digests=digests, purged=purged)
 
     async def _update(self, table: str, editable: set[str], row_id: int, changes: dict[str, Any]) -> None:
         unknown = set(changes) - editable

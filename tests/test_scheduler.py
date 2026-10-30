@@ -146,3 +146,44 @@ async def test_digest_job_runs_with_the_users_data(bot):
     schedule_digest(bot.app.job_queue, digest, timezone.utc)
     [job] = bot.app.job_queue.get_jobs_by_name(f"digest_job_{digest.id}")
     assert job.user_id == USER_ID and job.chat_id == USER_ID
+
+
+async def test_price_equal_to_budget_is_not_a_drop(bot, provider):
+    provider.offers = offers_at(100.0)
+    t = await tracker(bot, budget=100.0)
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    assert bot.telegram.calls_to("sendMessage") == []
+
+
+async def test_tracking_from_search_waits_for_a_real_drop(bot, provider):
+    provider.offers = offers_at(87.0, 120.0)
+    await bot.send(f"/search ATH LON {future(10)}")
+    await bot.finish_background_task()
+    await bot.press(bot.telegram.button_data("Track This Route"))
+    [t] = await bot.services.db.list_trackers(USER_ID)
+    sent = len(bot.telegram.calls_to("sendMessage"))
+
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    assert len(bot.telegram.calls_to("sendMessage")) == sent  # same price: no alert
+    provider.offers = offers_at(80.0)
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False
+    assert "PRICE DROP ALERT" in bot.telegram.last_text
+
+
+async def test_undelivered_alert_keeps_tracker_active(bot, provider):
+    provider.offers = offers_at(50.0)
+    t = await tracker(bot)
+    bot.telegram.sending_fails = True
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    assert (await bot.services.db.get_tracker(t.id)).status == ACTIVE
+
+
+async def test_cleanup_tells_users_what_expired(bot):
+    from daemon.scheduler import cleanup_job
+    from unittest.mock import MagicMock
+    from datetime import date, timedelta
+    t = await tracker(bot, start=(date.today() - timedelta(days=1)).isoformat())
+    context = MagicMock(bot=bot.app.bot, job_queue=bot.app.job_queue, bot_data=bot.app.bot_data)
+    await cleanup_job(context)
+    assert (await bot.services.db.get_tracker(t.id)).status == EXPIRED
+    assert "expired" in bot.telegram.last_text

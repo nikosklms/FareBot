@@ -44,9 +44,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(USAGE)
         return
     resolver = get_services(context).resolver
-    origin_matches, destination_matches = resolver.resolve(args[0]), resolver.resolve(args[1])
-    if not origin_matches or not destination_matches:
-        unknown = args[0] if not origin_matches else args[1]
+    origin, destination = resolver.best_guess(args[0]), resolver.best_guess(args[1])
+    if not origin or not destination:
+        unknown = args[0] if not origin else args[1]
         await update.message.reply_text(f"❌ I don't know '{unknown}'.")
         return
     try:
@@ -58,7 +58,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text("❌ That date is in the past.")
         return
     direct_only = len(args) > 3 and args[3].lower() in ("direct", "-d", "--direct")
-    await run_search(update, context, origin_matches[0][0], destination_matches[0][0], start_date, end_date, direct_only)
+    await run_search(update, context, origin, destination, start_date, end_date, direct_only)
 
 
 async def ask_origin(update: Update, context: Context) -> int:

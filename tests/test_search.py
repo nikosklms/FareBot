@@ -92,7 +92,7 @@ async def test_rejects_bad_and_past_dates(bot):
 
 
 async def test_unknown_place(bot, monkeypatch):
-    monkeypatch.setattr(bot.services.resolver, "resolve", lambda text: [])
+    monkeypatch.setattr(bot.services.resolver, "resolve", lambda text, limit=5: [])
     await bot.send("/search")
     await bot.send("Atlantis")
     assert "don't know that place" in bot.telegram.last_text
