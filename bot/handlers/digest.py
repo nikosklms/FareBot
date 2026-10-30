@@ -9,6 +9,7 @@ from bot.formatting import budget_text, digest_card
 from bot.keyboards import DEFAULT_RESULT_LIMIT, button, markup, pairs, quick_origins, regions, result_limits, sort_modes
 from bot.services import get_services
 from bot.wizard import (
+    parse_price,
     TEXT, Context, Steps, airport_step, choice_step, draft, respond, start_draft, timeframe_keyboard,
     timeframe_step,
     wizard_conversation,
@@ -153,10 +154,8 @@ async def budget_picked(update: Update, context: Context, value: str) -> int:
 
 
 async def budget_typed(update: Update, context: Context) -> int:
-    try:
-        budget = float(update.message.text.strip().replace("€", ""))
-    except ValueError:
-        budget = -1
+    budget = parse_price(update.message.text)
+    budget = -1 if budget is None else budget
     if budget < 0:
         await update.message.reply_text("❌ Type an amount like <code>80</code>, or <code>0</code> for any budget.",
                                         reply_markup=markup(back=True))

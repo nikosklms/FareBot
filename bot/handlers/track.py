@@ -9,7 +9,7 @@ from bot.keyboards import TRACK_ADD, button, flight_types, markup
 from bot.services import get_services
 from bot.wizard import (
     DATES_PROMPT, TEXT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
-    Steps, start_draft, wizard_conversation,
+    Steps, parse_price, start_draft, wizard_conversation,
 )
 from config import MAX_TRACKERS_PER_USER, MIN_POLL_INTERVAL_HOURS
 from daemon.scheduler import schedule_tracker
@@ -118,10 +118,12 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         unknown = args[0] if not origin else args[1]
         await update.message.reply_text(f"❌ I don't know '{unknown}'.")
         return
+    budget = parse_price(args[3])
     try:
         start_date, end_date = parse_date_or_range(args[2])
-        budget = float(args[3])
     except ValueError:
+        budget = None
+    if budget is None:
         await update.message.reply_text(f"❌ I couldn't read the date or budget.\n{USAGE}")
         return
     problem = window_problem(start_date, end_date) or (None if budget > 0 else "The budget must be above 0.")
@@ -205,10 +207,7 @@ async def flight_type_picked(update: Update, context: Context, value: str) -> in
 
 
 async def budget_typed(update: Update, context: Context) -> int:
-    try:
-        budget = float(update.message.text.strip().replace("€", ""))
-    except ValueError:
-        budget = 0
+    budget = parse_price(update.message.text) or 0
     if budget <= 0:
         await update.message.reply_text("❌ Type a price above 0, e.g. <code>150</code>.", reply_markup=markup(back=True))
         return BUDGET

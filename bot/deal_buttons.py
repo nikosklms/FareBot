@@ -22,7 +22,7 @@ def deal_buttons(sections: list[DealSection]) -> list[tuple[str, str]]:
     buttons = []
     for index, deal in numbered_deals(sections):
         budget = round(deal.price * TRACK_DISCOUNT, 2)
-        buttons.append((f"🔔 Track #{index}: {deal.destination} (alert under €{budget:.0f})",
+        buttons.append((f"🔔 Track #{index}: {deal.destination} (alert under €{budget:.2f})",
                         track_button_data(deal.origin, deal.destination, deal.departure_date, None, budget)))
     return buttons
 

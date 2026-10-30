@@ -301,22 +301,26 @@ def _is_summary(offer: FlightOffer) -> bool:
 def merge_duplicate_offers(offers: List[FlightOffer]) -> List[FlightOffer]:
     """Drop repeats of the same flight while keeping different flights that share a price.
 
-    Google often lists a fare twice: as a summary card ("Various Airlines", no times)
-    and as a detailed card. A summary card is kept only when no detailed card has its price.
+    Google often lists a fare twice: as a summary card ("Various Airlines", no times,
+    labelled with the searched city) and as a detailed card with the real airport. A
+    summary card is kept only when no detailed card has the same price and date.
     """
-    groups: dict[tuple[float, str, str, str], List[FlightOffer]] = {}
-    for offer in offers:
-        groups.setdefault((offer.price, offer.departure_date, offer.origin, offer.destination), []).append(offer)
-
+    detailed = [o for o in offers if not _is_summary(o)]
+    detailed_fares = {(o.price, o.departure_date) for o in detailed}
     merged: List[FlightOffer] = []
-    for group in groups.values():
-        detailed = [o for o in group if not _is_summary(o)]
-        seen = set()
-        for offer in detailed or group[:1]:
-            key = (offer.airline, offer.departure_time, offer.arrival_time, offer.is_direct)
-            if key not in seen:
-                seen.add(key)
-                merged.append(offer)
+    seen = set()
+    for offer in detailed:
+        key = (offer.price, offer.departure_date, offer.origin, offer.destination,
+               offer.airline, offer.departure_time, offer.arrival_time, offer.is_direct)
+        if key not in seen:
+            seen.add(key)
+            merged.append(offer)
+    summaries_kept = set()
+    for offer in offers:
+        fare = (offer.price, offer.departure_date)
+        if _is_summary(offer) and fare not in detailed_fares and fare not in summaries_kept:
+            summaries_kept.add(fare)
+            merged.append(offer)
     return merged
 
 

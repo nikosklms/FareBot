@@ -315,3 +315,11 @@ async def test_direct_only_never_loses_a_direct_flight_to_a_same_price_connectio
     provider = FastFlightsProvider(client=StaticClient())
     with patch("providers.fast_flights.parse_google_flights_payload_generic", return_value=[connecting, direct]):
         assert [o.airline for o in await provider.search_flights("ATH", "LGW", "2027-01-01", direct_only=True)] == ["Aegean"]
+
+
+def test_summary_card_for_a_city_is_dropped_when_a_detailed_card_exists():
+    from providers.fast_flights import merge_duplicate_offers
+    summary = FlightOffer("SKG", "LON", "2027-01-01", 149.0, airline="Various Airlines")
+    detailed = FlightOffer("SKG", "STN", "2027-01-01", 149.0, airline="Ryanair", departure_time="20:40")
+    other_day = FlightOffer("SKG", "LON", "2027-01-02", 149.0, airline="Various Airlines")
+    assert merge_duplicate_offers([summary, detailed, other_day]) == [detailed, other_day]

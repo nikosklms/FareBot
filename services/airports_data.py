@@ -44,7 +44,6 @@ GLOBAL_REGIONS_AIRPORTS = {
     ],
     "islands": [
         {"code": "MJT", "name": "Mytilene Odysseas Elytis Lesvos", "country": "Greece"},
-        {"code": "SKG", "name": "Thessaloniki Makedonia", "country": "Greece"},
         {"code": "HER", "name": "Heraklion Nikos Kazantzakis", "country": "Greece"},
         {"code": "CHQ", "name": "Chania Ioannis Daskalogiannis", "country": "Greece"},
         {"code": "RHO", "name": "Rhodes Diagoras", "country": "Greece"},
@@ -56,8 +55,7 @@ GLOBAL_REGIONS_AIRPORTS = {
         {"code": "KGS", "name": "Kos International", "country": "Greece"},
         {"code": "JNX", "name": "Naxos Island National", "country": "Greece"},
         {"code": "EFL", "name": "Kefalonia Island International", "country": "Greece"},
-        {"code": "SMI", "name": "Samos Aristarchos of Samos", "country": "Greece"},
-        {"code": "KTT", "name": "Kalamata Captain Vassilis Constantakopoulos", "country": "Greece"}
+        {"code": "SMI", "name": "Samos Aristarchos of Samos", "country": "Greece"}
     ],
     "middle_east": [
         {"code": "DXB", "name": "Dubai International", "country": "United Arab Emirates"},
@@ -184,7 +182,7 @@ MULTI_AIRPORT_CITIES = {
     "CHI": ["CHI", "ORD", "MDW"],                              # Chicago, USA
     "MIA": ["MIA", "FLL", "PBI"],                              # South Florida / Miami, USA
     "DFW": ["DFW", "DAL"],                                     # Dallas / Fort Worth, USA
-    "HOU": ["HOU", "IAH", "HOU"],                              # Houston, USA
+    "HOU": ["HOU", "IAH"],                                    # Houston, USA
     "SFO": ["SFO", "OAK", "SJC"],                              # San Francisco Bay Area, USA
     "LAX": ["LAX", "BUR", "LGB", "SNA", "ONT"],                # Greater Los Angeles, USA
     "MCO": ["MCO", "SFB"],                                     # Orlando, USA

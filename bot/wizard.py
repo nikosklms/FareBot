@@ -1,6 +1,7 @@
 """Building blocks shared by the /search, /track, /explore and /digest wizards."""
 import asyncio
 import logging
+import math
 import warnings
 from datetime import date
 from functools import wraps
@@ -158,6 +159,15 @@ def cancel_running_task(context: Context) -> bool:
         task.cancel()
         return True
     return False
+
+
+def parse_price(text: str) -> Optional[float]:
+    """A typed amount like '45', '€45.50' or '45,5'; None unless it's a finite number of at least 0."""
+    try:
+        value = float(text.strip().replace("€", "").replace(",", "."))
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and value >= 0 else None
 
 
 # ----------------------------------------------------------------------

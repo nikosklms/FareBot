@@ -37,8 +37,12 @@ async def test_shortcut(bot):
     assert "Usage" in bot.telegram.last_text
     await bot.send(f"/track ATH LON {future(5)} cheap")
     assert "couldn't read the date or budget" in bot.telegram.last_text
-    await bot.send(f"/track ATH LON {future(5)} -5")
+    await bot.send(f"/track ATH LON {future(5)} 0")
     assert "budget must be above 0" in bot.telegram.last_text
+    for bad in ("-5", "nan", "inf"):
+        await bot.send(f"/track ATH LON {future(5)} {bad}")
+        assert "couldn't read the date or budget" in bot.telegram.last_text, bad
+    assert len(await bot.services.db.list_trackers(USER_ID)) == 1
     await bot.send(f"/track ATH LON {future(5)}..{future(400)} 100")
     assert "range is too long" in bot.telegram.last_text
 
@@ -83,3 +87,17 @@ async def test_paused_duplicate_still_counts(bot):
     await bot.services.db.set_tracker_status(tracker.id, PAUSED)
     await bot.press(f"trk:add:ATH:LON:{future(5)}::60.00:0")
     assert "already tracking" in bot.telegram.last_text
+
+
+async def test_wizard_budget_rejects_nan_and_infinity(bot):
+    await bot.send("/track")
+    await bot.press("trk:org:ATH")
+    await bot.send("LON")
+    await bot.press("trk:dst:LON")
+    await bot.press("trk:date:preset:next_7_days")
+    await bot.press("trk:direct:0")
+    for bad in ("nan", "inf", "-1"):
+        await bot.send(bad)
+        assert "price above 0" in bot.telegram.last_text, bad
+    await bot.send("45,50")
+    assert "Step 6/6" in bot.telegram.last_text and "€45.50" in bot.telegram.last_text

@@ -41,3 +41,15 @@ def test_new_airport_hubs_exist():
     assert "IST" in me_codes
     assert "BEY" in me_codes
 
+
+
+def test_greek_islands_are_islands():
+    codes = {a["code"] for a in get_region_airports("islands")}
+    assert "SKG" not in codes and "KTT" not in codes
+    assert {"JTR", "JMK", "HER", "RHO"} <= codes
+
+
+def test_city_airport_lists_have_no_repeats():
+    from services.airports_data import MULTI_AIRPORT_CITIES
+    for city, codes in MULTI_AIRPORT_CITIES.items():
+        assert len(codes) == len(set(codes)), city
