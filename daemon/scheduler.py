@@ -164,7 +164,8 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
         f"⚙️ <b>Flights</b>: {flight_type_label(tracker.direct_only)}",
         "",
         f"✈️ <b>Top {len(top)} offers:</b>",
-        offers_block(top, show_date=bool(tracker.departure_date_end), direct_only=tracker.direct_only),
+        offers_block(top, show_date=bool(tracker.departure_date_end), direct_only=tracker.direct_only,
+                     searched=(tracker.origin_code, tracker.destination_code)),
         "",
         "The tracker is paused so you don't get repeat alerts. Set a lower budget to keep watching.",
     ])

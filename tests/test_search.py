@@ -164,3 +164,15 @@ async def test_starting_another_wizard_ends_the_first(bot):
     assert len(bot.telegram.texts) == replies_before + 1
     await bot.press(bot.telegram.button_data("ATH"))
     assert "Step 2/6" in bot.telegram.last_text
+
+
+async def test_results_say_when_a_flight_lands_at_another_airport(bot, provider):
+    def offers(origin, destination, day):
+        return [FlightOffer(origin, "LAX", day, price=499.0, airline="Asiana"),
+                FlightOffer(origin, "ONT", day, price=450.0, airline="United", is_direct=False)]
+    provider.offers = offers
+    await bot.send(f"/search ICN LAX {future(10)}")
+    await bot.finish_background_task()
+    lines = [line for line in bot.telegram.last_text.split("\n") if "€" in line]
+    assert lines[0].endswith("→ Ontario California (ONT)")
+    assert "→" not in lines[1].split("—")[1]

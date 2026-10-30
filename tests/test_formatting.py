@@ -1,5 +1,5 @@
 from bot.formatting import (
-    countdown, deal_report, digest_card, discount_badge, offer_line, progress_bar, progress_text, query_scope,
+    countdown, deal_entry, deal_report, digest_card, discount_badge, offer_line, progress_bar, progress_text, query_scope,
     short_date, short_window, split_message, tracker_card,
 )
 from database.models import Digest, Tracker
@@ -88,3 +88,24 @@ def test_cards():
     card = digest_card(digest)
     assert "ATH ✈️ Latin America" in card and "every Friday at 18:00" in card
     assert "next 30 days" in card and "Any budget" in card
+
+
+def test_other_airports_are_named():
+    searched = ("ICN", "LAX")
+    same = FlightOffer("ICN", "LAX", "2027-01-01", price=499.0, airline="Asiana")
+    nearby = FlightOffer("ICN", "ONT", "2027-01-01", price=504.0, airline="United")
+    assert "→" not in offer_line(same, 0, show_date=False, searched=searched)
+    assert offer_line(nearby, 0, show_date=False, searched=searched).endswith(" → Ontario California (ONT)")
+    assert "→" not in offer_line(nearby, 0, show_date=False)  # nothing to compare against
+
+    from_city = FlightOffer("STN", "BCN", "2027-01-01", price=29.0, airline="Ryanair")
+    line = offer_line(from_city, 0, show_date=False, searched=("LON", "BCN"))
+    assert "· from London Stansted (STN)" in line
+
+
+def test_deal_landing_elsewhere_is_named_and_linked():
+    deal = Deal("ATH", "IST", "Istanbul", "Turkey", "2027-01-05", 40.0, "Pegasus", True, None, 0.0, arrival="SAW")
+    entry = deal_entry(deal, 1, show_discount=True)
+    assert "<b>ATH ✈️ IST</b>" in entry and "→ lands at" in entry and "(SAW)" in entry
+    same = Deal("ATH", "FCO", "Rome", "Italy", "2027-01-05", 40.0, "ITA", True, None, 0.0, arrival="FCO")
+    assert "lands at" not in deal_entry(same, 1, show_discount=True)

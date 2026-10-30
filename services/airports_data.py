@@ -360,12 +360,44 @@ CITY_AIRPORTS = [
     ("OSA", "Osaka All Airports", "Japan"),
     ("SEL", "Seoul All Airports", "South Korea"),
     ("BJS", "Beijing All Airports", "China"),
+    ("MOW", "Moscow All Airports", "Russia"),
+    ("JKT", "Jakarta All Airports", "Indonesia"),
+]
+
+# Secondary airports searched as part of a city (MULTI_AIRPORT_CITIES), often used by budget airlines.
+NEARBY_AIRPORTS = [
+    ("STN", "London Stansted", "United Kingdom"), ("LTN", "London Luton", "United Kingdom"),
+    ("LCY", "London City", "United Kingdom"), ("SEN", "London Southend", "United Kingdom"),
+    ("BFS", "Belfast International", "United Kingdom"), ("BHD", "Belfast City", "United Kingdom"),
+    ("BVA", "Paris Beauvais", "France"), ("CIA", "Rome Ciampino", "Italy"),
+    ("BGY", "Milan Bergamo", "Italy"), ("LIN", "Milan Linate", "Italy"), ("TSF", "Venice Treviso", "Italy"),
+    ("GRO", "Girona (Barcelona)", "Spain"), ("REU", "Reus (Barcelona)", "Spain"),
+    ("BMA", "Stockholm Bromma", "Sweden"), ("NYO", "Stockholm Skavsta", "Sweden"),
+    ("SVO", "Moscow Sheremetyevo", "Russia"), ("DME", "Moscow Domodedovo", "Russia"),
+    ("VKO", "Moscow Vnukovo", "Russia"),
+    ("LGA", "New York LaGuardia", "United States"), ("DCA", "Washington Reagan National", "United States"),
+    ("BWI", "Baltimore Washington", "United States"), ("MDW", "Chicago Midway", "United States"),
+    ("FLL", "Fort Lauderdale", "United States"), ("PBI", "West Palm Beach", "United States"),
+    ("DAL", "Dallas Love Field", "United States"), ("HOU", "Houston Hobby", "United States"),
+    ("IAH", "Houston George Bush Intercontinental", "United States"), ("OAK", "Oakland", "United States"),
+    ("SJC", "San Jose California", "United States"), ("BUR", "Burbank Hollywood", "United States"),
+    ("LGB", "Long Beach", "United States"), ("SNA", "Santa Ana John Wayne", "United States"),
+    ("ONT", "Ontario California", "United States"), ("SFB", "Orlando Sanford", "United States"),
+    ("YTZ", "Toronto Billy Bishop", "Canada"), ("NLU", "Mexico City Felipe Angeles", "Mexico"),
+    ("CGH", "Sao Paulo Congonhas", "Brazil"), ("VCP", "Campinas Viracopos", "Brazil"),
+    ("SDU", "Rio de Janeiro Santos Dumont", "Brazil"), ("AEP", "Buenos Aires Aeroparque", "Argentina"),
+    ("ITM", "Osaka Itami", "Japan"), ("UKB", "Kobe", "Japan"), ("GMP", "Seoul Gimpo", "South Korea"),
+    ("PKX", "Beijing Daxing", "China"), ("SHA", "Shanghai Hongqiao", "China"), ("TSA", "Taipei Songshan", "Taiwan"),
+    ("DMK", "Bangkok Don Mueang", "Thailand"), ("HLP", "Jakarta Halim Perdanakusuma", "Indonesia"),
+    ("CRK", "Clark (Manila)", "Philippines"), ("DWC", "Dubai Al Maktoum", "United Arab Emirates"),
+    ("HLA", "Johannesburg Lanseria", "South Africa"),
 ]
 
 
 def _all_airports() -> list[tuple[str, str, str]]:
     """Every known airport once: the main list, city codes, then airports only listed in regions."""
     airports = AIRPORT_DATA + CITY_AIRPORTS
+    airports += [entry for entry in NEARBY_AIRPORTS if entry[0] not in {code for code, _, _ in airports}]
     seen = {code for code, _, _ in airports}
     for region_airports in GLOBAL_REGIONS_AIRPORTS.values():
         for airport in region_airports:

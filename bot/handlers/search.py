@@ -198,7 +198,7 @@ def search_results(origin: str, destination: str, start_date: str, end_date: Opt
         f"✈️ <b>Top {len(top)} flights</b> ({flight_type_label(direct_only)})",
         f"📍 <b>Route</b>: {origin} ✈️ {destination} | 📅 <b>Date</b>: {dates}",
         "",
-        offers_block(top, show_date=bool(end_date), direct_only=direct_only),
+        offers_block(top, show_date=bool(end_date), direct_only=direct_only, searched=(origin, destination)),
     ])
     best_url = lowest.booking_url or build_google_flights_url(origin, destination, lowest.departure_date,
                                                              direct_only=direct_only)

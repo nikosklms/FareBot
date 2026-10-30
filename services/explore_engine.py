@@ -19,6 +19,8 @@ ProgressCallback = Callable[[int, int, float, int, int], Awaitable[None]]
 
 @dataclass
 class Deal:
+    """destination is the region airport that was searched; arrival is where the flight lands,
+    which can be a nearby airport of the same city (see MULTI_AIRPORT_CITIES)."""
     origin: str
     destination: str
     destination_name: str
@@ -29,6 +31,7 @@ class Deal:
     is_direct: bool
     baseline_price: Optional[float]
     discount_pct: float
+    arrival: Optional[str] = None
 
 
 @dataclass
@@ -122,6 +125,7 @@ async def find_deals(
                 is_direct=offer.is_direct,
                 baseline_price=baseline_price(offer.typical_min, offer.typical_max),
                 discount_pct=calculate_discount_score(offer.price, offer.typical_min, offer.typical_max),
+                arrival=offer.destination,
             ))
         return deals
 

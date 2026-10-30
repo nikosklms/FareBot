@@ -7,7 +7,7 @@ from typing import Optional
 from database.models import ACTIVE, PAUSED, Digest, Tracker
 from providers.base import FlightOffer
 from providers.fast_flights import build_google_flights_url
-from services.airports_data import region_display_name
+from services.airports_data import airport_name, region_display_name
 from services.explore_engine import Deal, DealSection, baseline_price
 from utils.date_parser import describe_window
 
@@ -50,7 +50,17 @@ def discount_badge(price: float, baseline: Optional[float], show_discount: bool 
     return f" ({average})"
 
 
-def offer_line(offer: FlightOffer, index: int, show_date: bool, direct_only: bool = False) -> str:
+def other_airport_note(actual: Optional[str], searched: Optional[str], label: str) -> str:
+    """' → London Stansted (STN)' when a flight uses a different airport than the one searched."""
+    if not actual or not searched or actual == searched:
+        return ""
+    name = airport_name(actual)
+    return f" {label} {escape(name)} ({actual})" if name else f" {label} {actual}"
+
+
+def offer_line(offer: FlightOffer, index: int, show_date: bool, direct_only: bool = False,
+               searched: Optional[tuple[str, str]] = None) -> str:
+    """searched: the (origin, destination) the user asked for, to point out other airports."""
     url = offer.booking_url or build_google_flights_url(offer.origin, offer.destination, offer.departure_date,
                                                        direct_only=direct_only)
     baseline = baseline_price(offer.typical_min, offer.typical_max)
@@ -62,21 +72,26 @@ def offer_line(offer: FlightOffer, index: int, show_date: bool, direct_only: boo
         f" ({offer.departure_date})" if show_date else "",
         f" — {escape(offer.airline or 'Various')} ({stops})",
     ]
+    if searched:
+        parts.append(other_airport_note(offer.origin, searched[0], "· from"))
+        parts.append(other_airport_note(offer.destination, searched[1], "→"))
     if offer.departure_time and offer.arrival_time:
         next_day = f" (+{offer.day_offset})" if offer.day_offset > 0 else ""
         parts.append(f" | 🕒 {offer.departure_time} ➔ {offer.arrival_time}{next_day}")
     return "".join(parts)
 
 
-def offers_block(offers: list[FlightOffer], show_date: bool, direct_only: bool = False) -> str:
-    return "\n".join(offer_line(o, i, show_date, direct_only) for i, o in enumerate(offers))
+def offers_block(offers: list[FlightOffer], show_date: bool, direct_only: bool = False,
+                 searched: Optional[tuple[str, str]] = None) -> str:
+    return "\n".join(offer_line(o, i, show_date, direct_only, searched) for i, o in enumerate(offers))
 
 
 def deal_entry(deal: Deal, index: int, show_discount: bool) -> str:
-    url = build_google_flights_url(deal.origin, deal.destination, deal.departure_date)
+    url = build_google_flights_url(deal.origin, deal.arrival or deal.destination, deal.departure_date)
     stops = "🟢 Direct" if deal.is_direct else "🟡 Connecting"
     return (
-        f"{index}. <b>{deal.origin} ✈️ {deal.destination}</b> ({escape(deal.destination_name)})\n"
+        f"{index}. <b>{deal.origin} ✈️ {deal.destination}</b> ({escape(deal.destination_name)})"
+        f"{other_airport_note(deal.arrival, deal.destination, '→ lands at')}\n"
         f"💶 {link(bold(eur(deal.price)), url)}{discount_badge(deal.price, deal.baseline_price, show_discount)}"
         f" | {stops} | 📅 {deal.departure_date} ({escape(deal.airline)})"
     )
