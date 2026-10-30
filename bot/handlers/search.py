@@ -7,7 +7,10 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler
 
-from bot.formatting import flight_type_label, offers_block, progress_text, query_scope, short_window
+from bot.formatting import (
+    GOOGLE_UNREACHABLE, failed_searches_note, flight_type_label, offers_block, progress_text, query_scope,
+    short_window,
+)
 from bot.lifecycle import RESTART_NOTICE
 from bot.keyboards import (
     EXPLORE_FROM_SEARCH, button, explore_from_search_prefix, flight_types, markup, regions, stop_markup,
@@ -18,10 +21,11 @@ from bot.wizard import (
     DATES_PROMPT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
     Steps, run_in_background, start_draft, wizard_conversation,
 )
+from providers.base import FlightSearchError
 from providers.fast_flights import build_google_flights_url
 from services.airports_data import region_display_name
 from services.progress import Progress
-from utils.date_parser import describe_window, generate_date_sequence, is_past, parse_date_or_range
+from utils.date_parser import describe_window, generate_date_sequence, parse_date_or_range, window_problem
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +58,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     except ValueError:
         await update.message.reply_text(f"❌ I couldn't read that date.\n{USAGE}")
         return
-    if is_past(start_date):
-        await update.message.reply_text("❌ That date is in the past.")
+    problem = window_problem(start_date, end_date)
+    if problem:
+        await update.message.reply_text(f"❌ {problem}")
         return
     direct_only = len(args) > 3 and args[3].lower() in ("direct", "-d", "--direct")
     await run_search(update, context, origin, destination, start_date, end_date, direct_only)
@@ -167,21 +172,29 @@ async def _search_and_report(services: Services, status: Message, header: str,
     provider = services.provider
     progress = Progress(len(dates), show_progress if len(dates) > 1 else None,
                         provider.average_latency() / provider.concurrency)
+    async def search_day(day: str) -> Optional[list]:
+        try:
+            return await provider.search_flights(origin=origin, destination=destination, departure_date=day,
+                                                 direct_only=direct_only)
+        except FlightSearchError:
+            return None
+
     try:
         await progress.start()
-        batches = await asyncio.gather(*(
-            progress.track(provider.search_flights(origin=origin, destination=destination, departure_date=day,
-                                                   direct_only=direct_only))
-            for day in dates
-        ))
+        batches = await asyncio.gather(*(progress.track(search_day(day)) for day in dates))
     except asyncio.CancelledError:
         await _edit_quietly(status, RESTART_NOTICE if services.shutting_down else "⏹ Search stopped.")
         raise
 
-    offers = [offer for batch in batches for offer in batch]
+    failed = sum(1 for batch in batches if batch is None)
+    if failed == len(dates):
+        await status.edit_text(f"{header}\n\n{GOOGLE_UNREACHABLE}")
+        return
+    offers = [offer for batch in batches if batch for offer in batch]
     end_date = dates[-1] if len(dates) > 1 else None
     text, keyboard = search_results(origin, destination, dates[0], end_date, direct_only, offers)
-    await status.edit_text(text, reply_markup=keyboard)
+    note = failed_searches_note(failed, len(dates), "days")
+    await status.edit_text(text + (f"\n\n{note}" if note else ""), reply_markup=keyboard)
 
 
 def search_results(origin: str, destination: str, start_date: str, end_date: Optional[str],

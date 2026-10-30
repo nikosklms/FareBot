@@ -38,7 +38,9 @@ async def test_shortcut(bot):
     await bot.send(f"/track ATH LON {future(5)} cheap")
     assert "couldn't read the date or budget" in bot.telegram.last_text
     await bot.send(f"/track ATH LON {future(5)} -5")
-    assert "budget above 0" in bot.telegram.last_text
+    assert "budget must be above 0" in bot.telegram.last_text
+    await bot.send(f"/track ATH LON {future(5)}..{future(400)} 100")
+    assert "range is too long" in bot.telegram.last_text
 
 
 async def test_duplicate_is_refused_with_edit_budget_button(bot):
@@ -69,8 +71,10 @@ async def test_track_button_from_results(bot):
     assert bot.telegram.alerts[-1] == "✅ Tracking started"
     assert "Tracking started" in bot.telegram.last_text
 
-    await bot.press(f"trk:add:ATH:LON:{future(5)}::60.00:0")
+    await bot.press(f"trk:add:ATH:LON:{future(5)}:{future(8)}:60.00:1")
     assert "already tracking" in bot.telegram.last_text
+    await bot.press(f"trk:add:ATH:LON:{future(5)}::60.00:0")
+    assert "Tracking started" in bot.telegram.last_text  # a single day is a different tracker
 
 
 async def test_paused_duplicate_still_counts(bot):

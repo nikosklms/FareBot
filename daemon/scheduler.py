@@ -9,19 +9,22 @@ from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import Application, ContextTypes, JobQueue
 
 from bot.formatting import (
-    budget_text, deal_report, digest_window_text, eur, flight_type_label, offers_block, progress_text,
+    GOOGLE_UNREACHABLE, budget_text, deal_report, digest_window_text, eur, failed_searches_note, flight_type_label,
+    offers_block, progress_text,
     query_scope, short_window, split_message,
 )
+from bot import auth
 from bot.deal_buttons import COLLAPSED, remember_deal_buttons
 from bot.keyboards import button
 from bot.lifecycle import track_task
 from bot.services import Services, get_services
 from config import MAX_CONSECUTIVE_FAILURES
 from database.models import ACTIVE, EXPIRED, PAUSED, Digest, Tracker
+from providers.base import FlightSearchError
 from providers.fast_flights import build_google_flights_url
 from services.airports_data import region_display_name
 from services.explore_engine import find_deals, rank_deals
-from utils.date_parser import describe_window, is_past, today_utc
+from utils.date_parser import describe_window, is_past, today_local
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +117,10 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
     tracker = await db.get_tracker(tracker_id)
     if not tracker or tracker.status != ACTIVE:
         return False
+    if not auth.is_allowed(tracker.user_id):
+        logger.info("[TRACKER] #%d belongs to user %s, who is no longer allowed; pausing", tracker.id, tracker.user_id)
+        await db.set_tracker_status(tracker.id, PAUSED)
+        return False
 
     route = f"<b>{tracker.origin_code} ✈️ {tracker.destination_code}</b>"
     dates = describe_window(tracker.departure_date, tracker.departure_date_end)
@@ -123,19 +130,19 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
         await _notify(services, bot, tracker, f"ℹ️ Your tracker for {route} on <b>{dates}</b> expired: the departure date has passed.")
         return False
 
-    if tracker.departure_date_end:
-        offers = await services.provider.search_flights_range(
-            origin=tracker.origin_code, destination=tracker.destination_code,
-            start_date=tracker.departure_date, end_date=tracker.departure_date_end,
-            direct_only=tracker.direct_only,
-        )
-    else:
-        offers = await services.provider.search_flights(
-            origin=tracker.origin_code, destination=tracker.destination_code,
-            departure_date=tracker.departure_date, direct_only=tracker.direct_only,
-        )
-
-    if not offers:
+    try:
+        if tracker.departure_date_end:
+            offers = await services.provider.search_flights_range(
+                origin=tracker.origin_code, destination=tracker.destination_code,
+                start_date=tracker.departure_date, end_date=tracker.departure_date_end,
+                direct_only=tracker.direct_only,
+            )
+        else:
+            offers = await services.provider.search_flights(
+                origin=tracker.origin_code, destination=tracker.destination_code,
+                departure_date=tracker.departure_date, direct_only=tracker.direct_only,
+            )
+    except FlightSearchError:
         failures = await db.record_failure(tracker.id)
         if failures >= MAX_CONSECUTIVE_FAILURES:
             await db.set_tracker_status(tracker.id, PAUSED)
@@ -143,6 +150,10 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
                           f"⚠️ I couldn't get prices for {route} after {failures} attempts, so the tracker is paused. "
                           "Resume it from /mytracks.")
             return False
+        return True
+
+    if not offers:
+        await db.record_no_flights(tracker.id)
         return True
 
     offers.sort(key=lambda o: o.price)
@@ -216,16 +227,20 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
     digest = await services.db.get_digest(digest_id)
     if not digest or digest.status != ACTIVE:
         return False
+    if not auth.is_allowed(digest.user_id):
+        logger.info("[DIGEST] #%d belongs to user %s, who is no longer allowed; pausing", digest.id, digest.user_id)
+        await services.db.set_digest_status(digest.id, PAUSED)
+        return False
 
     region = region_display_name(digest.region)
     title = f"🗞️ <b>Weekly Flight Digest: {digest.origin_code} → {region}</b>"
-    start, end = digest.window(today_utc())
+    start, end = digest.window(today_local())
     if is_past(end or start):
         await services.db.set_digest_status(digest.id, EXPIRED)
         await _send(bot, digest.user_id, f"{title}\n\nℹ️ The travel dates for this digest have passed, so it has been stopped.")
         return False
     if is_past(start):
-        start = today_utc().isoformat()
+        start = today_local().isoformat()
 
     status = await _send(bot, digest.user_id, f"{title}\n\n⏳ Searching deals for {digest_window_text(digest)}…")
 
@@ -235,21 +250,26 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
         await _edit(status, progress_text(title, f"{when} · {query_scope(airports, days)}", done, total, seconds))
 
     try:
-        deals = await find_deals(services.provider, digest.origin_code, digest.region, start, end,
-                                 max_budget=digest.max_budget, on_progress=progress)
+        search = await find_deals(services.provider, digest.origin_code, digest.region, start, end,
+                                  max_budget=digest.max_budget, on_progress=progress)
     except asyncio.CancelledError:
         await _edit(status, f"{title}\n\n⏹ This week's digest was interrupted because the bot restarted. "
                             f"It runs again next {digest.delivery_day} at {digest.delivery_time}.")
         raise
-    sections = rank_deals(deals, digest.sort_mode, digest.max_results, digest.region)
+    sections = rank_deals(search.deals, digest.sort_mode, digest.max_results, digest.region)
+    note = failed_searches_note(search.failed_queries, search.total_queries)
     if not sections:
-        text = (f"{title}\n\nℹ️ No deals found this week (budget: {budget_text(digest.max_budget)}).\n"
-                "You can change the budget in /mytracks.")
+        if search.all_failed:
+            text = f"{title}\n\n{GOOGLE_UNREACHABLE} This week's digest couldn't run."
+        else:
+            text = (f"{title}\n\nℹ️ No deals found this week (budget: {budget_text(digest.max_budget)}).\n"
+                    "You can change the budget in /mytracks." + (f"\n\n{note}" if note else ""))
         if not await _edit(status, text):
             await _send(bot, digest.user_id, text)
         return True
 
-    chunks = split_message(deal_report(f"{title}\n📅 {when}", sections))
+    report = deal_report(f"{title}\n📅 {when}", sections) + (f"\n\n{note}" if note else "")
+    chunks = split_message(report)
     track_markup = COLLAPSED if user_data is not None else None
     last_message = None
     for index, chunk in enumerate(chunks):
@@ -292,7 +312,7 @@ async def _edit(message: Optional[Message], text: str,
 
 async def cleanup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     services = get_services(context)
-    result = await services.db.purge_stale(today_utc())
+    result = await services.db.purge_stale(today_local())
     for tracker in result.expired_trackers:
         unschedule_tracker(context.job_queue, tracker.id)
         dates = describe_window(tracker.departure_date, tracker.departure_date_end)

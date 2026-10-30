@@ -66,3 +66,21 @@ async def test_cannot_touch_other_users_items(bot):
     await bot.press(f"dash:del:t:{tracker.id}")
     assert bot.telegram.alerts[-1] == "This item no longer exists."
     assert await bot.services.db.get_tracker(tracker.id) is not None
+
+
+async def test_resume_resets_failures_and_respects_the_limit(bot):
+    from config import MAX_TRACKERS_PER_USER
+    db = bot.services.db
+    tracker = await make_tracker(bot)
+    for _ in range(3):
+        await db.record_failure(tracker.id)
+    await db.set_tracker_status(tracker.id, PAUSED)
+    await bot.press(f"dash:resume:t:{tracker.id}")
+    assert (await db.get_tracker(tracker.id)).consecutive_failures == 0
+
+    await bot.press(f"dash:pause:t:{tracker.id}")
+    for i in range(MAX_TRACKERS_PER_USER):
+        await db.create_tracker(USER_ID, "ATH", "PAR", future(20 + i), 100.0)
+    await bot.press(f"dash:resume:t:{tracker.id}")
+    assert "already have" in bot.telegram.last_text
+    assert (await db.get_tracker(tracker.id)).status == PAUSED

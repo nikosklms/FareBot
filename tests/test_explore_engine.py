@@ -32,13 +32,13 @@ def test_baseline_price():
 
 async def test_unknown_region_returns_nothing():
     provider = FakeProvider()
-    assert await find_deals(provider, "ATH", "atlantis", "2027-01-01") == []
+    assert (await find_deals(provider, "ATH", "atlantis", "2027-01-01")).deals == []
     assert provider.queries == []
 
 
 async def test_skips_origin_country_and_cyprus_for_greek_origins():
     provider = FakeProvider(offers_by_destination({"SKG": (30, 80, 100), "LCA": (35, 80, 100), "FCO": (40, 90, 110)}))
-    deals = await find_deals(provider, "ATH", "europe", "2027-01-01")
+    deals = (await find_deals(provider, "ATH", "europe", "2027-01-01")).deals
 
     assert [d.destination for d in deals] == ["FCO"]
     queried = {destination for _, destination, _, _ in provider.queries}
@@ -47,13 +47,13 @@ async def test_skips_origin_country_and_cyprus_for_greek_origins():
 
 async def test_islands_keep_same_country_destinations():
     provider = FakeProvider(offers_by_destination({"JTR": (30, 80, 100)}))
-    deals = await find_deals(provider, "ATH", "islands", "2027-01-01")
+    deals = (await find_deals(provider, "ATH", "islands", "2027-01-01")).deals
     assert [d.destination for d in deals] == ["JTR"]
 
 
 async def test_queries_every_day_of_a_range_and_applies_budget():
     provider = FakeProvider(offers_by_destination({"FCO": (40, 90, 110), "MAD": (140, 90, 110)}))
-    deals = await find_deals(provider, "ATH", "europe", "2027-01-01", "2027-01-03", max_budget=100)
+    deals = (await find_deals(provider, "ATH", "europe", "2027-01-01", "2027-01-03", max_budget=100)).deals
 
     assert {d.departure_date for d in deals} == {"2027-01-01", "2027-01-02", "2027-01-03"}
     assert {d.destination for d in deals} == {"FCO"}
@@ -66,8 +66,9 @@ async def test_provider_errors_do_not_stop_other_airports():
             raise RuntimeError("timeout")
         return offers_by_destination({"FCO": (40, 90, 110)})(origin, destination, day)
 
-    deals = await find_deals(FakeProvider(offers), "ATH", "europe", "2027-01-01")
-    assert [d.destination for d in deals] == ["FCO"]
+    search = await find_deals(FakeProvider(offers), "ATH", "europe", "2027-01-01")
+    assert [d.destination for d in search.deals] == ["FCO"]
+    assert search.failed_queries == 1 and not search.all_failed
 
 
 async def test_reports_progress():

@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 UNAUTHORIZED_LOG = LOGS_DIR / "unauthorized_access.log"
 
 
+def is_allowed(user_id: int) -> bool:
+    return user_id in get_allowed_users()
+
+
 async def auth_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Runs before every other handler; stops updates from users not in ALLOWED_USERS."""
     user = update.effective_user

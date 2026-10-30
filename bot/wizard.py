@@ -23,7 +23,7 @@ from bot.keyboards import BACK, CANCEL, button, markup, pairs
 from bot.lifecycle import track_task
 from bot.services import get_services
 from services.airports_data import find_region
-from utils.date_parser import MAX_RANGE_DAYS, PRESETS, get_preset_range, is_past, parse_date_or_range, today_utc
+from utils.date_parser import MAX_RANGE_DAYS, PRESETS, get_preset_range, parse_date_or_range, today_local, window_problem
 
 logger = logging.getLogger(__name__)
 
@@ -226,9 +226,9 @@ def dates_step(prefix: str, state: int, on_dates: OnDates, on_back: Ask) -> list
                 reply_markup=markup(back=True),
             )
             return state
-        if is_past(start):
-            await update.message.reply_text("❌ That date is in the past. Pick a future date.",
-                                            reply_markup=markup(back=True))
+        problem = window_problem(start, end)
+        if problem:
+            await update.message.reply_text(f"❌ {problem}", reply_markup=markup(back=True))
             return state
         return await on_dates(update, context, start, end)
 
@@ -284,12 +284,12 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask)
         cal = picker(context)
         year, month = (int(part) for part in cal["month"].split("-"))
         start = date.fromisoformat(cal["start"]) if cal["start"] else None
-        return calendar_markup(prefix, year, month, today_utc(), mode=cal["mode"], range_start=start,
+        return calendar_markup(prefix, year, month, today_local(), mode=cal["mode"], range_start=start,
                                back_data=f"{prefix}:close")
 
     async def open_picker(update: Update, context: Context) -> int:
         await update.callback_query.answer()
-        today = today_utc()
+        today = today_local()
         context.user_data[CALENDAR_KEY] = {"mode": RANGE, "start": None, "month": f"{today:%Y-%m}"}
         await respond(update, "📆 Pick the first day of the range (or switch to one day):", render(context))
         return state
@@ -320,8 +320,14 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask)
                           render(context))
             return state
         start, end = sorted([cal["start"] or day, day])
+        end = end if end != start else None
+        problem = window_problem(start, end)
+        if problem:
+            cal["start"] = None
+            await respond(update, f"❌ {problem} Pick the first day again:", render(context))
+            return state
         context.user_data.pop(CALENDAR_KEY, None)
-        return await on_dates(update, context, start, end if end != start else None)
+        return await on_dates(update, context, start, end)
 
     async def close(update: Update, context: Context) -> int:
         await update.callback_query.answer()

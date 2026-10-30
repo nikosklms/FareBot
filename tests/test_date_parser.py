@@ -74,3 +74,20 @@ def test_get_preset_range_next_7_days():
     exp_end = (today + timedelta(days=7)).strftime("%Y-%m-%d")
     assert start_str == exp_start
     assert end_str == exp_end
+
+
+def test_window_problem():
+    from utils.date_parser import window_problem
+    today = date(2027, 1, 10)
+    assert window_problem("2027-01-09", None, today) == "That date is in the past. Pick a future date."
+    assert window_problem("2027-01-10", "2027-12-05", today) is None  # 330 days
+    assert "too long" in window_problem("2027-01-10", "2027-12-06", today)
+
+
+def test_today_follows_the_bot_timezone(monkeypatch):
+    import utils.date_parser as dp
+    from zoneinfo import ZoneInfo
+    monkeypatch.setattr(dp, "_bot_timezone", lambda: ZoneInfo("Pacific/Kiritimati"))  # UTC+14
+    ahead = dp.today_local()
+    monkeypatch.setattr(dp, "_bot_timezone", lambda: ZoneInfo("Pacific/Pago_Pago"))  # UTC-11
+    assert (ahead - dp.today_local()).days == 1

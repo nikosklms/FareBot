@@ -70,7 +70,9 @@ async def test_shortcut_rejects_bad_input(bot):
 
 
 async def test_duplicate_digest_is_refused(bot):
-    await bot.send("/digest ATH europe 30")
+    await bot.send("/digest ATH europe 30 50 Monday@09:00")
     await bot.send("/digest ATH europe 30 50 Monday@09:00")
     assert "already have this digest" in bot.telegram.last_text
-    assert len(await bot.services.db.list_digests(USER_ID)) == 1
+    await bot.send("/digest ATH europe 30 80 Monday@09:00")
+    assert "Weekly digest scheduled" in bot.telegram.last_text  # a different budget is a different digest
+    assert len(await bot.services.db.list_digests(USER_ID)) == 2

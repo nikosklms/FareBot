@@ -1,4 +1,5 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
+from functools import lru_cache
 from typing import Optional
 
 MAX_RANGE_DAYS = 330
@@ -10,8 +11,15 @@ PRESETS = {
 }
 
 
-def today_utc() -> date:
-    return datetime.now(timezone.utc).date()
+@lru_cache(maxsize=1)
+def _bot_timezone():
+    from config import get_timezone
+    return get_timezone()
+
+
+def today_local() -> date:
+    """Today in the bot's timezone (TIMEZONE, else the server's), the same one digest times use."""
+    return datetime.now(_bot_timezone()).date()
 
 
 def parse_date_or_range(raw_input: str) -> tuple[str, Optional[str]]:
@@ -44,12 +52,12 @@ def generate_date_sequence(start_date: str, end_date: str, max_days: Optional[in
 
 def days_ahead_window(days: int, today: Optional[date] = None) -> tuple[str, str]:
     """Tomorrow through `days` days from today."""
-    today = today or today_utc()
+    today = today or today_local()
     return (today + timedelta(days=1)).isoformat(), (today + timedelta(days=days)).isoformat()
 
 
 def get_preset_range(preset_key: str, today: Optional[date] = None) -> tuple[str, str]:
-    today = today or today_utc()
+    today = today or today_local()
     if preset_key == "this_weekend":
         days_until_saturday = (5 - today.weekday()) % 7 or 7
         saturday = today + timedelta(days=days_until_saturday)
@@ -62,7 +70,16 @@ def get_preset_range(preset_key: str, today: Optional[date] = None) -> tuple[str
 
 
 def is_past(iso_date: str, today: Optional[date] = None) -> bool:
-    return iso_date < (today or today_utc()).isoformat()
+    return iso_date < (today or today_local()).isoformat()
+
+
+def window_problem(start: str, end: Optional[str], today: Optional[date] = None) -> Optional[str]:
+    """Why a departure date or range can't be used, or None if it's fine."""
+    if is_past(start, today):
+        return "That date is in the past. Pick a future date."
+    if end and (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 > MAX_RANGE_DAYS:
+        return f"That range is too long: the most I can search is {MAX_RANGE_DAYS} days."
+    return None
 
 
 def describe_window(start: str, end: Optional[str]) -> str:

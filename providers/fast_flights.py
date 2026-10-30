@@ -12,7 +12,7 @@ import httpx
 from fast_flights import FlightQuery, Passengers, create_query
 from selectolax.lexbor import LexborHTMLParser
 
-from providers.base import AbstractFlightProvider, FlightOffer
+from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError
 from services.airports_data import MULTI_AIRPORT_CITIES
 from utils.date_parser import generate_date_sequence
 
@@ -157,7 +157,8 @@ def parse_google_flights_payload_generic(
     default_destination: str,
     departure_date: str,
     return_date: Optional[str] = None,
-    currency: str = "EUR"
+    currency: str = "EUR",
+    direct_only: bool = False,
 ) -> List[FlightOffer]:
     """Parse Google Flights html JSON payload and extract matching flight offers."""
     html_lower = html.lower()
@@ -251,7 +252,8 @@ def parse_google_flights_payload_generic(
             orig = orig_val if isinstance(orig_val, str) and len(orig_val) == 3 else default_origin
             dest = dest_val if isinstance(dest_val, str) and len(dest_val) == 3 else default_destination
 
-            booking_url_val = build_google_flights_url(orig, dest, departure_date, currency=currency)
+            booking_url_val = build_google_flights_url(orig, dest, departure_date, currency=currency,
+                                                       direct_only=direct_only)
 
             if len(orig) == 3 and len(dest) == 3 and orig.isalpha() and dest.isalpha():
                 offers.append(
@@ -359,7 +361,9 @@ class FastFlightsProvider(AbstractFlightProvider):
             self._fetch(origin, dest, departure_date, return_date, currency, direct_only)
             for dest in target_destinations
         ))
-        all_offers = [offer for batch in results for offer in batch]
+        if all(batch is None for batch in results):
+            raise FlightSearchError(f"Couldn't search {origin} -> {destination} on {departure_date}")
+        all_offers = [offer for batch in results if batch for offer in batch]
 
         offers = merge_duplicate_offers([o for o in all_offers if o.is_direct or not direct_only])
         offers.sort(key=lambda o: o.price)
@@ -377,7 +381,8 @@ class FastFlightsProvider(AbstractFlightProvider):
         return_date: Optional[str],
         currency: str,
         direct_only: bool,
-    ) -> List[FlightOffer]:
+    ) -> Optional[List[FlightOffer]]:
+        """Offers for one airport, or None if Google couldn't be searched."""
         flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
         if return_date:
             flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
@@ -399,20 +404,20 @@ class FastFlightsProvider(AbstractFlightProvider):
                     html = await self._fetcher.fetch_html(q)
                     # Parsing a results page takes tens of milliseconds; keep it off the event loop.
                     offers = await asyncio.to_thread(parse_google_flights_payload_generic, html, origin, dest_code,
-                                                     departure_date, return_date, currency)
+                                                     departure_date, return_date, currency, direct_only)
                     self._latencies.append(time.perf_counter() - t0)
                     return offers
                 except GoogleRateLimitException as e:
                     if attempt == max_retries:
                         logger.error(f"[PROVIDER_ERR] Max retries reached for {origin} -> {dest_code}: {e}")
-                        return []
+                        return None
                     backoff_sec = 0.5 * (2 ** attempt)
                     logger.warning(f"[RATE_LIMIT_RETRY] {e}. Retrying {origin} -> {dest_code} in {backoff_sec}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(backoff_sec)
                 except Exception as e:
                     logger.error(f"[PROVIDER_ERR] Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
-                    return []
-        return []
+                    return None
+        return None
 
     async def search_flights_range(
         self,
@@ -428,8 +433,14 @@ class FastFlightsProvider(AbstractFlightProvider):
             self.search_flights(origin=origin, destination=destination, departure_date=d,
                                 currency=currency, direct_only=direct_only)
             for d in dates
-        ))
-        offers = [offer for batch in results for offer in batch]
+        ), return_exceptions=True)
+        failures = [r for r in results if isinstance(r, FlightSearchError)]
+        if len(failures) == len(dates):
+            raise FlightSearchError(f"Couldn't search {origin} -> {destination} on any day from {start_date}")
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, FlightSearchError):
+                raise result
+        offers = [offer for batch in results if isinstance(batch, list) for offer in batch]
         offers.sort(key=lambda o: o.price)
         logger.info(f"[PROVIDER] Range search {origin} -> {destination} across {len(dates)} dates: {len(offers)} offers")
         return offers

@@ -78,7 +78,8 @@ TRACKER_COLUMNS = [
     "last_checked_at", "last_price_found", "created_at",
 ]
 
-TRACKER_EDITABLE = {"departure_date", "departure_date_end", "direct_only", "max_budget", "frequency_hours", "status"}
+TRACKER_EDITABLE = {"departure_date", "departure_date_end", "direct_only", "max_budget", "frequency_hours", "status",
+                    "consecutive_failures"}
 DIGEST_EDITABLE = {"max_budget", "days_ahead", "departure_date", "departure_date_end", "sort_mode",
                    "delivery_day", "delivery_time", "max_results", "status"}
 
@@ -185,14 +186,17 @@ class Database:
                 return [_tracker(r) for r in await cur.fetchall()]
 
     async def find_tracker(
-        self, user_id: int, origin_code: str, destination_code: str, departure_date: str
+        self, user_id: int, origin_code: str, destination_code: str, departure_date: str,
+        departure_date_end: Optional[str] = None, direct_only: bool = False,
     ) -> Optional[Tracker]:
-        """An existing active or paused tracker for the same route and start date."""
+        """An existing active or paused tracker for the same route, dates and flight type."""
         async with self._connect() as db:
             async with db.execute(
                 "SELECT * FROM trackers WHERE user_id = ? AND origin_code = ? AND destination_code = ?"
-                " AND departure_date = ? AND status IN (?, ?) LIMIT 1",
-                (user_id, origin_code, destination_code, departure_date, ACTIVE, PAUSED),
+                " AND departure_date = ? AND departure_date_end IS ? AND direct_only = ?"
+                " AND status IN (?, ?) LIMIT 1",
+                (user_id, origin_code, destination_code, departure_date, departure_date_end, int(direct_only),
+                 ACTIVE, PAUSED),
             ) as cur:
                 row = await cur.fetchone()
         return _tracker(row) if row else None
@@ -223,6 +227,13 @@ class Database:
                 (tracker_id, price, airline),
             )
             await db.commit()
+
+    async def record_no_flights(self, tracker_id: int) -> None:
+        """A check that worked but found no matching flights."""
+        await self._execute(
+            "UPDATE trackers SET last_price_found = NULL, last_checked_at = ?, consecutive_failures = 0 WHERE id = ?",
+            (_now(), tracker_id),
+        )
 
     async def record_failure(self, tracker_id: int) -> int:
         """Count a failed check and return the consecutive failure total."""
@@ -293,14 +304,19 @@ class Database:
         days_ahead: Optional[int],
         departure_date: Optional[str],
         departure_date_end: Optional[str],
+        max_budget: Optional[float] = None,
+        sort_mode: str = "both",
+        delivery_day: str = "Sunday",
+        delivery_time: str = "15:00",
     ) -> Optional[Digest]:
-        """An existing active or paused digest with the same origin, region and window."""
+        """An existing active or paused digest with exactly the same settings."""
         async with self._connect() as db:
             async with db.execute(
                 "SELECT * FROM digests WHERE user_id = ? AND origin_code = ? AND region = ?"
-                " AND days_ahead IS ? AND departure_date IS ? AND departure_date_end IS ?"
-                " AND status IN (?, ?) LIMIT 1",
-                (user_id, origin_code, region, days_ahead, departure_date, departure_date_end, ACTIVE, PAUSED),
+                " AND days_ahead IS ? AND departure_date IS ? AND departure_date_end IS ? AND max_budget IS ?"
+                " AND sort_mode = ? AND delivery_day = ? AND delivery_time = ? AND status IN (?, ?) LIMIT 1",
+                (user_id, origin_code, region, days_ahead, departure_date, departure_date_end, max_budget,
+                 sort_mode, delivery_day, delivery_time, ACTIVE, PAUSED),
             ) as cur:
                 row = await cur.fetchone()
         return _digest(row) if row else None

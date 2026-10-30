@@ -8,7 +8,10 @@ from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler, MessageHandler
 
 from bot.deal_buttons import COLLAPSED, remember_deal_buttons
-from bot.formatting import deal_report, eur, progress_text, query_scope, short_window, split_message
+from bot.formatting import (
+    GOOGLE_UNREACHABLE, deal_report, eur, failed_searches_note, progress_text, query_scope, short_window,
+    split_message,
+)
 from bot.lifecycle import RESTART_NOTICE
 from bot.keyboards import (
     DEFAULT_RESULT_LIMIT, EXPLORE_FROM_SEARCH, markup, quick_origins, regions, result_limits, sort_modes,
@@ -21,7 +24,7 @@ from bot.wizard import (
 )
 from services.airports_data import REGION_LABELS, region_display_name
 from services.explore_engine import find_deals, rank_deals
-from utils.date_parser import days_ahead_window, describe_window
+from utils.date_parser import MAX_RANGE_DAYS, days_ahead_window, describe_window
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
+    if not 1 <= days <= MAX_RANGE_DAYS:
+        await update.message.reply_text(f"❌ Days ahead must be between 1 and {MAX_RANGE_DAYS}.")
+        return
     budget = float(numbers[1]) if len(numbers) > 1 else 0
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
     start_date, end_date = days_ahead_window(max(1, days))
@@ -168,8 +174,8 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
             pass
 
     try:
-        deals = await find_deals(services.provider, origin, region, start_date, end_date,
-                                 max_budget=max_budget, on_progress=progress)
+        search = await find_deals(services.provider, origin, region, start_date, end_date,
+                                  max_budget=max_budget, on_progress=progress)
     except asyncio.CancelledError:
         notice = RESTART_NOTICE if services.shutting_down else "⏹ Search stopped."
         try:
@@ -178,13 +184,18 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
             pass
         raise
 
-    sections = rank_deals(deals, sort_mode, limit, region)
+    sections = rank_deals(search.deals, sort_mode, limit, region)
+    note = failed_searches_note(search.failed_queries, search.total_queries)
     if not sections:
+        if search.all_failed:
+            await status.edit_text(f"{headline}\n\n{GOOGLE_UNREACHABLE}")
+            return
         budget_note = f" under {eur(max_budget)}" if max_budget else ""
-        await status.edit_text(f"{headline}\n\nℹ️ No deals found{budget_note}. Try a wider date window.")
+        await status.edit_text(f"{headline}\n\nℹ️ No deals found{budget_note}. Try a wider date window."
+                               + (f"\n\n{note}" if note else ""))
         return
 
-    chunks = split_message(deal_report(headline, sections))
+    chunks = split_message(deal_report(headline, sections) + (f"\n\n{note}" if note else ""))
     message = status
     for index, chunk in enumerate(chunks):
         reply_markup = COLLAPSED if index == len(chunks) - 1 else None

@@ -35,6 +35,18 @@ class Deal:
 
 
 @dataclass
+class DealSearch:
+    """Every candidate deal, plus how many of the queries couldn't be run."""
+    deals: list[Deal]
+    failed_queries: int
+    total_queries: int
+
+    @property
+    def all_failed(self) -> bool:
+        return self.total_queries > 0 and self.failed_queries == self.total_queries
+
+
+@dataclass
 class DealSection:
     """One ranked list of deals; sort_mode is 'discount' or 'price'."""
     sort_mode: str
@@ -78,7 +90,7 @@ async def find_deals(
     end_date: Optional[str] = None,
     max_budget: Optional[float] = None,
     on_progress: Optional[ProgressCallback] = None,
-) -> list[Deal]:
+) -> DealSearch:
     """Query every airport in a region for every date in the window."""
     origin = origin.upper()
     region = region.lower().strip()
@@ -86,7 +98,7 @@ async def find_deals(
     airports = [a for a in get_region_airports(region) if not _skip_destination(origin, origin_country, a, region)]
     if not airports:
         logger.warning("[EXPLORE] No airports to query for region '%s'", region)
-        return []
+        return DealSearch([], 0, 0)
 
     dates = generate_date_sequence(start_date, end_date) if end_date else [start_date]
     total = len(airports) * len(dates)
@@ -101,11 +113,15 @@ async def find_deals(
     progress = Progress(total, report, provider.average_latency() / provider.concurrency)
     await progress.start()
 
+    failed = 0
+
     async def fetch(code: str, departure_date: str) -> list:
+        nonlocal failed
         try:
             return await provider.search_flights(origin, code, departure_date)
         except Exception:
-            logger.exception("[EXPLORE] Query failed: %s -> %s on %s", origin, code, departure_date)
+            failed += 1
+            logger.warning("[EXPLORE] Query failed: %s -> %s on %s", origin, code, departure_date, exc_info=True)
             return []
 
     async def query(airport: dict, departure_date: str) -> list[Deal]:
@@ -131,9 +147,9 @@ async def find_deals(
 
     results = await asyncio.gather(*(query(a, d) for a in airports for d in dates))
     deals = [deal for batch in results for deal in batch]
-    logger.info("[EXPLORE] %s -> %s finished in %.1fs: %d candidate deals",
-                origin, region, time.perf_counter() - t_start, len(deals))
-    return deals
+    logger.info("[EXPLORE] %s -> %s finished in %.1fs: %d candidate deals, %d of %d queries failed",
+                origin, region, time.perf_counter() - t_start, len(deals), failed, total)
+    return DealSearch(deals, failed, total)
 
 
 def _one_per_destination(deals: list[Deal], limit: int, cap_per_country: bool) -> list[Deal]:

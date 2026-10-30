@@ -11,7 +11,9 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler
 
 from bot.formatting import budget_text, digest_card, digest_window_text, eur, flight_type_label, tracker_card
-from bot.handlers.dashboard import DIGEST, TRACKER, Item, item_buttons, label_for, load_owned, set_active
+from bot.handlers.dashboard import (
+    DIGEST, LIMIT_REACHED, TRACKER, Item, item_buttons, label_for, load_owned, set_active,
+)
 from bot.handlers.digest import BUDGET_OPTIONS, DAY_OPTIONS, DEFAULT_DAYS, MAX_RESULTS, TIME_OPTIONS, parse_clock
 from bot.handlers.track import FREQUENCIES
 from bot.keyboards import button, flight_types, markup, pairs, result_limits, sort_modes
@@ -123,19 +125,19 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
             notes.append(f"⚠️ The last price found was {eur(item.last_price_found)}, already below this "
                          "budget, so you'll get an alert at the next check.")
         if "max_budget" in changes and item.status == PAUSED:
-            await set_active(services, context, kind, item, active=True)
-            notes.append("It was paused, so I've resumed it.")
+            notes.append("It was paused, so I've resumed it." if await set_active(services, context, kind, item, True)
+                         else LIMIT_REACHED)
         elif "departure_date" in changes and item.status == EXPIRED and not is_past(item.last_departure_date):
-            await set_active(services, context, kind, item, active=True)
-            notes.append("The new dates are in the future, so it's active again.")
+            notes.append("The new dates are in the future, so it's active again."
+                         if await set_active(services, context, kind, item, True) else LIMIT_REACHED)
         elif item.status == ACTIVE:
             schedule_tracker(context.job_queue, item)
     else:
         item = await services.db.update_digest(item.id, **changes)
         window_changed = {"days_ahead", "departure_date"} & set(changes)
         if window_changed and item.status == EXPIRED:
-            await set_active(services, context, kind, item, active=True)
-            notes.append("It's active again with the new departures.")
+            notes.append("It's active again with the new departures."
+                         if await set_active(services, context, kind, item, True) else LIMIT_REACHED)
         elif item.status == ACTIVE:
             schedule_digest(context.job_queue, item, services.timezone)
 

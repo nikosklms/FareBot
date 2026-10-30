@@ -11,6 +11,7 @@ from bot.formatting import digest_card, tracker_card
 from bot.keyboards import button
 from bot.services import Services, get_services
 from daemon.scheduler import schedule_digest, schedule_tracker, unschedule_digest, unschedule_tracker
+from config import MAX_TRACKERS_PER_USER
 from database.models import ACTIVE, PAUSED, Digest, Tracker
 
 TRACKER, DIGEST = "t", "d"
@@ -51,10 +52,20 @@ def label_for(kind: str, item_id: int) -> str:
     return f"Tracker #{item_id}" if kind == TRACKER else f"Digest #{item_id}"
 
 
-async def set_active(services: Services, context: ContextTypes.DEFAULT_TYPE, kind: str, item: Item, active: bool) -> None:
+LIMIT_REACHED = (f"⚠️ You already have {MAX_TRACKERS_PER_USER} active trackers and digests. "
+                 "Pause or delete one first.")
+
+
+async def set_active(services: Services, context: ContextTypes.DEFAULT_TYPE, kind: str, item: Item,
+                     active: bool) -> bool:
+    """Pause or (re)activate an item. Activation is refused at the per-user limit; returns success."""
+    if active and item.status != ACTIVE and await services.db.count_active(item.user_id) >= MAX_TRACKERS_PER_USER:
+        return False
     item.status = ACTIVE if active else PAUSED
     if kind == TRACKER:
-        await services.db.set_tracker_status(item.id, item.status)
+        changes = {"status": item.status, **({"consecutive_failures": 0} if active else {})}
+        await services.db.update_tracker(item.id, **changes)
+        item.consecutive_failures = 0 if active else item.consecutive_failures
         if active:
             schedule_tracker(context.job_queue, item)
         else:
@@ -65,6 +76,7 @@ async def set_active(services: Services, context: ContextTypes.DEFAULT_TYPE, kin
             schedule_digest(context.job_queue, item, services.timezone)
         else:
             unschedule_digest(context.job_queue, item.id)
+    return True
 
 
 async def dashboard_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -82,7 +94,9 @@ async def dashboard_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await set_active(services, context, kind, item, active=False)
         await query.edit_message_text(f"⏸ {label} paused.", reply_markup=item_buttons(kind, item))
     elif action == "resume":
-        await set_active(services, context, kind, item, active=True)
+        if not await set_active(services, context, kind, item, active=True):
+            await query.message.reply_text(LIMIT_REACHED)
+            return
         await query.edit_message_text(f"▶️ {label} resumed.", reply_markup=item_buttons(kind, item))
     elif action == "del":
         if kind == TRACKER:

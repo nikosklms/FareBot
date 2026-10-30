@@ -270,9 +270,31 @@ async def test_client_detects_rate_limiting(response):
 
 
 @pytest.mark.asyncio
-async def test_server_errors_give_no_offers_instead_of_crashing():
+async def test_failed_searches_raise_instead_of_looking_empty():
+    from providers.base import FlightSearchError
     provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(500)))
+    with pytest.raises(FlightSearchError):
+        await provider.search_flights("SKG", "VIE", "2026-10-31")
+    with pytest.raises(FlightSearchError):
+        await provider.search_flights_range("SKG", "VIE", "2026-10-31", "2026-11-01")
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_a_page_with_no_flights_is_an_empty_result():
+    provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(200, text="<html></html>")))
     assert await provider.search_flights("SKG", "VIE", "2026-10-31") == []
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_booking_links_keep_direct_only():
+    pages = {"page": results_page()}
+    provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(200, text=pages["page"])))
+    [any_offer] = await provider.search_flights("SKG", "VIE", "2026-10-31")
+    [direct_offer] = await provider.search_flights("SKG", "VIE", "2026-10-31", direct_only=True)
+    assert any_offer.booking_url != direct_offer.booking_url
+    assert "max_stops" not in any_offer.booking_url and "max_stops=0" in direct_offer.booking_url
     await provider.close()
 
 

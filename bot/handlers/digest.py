@@ -17,7 +17,7 @@ from config import MAX_TRACKERS_PER_USER
 from daemon.scheduler import schedule_digest
 from database.models import WEEKDAYS, Digest
 from services.airports_data import REGION_LABELS, region_display_name
-from utils.date_parser import describe_window
+from utils.date_parser import MAX_RANGE_DAYS, describe_window
 
 ORIGIN, REGION, SORT, BUDGET, WINDOW, DAY, TIME, LIMIT = range(8)
 DRAFT = "digest"
@@ -65,6 +65,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
+    if not 1 <= days <= MAX_RANGE_DAYS:
+        await update.message.reply_text(f"❌ Days ahead must be between 1 and {MAX_RANGE_DAYS}.")
+        return
     budget = float(numbers[1]) if len(numbers) > 1 else 0
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
     await create_digest(update, context, {
@@ -214,7 +217,8 @@ STEPS = Steps(DRAFT, ask_origin, ask_region, ask_sort, ask_budget, ask_window, a
 async def create_digest(update: Update, context: Context, d: dict) -> Optional[Digest]:
     services = get_services(context)
     user_id = update.effective_user.id
-    existing = await services.db.find_digest(user_id, d["origin"], d["region"], d["days"], d["start"], d["end"])
+    existing = await services.db.find_digest(user_id, d["origin"], d["region"], d["days"], d["start"], d["end"],
+                                             d["budget"], d["sort"], d["day"], d["time"])
     if existing:
         await respond(update, f"ℹ️ You already have this digest (#{existing.id}). Manage it in /mytracks.")
         return None

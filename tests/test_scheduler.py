@@ -48,7 +48,13 @@ async def test_range_and_direct_only_are_used(bot, provider):
     assert sorted(provider.queries) == [("ATH", "LON", future(d), True) for d in (10, 11, 12)]
 
 
+async def failing(*args, **kwargs):
+    from providers.base import FlightSearchError
+    raise FlightSearchError("rate limited")
+
+
 async def test_repeated_failures_pause_tracker(bot, provider):
+    provider.search_flights = failing
     t = await tracker(bot)
     assert await check_tracker(bot.services, bot.app.bot, t.id) is True
     assert await check_tracker(bot.services, bot.app.bot, t.id) is True
@@ -187,3 +193,33 @@ async def test_cleanup_tells_users_what_expired(bot):
     await cleanup_job(context)
     assert (await bot.services.db.get_tracker(t.id)).status == EXPIRED
     assert "expired" in bot.telegram.last_text
+
+
+async def test_no_flights_is_not_a_failure(bot, provider):
+    from bot.formatting import tracker_card
+    t = await tracker(bot, direct_only=True)
+    for _ in range(5):
+        assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    updated = await bot.services.db.get_tracker(t.id)
+    assert (updated.status, updated.consecutive_failures) == (ACTIVE, 0)
+    assert "no matching flights at the last check" in tracker_card(updated)
+    assert bot.telegram.calls_to("sendMessage") == []
+
+
+async def test_digest_says_when_google_could_not_be_searched(bot, provider):
+    provider.search_flights = failing
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=1)
+    await send_digest(bot.services, bot.app.bot, digest.id)
+    assert "couldn't reach Google Flights" in bot.telegram.last_text
+
+
+async def test_removed_users_stop_getting_alerts(bot, provider, monkeypatch):
+    provider.offers = offers_at(50.0)
+    t = await tracker(bot)
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "europe", days_ahead=7)
+    monkeypatch.setattr("bot.auth.get_allowed_users", lambda: [])
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False
+    assert await send_digest(bot.services, bot.app.bot, digest.id) is False
+    assert (await bot.services.db.get_tracker(t.id)).status == PAUSED
+    assert (await bot.services.db.get_digest(digest.id)).status == PAUSED
+    assert bot.telegram.calls_to("sendMessage") == [] and provider.queries == []

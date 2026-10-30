@@ -23,6 +23,13 @@ class FlightOffer:
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class FlightSearchError(Exception):
+    """Google Flights couldn't be searched (rate limiting, network or server errors).
+
+    Distinct from an empty result, which means the search worked and found no flights.
+    """
+
+
 class AbstractFlightProvider(ABC):
     # Requests the provider runs in parallel, used for time estimates.
     concurrency: int = 1

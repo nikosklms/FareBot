@@ -65,9 +65,10 @@ async def test_digest_crud_and_find(db):
                                    departure_date=future(10), departure_date_end=future(20))
 
     assert rolling.max_budget is None and rolling.days_ahead == 30
-    assert (await db.find_digest(1, "ATH", "europe", 30, None, None)).id == rolling.id
-    assert (await db.find_digest(1, "ATH", "europe", None, future(10), future(20))).id == fixed.id
+    assert (await db.find_digest(1, "ATH", "europe", 30, None, None, None, "both", "Friday", "18:00")).id == rolling.id
+    assert (await db.find_digest(1, "ATH", "europe", None, future(10), future(20), 80.0)).id == fixed.id
     assert await db.find_digest(1, "ATH", "europe", 60, None, None) is None
+    assert await db.find_digest(1, "ATH", "europe", 30, None, None, None, "both", "Monday", "18:00") is None
 
     updated = await db.update_digest(rolling.id, max_budget=50.0, delivery_time="09:30")
     await db.set_digest_status(rolling.id, PAUSED)
@@ -147,3 +148,10 @@ async def test_update_tracker_fields_and_rejects_unknown_ones(db):
         await db.update_tracker(tracker.id, user_id=999)
     with pytest.raises(ValueError):
         await db.update_digest(tracker.id, origin_code="SKG")
+
+
+async def test_find_tracker_compares_dates_and_flight_type(db):
+    tracker = await make_tracker(db, start=future(10))
+    assert (await db.find_tracker(1, "ATH", "LON", future(10))).id == tracker.id
+    assert await db.find_tracker(1, "ATH", "LON", future(10), future(20)) is None
+    assert await db.find_tracker(1, "ATH", "LON", future(10), direct_only=True) is None

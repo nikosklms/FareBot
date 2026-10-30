@@ -108,3 +108,16 @@ async def test_track_buttons_expand_and_collapse(bot, provider):
 async def test_old_results_explain_instead_of_failing(bot):
     await bot.press("deals:show", message_id=4242)
     assert "too old" in bot.telegram.alerts[-1]
+
+
+async def test_explore_reports_failed_searches(bot, provider):
+    from providers.base import FlightSearchError
+
+    async def half_fail(origin, destination, departure_date, **kwargs):
+        if destination in ("CDG", "MAD", "BCN"):
+            raise FlightSearchError("rate limited")
+        return regional_offers(origin, destination, departure_date)
+    provider.search_flights = half_fail
+    await bot.send("/explore ATH europe 1")
+    await bot.finish_background_task()
+    assert "ATH ✈️ FCO" in bot.telegram.last_text and "3 of 36 searches failed" in bot.telegram.last_text

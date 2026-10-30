@@ -14,7 +14,7 @@ from bot.wizard import (
 from config import MAX_TRACKERS_PER_USER, MIN_POLL_INTERVAL_HOURS
 from daemon.scheduler import schedule_tracker
 from database.models import Tracker
-from utils.date_parser import describe_window, is_past, parse_date_or_range
+from utils.date_parser import describe_window, parse_date_or_range, window_problem
 
 ORIGIN, DESTINATION, DATES, FLIGHT_TYPE, BUDGET, FREQUENCY = range(6)
 DRAFT = "track"
@@ -49,10 +49,10 @@ async def create_tracker_for_user(
             f"⚠️ You already have {MAX_TRACKERS_PER_USER} active trackers and digests. "
             "Delete or pause one in /mytracks first."
         )
-    existing = await services.db.find_tracker(user_id, origin, destination, start)
+    existing = await services.db.find_tracker(user_id, origin, destination, start, end, direct_only)
     if existing:
         raise TrackerRejected(
-            f"ℹ️ You're already tracking <b>{origin} ✈️ {destination}</b> from <b>{start}</b> "
+            f"ℹ️ You're already tracking <b>{origin} ✈️ {destination}</b> on <b>{describe_window(start, end)}</b> "
             f"(Tracker #{existing.id}, budget {eur(existing.max_budget)}).",
             InlineKeyboardMarkup([[button("✏️ Edit Its Budget", f"dash:budget:t:{existing.id}")]]),
         )
@@ -124,8 +124,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     except ValueError:
         await update.message.reply_text(f"❌ I couldn't read the date or budget.\n{USAGE}")
         return
-    if is_past(start_date) or budget <= 0:
-        await update.message.reply_text("❌ The date must be in the future and the budget above 0.")
+    problem = window_problem(start_date, end_date) or (None if budget > 0 else "The budget must be above 0.")
+    if problem:
+        await update.message.reply_text(f"❌ {problem}")
         return
     direct_only = len(args) > 4 and args[4].lower() in ("direct", "-d", "--direct")
     try:

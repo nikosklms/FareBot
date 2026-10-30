@@ -158,6 +158,16 @@ def query_scope(airports: int, days: int) -> str:
     return f"{days} days" if days > 1 else ""
 
 
+GOOGLE_UNREACHABLE = ("⚠️ I couldn't reach Google Flights (it may be limiting requests right now). "
+                      "Please try again in a few minutes.")
+
+
+def failed_searches_note(failed: int, total: int, what: str = "searches") -> str:
+    if not failed:
+        return ""
+    return f"⚠️ {failed} of {total} {what} failed (Google may be limiting requests), so some results may be missing."
+
+
 def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     """Split on line boundaries into chunks Telegram accepts."""
     chunks: list[str] = []
@@ -176,7 +186,12 @@ def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
 
 def tracker_card(tracker: Tracker) -> str:
     icon = STATUS_ICONS.get(tracker.status, "🔴")
-    last_price = eur(tracker.last_price_found) if tracker.last_price_found else "not checked yet"
+    if tracker.last_price_found:
+        last_price = eur(tracker.last_price_found)
+    elif tracker.last_checked_at:
+        last_price = "no matching flights at the last check"
+    else:
+        last_price = "not checked yet"
     return "\n".join([
         f"{icon} <b>Tracker #{tracker.id}</b>",
         f"📍 <b>Route</b>: {tracker.origin_code} ✈️ {tracker.destination_code}",

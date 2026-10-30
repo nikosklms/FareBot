@@ -176,3 +176,32 @@ async def test_results_say_when_a_flight_lands_at_another_airport(bot, provider)
     lines = [line for line in bot.telegram.last_text.split("\n") if "€" in line]
     assert lines[0].endswith("→ Ontario California (ONT)")
     assert "→" not in lines[1].split("—")[1]
+
+
+async def test_search_says_when_google_could_not_be_reached(bot, provider):
+    from providers.base import FlightSearchError
+    calls = []
+
+    async def flaky(origin, destination, departure_date, **kwargs):
+        calls.append(departure_date)
+        if departure_date == future(11) or len(calls) > 10:
+            raise FlightSearchError("rate limited")
+        return [FlightOffer(origin, destination, departure_date, price=99.0, airline="Aegean")]
+    provider.search_flights = flaky
+
+    await bot.send(f"/search ATH LON {future(10)}..{future(12)}")
+    await bot.finish_background_task()
+    assert "€99.00" in bot.telegram.last_text and "1 of 3 days failed" in bot.telegram.last_text
+
+    await bot.send(f"/search ATH LON {future(11)}")
+    await bot.finish_background_task()
+    assert "couldn't reach Google Flights" in bot.telegram.last_text
+
+
+async def test_calendar_rejects_ranges_over_330_days(bot):
+    await start_to_dates(bot)
+    await bot.press("src:date:cal:open")
+    await bot.press(f"src:date:cal:day:{future(1)}")
+    await bot.press(f"src:date:cal:day:{future(340)}")
+    assert "range is too long" in bot.telegram.last_text
+    assert "Step 4/4" not in bot.telegram.last_text
