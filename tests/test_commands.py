@@ -11,7 +11,7 @@ def registered_commands(app) -> set[str]:
                 commands |= handler.commands
             elif isinstance(handler, ConversationHandler):
                 for entry in handler.entry_points:
-                    commands |= entry.commands
+                    commands |= getattr(entry, "commands", set())
     return commands
 
 

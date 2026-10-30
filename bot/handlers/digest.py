@@ -243,4 +243,4 @@ def conversation() -> ConversationHandler:
         DAY: [choice_step("dig:day", day_picked, "|".join(WEEKDAYS))],
         TIME: [choice_step("dig:time", time_picked, r"\d{2}:\d{2}"), MessageHandler(TEXT, time_typed)],
         LIMIT: [choice_step("dig:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
-    }, STEPS)
+    }, STEPS.back)

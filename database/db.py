@@ -77,6 +77,10 @@ TRACKER_COLUMNS = [
     "last_checked_at", "last_price_found", "created_at",
 ]
 
+TRACKER_EDITABLE = {"departure_date", "departure_date_end", "direct_only", "max_budget", "frequency_hours", "status"}
+DIGEST_EDITABLE = {"max_budget", "days_ahead", "departure_date", "departure_date_end", "sort_mode",
+                   "delivery_day", "delivery_time", "max_results", "status"}
+
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CLOCK = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
@@ -184,8 +188,12 @@ class Database:
     async def set_tracker_status(self, tracker_id: int, status: str) -> None:
         await self._execute("UPDATE trackers SET status = ? WHERE id = ?", (status, tracker_id))
 
-    async def set_tracker_budget(self, tracker_id: int, max_budget: float) -> None:
-        await self._execute("UPDATE trackers SET max_budget = ? WHERE id = ?", (max_budget, tracker_id))
+    async def update_tracker(self, tracker_id: int, **changes: Any) -> Optional[Tracker]:
+        """Change editable fields and return the updated tracker."""
+        if "direct_only" in changes:
+            changes["direct_only"] = int(changes["direct_only"])
+        await self._update("trackers", TRACKER_EDITABLE, tracker_id, changes)
+        return await self.get_tracker(tracker_id)
 
     async def delete_tracker(self, tracker_id: int) -> None:
         await self._execute("DELETE FROM trackers WHERE id = ?", (tracker_id,))
@@ -288,8 +296,10 @@ class Database:
     async def set_digest_status(self, digest_id: int, status: str) -> None:
         await self._execute("UPDATE digests SET status = ? WHERE id = ?", (status, digest_id))
 
-    async def set_digest_budget(self, digest_id: int, max_budget: Optional[float]) -> None:
-        await self._execute("UPDATE digests SET max_budget = ? WHERE id = ?", (max_budget, digest_id))
+    async def update_digest(self, digest_id: int, **changes: Any) -> Optional[Digest]:
+        """Change editable fields and return the updated digest."""
+        await self._update("digests", DIGEST_EDITABLE, digest_id, changes)
+        return await self.get_digest(digest_id)
 
     async def delete_digest(self, digest_id: int) -> None:
         await self._execute("DELETE FROM digests WHERE id = ?", (digest_id,))
@@ -349,6 +359,14 @@ class Database:
             await db.commit()
 
         return {"expired": expired, "purged": purged}
+
+    async def _update(self, table: str, editable: set[str], row_id: int, changes: dict[str, Any]) -> None:
+        unknown = set(changes) - editable
+        if unknown:
+            raise ValueError(f"Not editable in {table}: {', '.join(sorted(unknown))}")
+        if changes:
+            assignments = ", ".join(f"{column} = ?" for column in changes)
+            await self._execute(f"UPDATE {table} SET {assignments} WHERE id = ?", (*changes.values(), row_id))
 
     async def _execute(self, sql: str, params: tuple[Any, ...]) -> None:
         async with self._connect() as db:

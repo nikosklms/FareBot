@@ -240,7 +240,7 @@ def conversation() -> ConversationHandler:
         FLIGHT_TYPE: [choice_step("trk:direct", flight_type_picked, "0|1")],
         BUDGET: [MessageHandler(TEXT, budget_typed)],
         FREQUENCY: [choice_step("trk:freq", frequency_picked, "|".join(map(str, FREQUENCIES)))],
-    }, STEPS)
+    }, STEPS.back)
 
 
 track_button_handler = CallbackQueryHandler(track_button_pressed, pattern=rf"^{TRACK_ADD}:")

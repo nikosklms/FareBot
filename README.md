@@ -93,7 +93,7 @@ Interact with FareBot using standard Telegram chat commands and interactive inli
 | `/track` | Create a recurring background price tracker for a specific route and date |
 | `/explore` | Interactively search top flight deals by region (Europe, Islands, Asia, Middle East, Americas, etc.) |
 | `/digest` | Schedule a recurring weekly flight deal digest with custom day, time, sorting, and deal limits |
-| `/mytracks` | Manage trackers and weekly digests (edit budget, pause, resume, or delete) |
+| `/mytracks` | Manage trackers and weekly digests: pause, resume, delete, or edit dates, budget, flight type, check frequency and digest schedule |
 | `/cancel` | Cancel the current wizard or stop a running search |
 
 Every command also accepts its answers as arguments to skip the wizard:
@@ -122,6 +122,8 @@ Every command also accepts its answers as arguments to skip the wizard:
 Run the test suite with `pytest`. The tests drive the real bot through a fake Telegram API, so no network access or bot token is needed.
 
 Tests that query the real Google Flights site are skipped by default. Run them with `pytest -m live`.
+
+To measure throughput against Google Flights (queries per minute, request time, rate limiting, CPU and memory), run `python -m tools.benchmark`. It sends real requests, so start with the defaults.
 
 ## Limitations and Known Gaps
 

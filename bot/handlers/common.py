@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from bot.wizard import CALENDAR_KEY, PENDING_BUDGET_KEY, cancel_running_task
+from bot.wizard import CALENDAR_KEY, cancel_running_task
 from config import MAX_TRACKERS_PER_USER
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,9 @@ Tracking a deal sets the target budget 10% below its price.
 
 📅 <b>Dates</b>: <code>2026-09-01</code> or a range <code>2026-09-01..2026-09-15</code>
 
-📊 /mytracks lets you pause, resume, edit the budget of, or delete your trackers and digests (up to {MAX_TRACKERS_PER_USER} active)."""
+📊 /mytracks lets you pause, resume, edit (dates, budget, schedule and more) or delete your trackers and digests (up to {MAX_TRACKERS_PER_USER} active).
+
+⬅️ Every wizard step has a Back button."""
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,7 +62,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Global /cancel; any open wizard also ends because it sees a command."""
     stopped = cancel_running_task(context)
-    context.user_data.pop(PENDING_BUDGET_KEY, None)
     context.user_data.pop(CALENDAR_KEY, None)
     await update.message.reply_text("❌ Cancelled." + (" The running search was stopped." if stopped else ""))
 

@@ -1,14 +1,13 @@
 from telegram import Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, TypeHandler
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
 from bot.auth import auth_gate
 from bot.deal_buttons import toggle_deals_handler
-from bot.handlers import dashboard, digest, explore, search, track
+from bot.handlers import dashboard, digest, edit, explore, search, track
 from bot.handlers.common import (
     cancel_command, error_handler, help_command, noop_pressed, start_command, stop_task_pressed,
 )
 from bot.keyboards import NOOP, STOP_TASK
-from bot.wizard import TEXT
 
 BOT_COMMANDS = [
     ("search", "🔍 Search flights"),
@@ -35,8 +34,7 @@ def register_handlers(app: Application) -> None:
         toggle_deals_handler,
         CallbackQueryHandler(stop_task_pressed, pattern=f"^{STOP_TASK}$"),
         CallbackQueryHandler(noop_pressed, pattern=f"^{NOOP}$"),
-        MessageHandler(TEXT, dashboard.budget_typed),
     ], group=0)
-    for group, wizard in enumerate([search, track, explore, digest], start=1):
+    for group, wizard in enumerate([search, track, explore, digest, edit], start=1):
         app.add_handler(wizard.conversation(), group=group)
     app.add_error_handler(error_handler)

@@ -192,4 +192,4 @@ def conversation() -> ConversationHandler:
         SORT: [choice_step("exp:sort", sort_picked, "discount|price|both")],
         WINDOW: timeframe_step("exp:when", WINDOW, days_picked, dates_picked, STEPS.again),
         LIMIT: [choice_step("exp:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
-    }, STEPS)
+    }, STEPS.back)

@@ -185,4 +185,4 @@ def conversation() -> ConversationHandler:
         DESTINATION: airport_step("src:dst", DESTINATION, destination_picked),
         DATES: dates_step("src:date", DATES, dates_picked, STEPS.again),
         FLIGHT_TYPE: [choice_step("src:direct", flight_type_picked, "0|1")],
-    }, STEPS)
+    }, STEPS.back)

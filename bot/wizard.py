@@ -3,6 +3,7 @@ import asyncio
 import logging
 import warnings
 from datetime import date
+from functools import wraps
 from typing import Any, Awaitable, Callable, Coroutine, Optional
 
 from telegram import InlineKeyboardMarkup, Message, Update
@@ -10,7 +11,6 @@ from telegram.warnings import PTBUserWarning
 from telegram.ext import (
     BaseHandler,
     CallbackQueryHandler,
-    CommandHandler,
     ContextTypes,
     ConversationHandler,
     MessageHandler,
@@ -37,7 +37,7 @@ Ask = Callable[[Update, Context], Awaitable[int]]
 
 TEXT = filters.TEXT & ~filters.COMMAND
 TASK_KEY = "running_task"
-PENDING_BUDGET_KEY = "pending_budget_edit"
+ACTIVE_WIZARD_KEY = "active_wizard"
 CALENDAR_KEY = "calendar"
 
 
@@ -46,9 +46,9 @@ CALENDAR_KEY = "calendar"
 # ----------------------------------------------------------------------
 
 def start_draft(context: Context, name: str) -> dict[str, Any]:
-    """Fresh per-wizard state; starting a wizard also drops a pending budget edit."""
-    context.user_data.pop(PENDING_BUDGET_KEY, None)
+    """Fresh state for a wizard, which also becomes the one that answers typed input."""
     context.user_data.pop(CALENDAR_KEY, None)
+    context.user_data[ACTIVE_WIZARD_KEY] = name
     context.user_data[name] = {}
     return context.user_data[name]
 
@@ -109,14 +109,30 @@ class Steps:
         return draft(context, self.draft_name).get("step", 0)
 
 
-def wizard_conversation(name: str, entry: CommandHandler | list[CommandHandler],
-                        states: dict[int, list[BaseHandler]], steps: Steps) -> ConversationHandler:
+def _only_while_active(name: str, callback: Ask) -> Ask:
+    """Ignore input meant for a newer wizard (the editor can start while another wizard is open)."""
+
+    @wraps(callback)
+    async def guarded(update: Update, context: Context) -> Optional[int]:
+        if context.user_data.get(ACTIVE_WIZARD_KEY) != name:
+            return None  # keep this wizard where it is
+        return await callback(update, context)
+
+    return guarded
+
+
+def wizard_conversation(name: str, entry: BaseHandler | list[BaseHandler],
+                        states: dict[int, list[BaseHandler]], on_back: Ask) -> ConversationHandler:
+    """name must match the wizard's start_draft name."""
+    for handlers in states.values():
+        for handler in handlers:
+            handler.callback = _only_while_active(name, handler.callback)
     return ConversationHandler(
         entry_points=entry if isinstance(entry, list) else [entry],
         states=states,
         fallbacks=[
             CallbackQueryHandler(cancel_pressed, pattern=f"^{CANCEL}$"),
-            CallbackQueryHandler(steps.back, pattern=f"^{BACK}$"),
+            CallbackQueryHandler(_only_while_active(name, on_back), pattern=f"^{BACK}$"),
             MessageHandler(filters.COMMAND, end_on_command),
         ],
         allow_reentry=True,

@@ -69,10 +69,10 @@ async def test_digest_crud_and_find(db):
     assert (await db.find_digest(1, "ATH", "europe", None, future(10), future(20))).id == fixed.id
     assert await db.find_digest(1, "ATH", "europe", 60, None, None) is None
 
-    await db.set_digest_budget(rolling.id, 50.0)
+    updated = await db.update_digest(rolling.id, max_budget=50.0, delivery_time="09:30")
     await db.set_digest_status(rolling.id, PAUSED)
-    updated = await db.get_digest(rolling.id)
-    assert updated.max_budget == 50.0 and updated.status == PAUSED
+    assert (updated.max_budget, updated.delivery_time) == (50.0, "09:30")
+    assert (await db.get_digest(rolling.id)).status == PAUSED
     assert [d.id for d in await db.active_digests()] == [fixed.id]
 
     await db.delete_digest(fixed.id)
@@ -129,3 +129,16 @@ async def test_log_unauthorized_attempt(db):
     async with aiosqlite.connect(db.path) as conn:
         async with conn.execute("SELECT user_id, username, input_text FROM unauthorized_attempts") as cur:
             assert await cur.fetchall() == [(77, "@intruder", "/search")]
+
+
+async def test_update_tracker_fields_and_rejects_unknown_ones(db):
+    import pytest
+    tracker = await make_tracker(db)
+    updated = await db.update_tracker(tracker.id, departure_date=future(40), departure_date_end=future(45),
+                                      direct_only=True, frequency_hours=24, max_budget=55.5)
+    assert (updated.departure_date, updated.departure_date_end) == (future(40), future(45))
+    assert (updated.direct_only, updated.frequency_hours, updated.max_budget) == (True, 24, 55.5)
+    with pytest.raises(ValueError):
+        await db.update_tracker(tracker.id, user_id=999)
+    with pytest.raises(ValueError):
+        await db.update_digest(tracker.id, origin_code="SKG")
