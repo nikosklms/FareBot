@@ -155,3 +155,16 @@ async def test_find_tracker_compares_dates_and_flight_type(db):
     assert (await db.find_tracker(1, "ATH", "LON", future(10))).id == tracker.id
     assert await db.find_tracker(1, "ATH", "LON", future(10), future(20)) is None
     assert await db.find_tracker(1, "ATH", "LON", future(10), direct_only=True) is None
+
+
+
+async def test_changing_the_search_clears_the_last_price(db):
+    tracker = await db.create_tracker(user_id=1, origin_code="ATH", destination_code="LON",
+                                      departure_date="2027-03-15", max_budget=80.0)
+    await db.record_price(tracker.id, 95.0, None)
+
+    updated = await db.update_tracker(tracker.id, max_budget=90.0, departure_date="2027-03-15")
+    assert updated.last_price_found == 95.0
+
+    updated = await db.update_tracker(tracker.id, direct_only=True)
+    assert (updated.last_price_found, updated.last_checked_at) == (None, None)

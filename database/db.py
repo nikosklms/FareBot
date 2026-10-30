@@ -80,6 +80,8 @@ TRACKER_COLUMNS = [
 
 TRACKER_EDITABLE = {"departure_date", "departure_date_end", "direct_only", "max_budget", "frequency_hours", "status",
                     "consecutive_failures"}
+# Changing these means a different search, so earlier prices no longer apply.
+TRACKER_SEARCH_FIELDS = {"departure_date", "departure_date_end", "direct_only"}
 DIGEST_EDITABLE = {"max_budget", "days_ahead", "departure_date", "departure_date_end", "sort_mode",
                    "delivery_day", "delivery_time", "max_results", "status"}
 
@@ -205,10 +207,19 @@ class Database:
         await self._execute("UPDATE trackers SET status = ? WHERE id = ?", (status, tracker_id))
 
     async def update_tracker(self, tracker_id: int, **changes: Any) -> Optional[Tracker]:
-        """Change editable fields and return the updated tracker."""
+        """Change editable fields and return the updated tracker.
+
+        A new date window or flight type clears the last price, which was for the old search.
+        """
+        before = await self.get_tracker(tracker_id)
+        search_changed = before and any(getattr(before, field) != changes[field]
+                                        for field in TRACKER_SEARCH_FIELDS & set(changes))
         if "direct_only" in changes:
             changes["direct_only"] = int(changes["direct_only"])
         await self._update("trackers", TRACKER_EDITABLE, tracker_id, changes)
+        if search_changed:
+            await self._execute("UPDATE trackers SET last_price_found = NULL, last_checked_at = NULL WHERE id = ?",
+                                (tracker_id,))
         return await self.get_tracker(tracker_id)
 
     async def delete_tracker(self, tracker_id: int) -> None:
