@@ -31,6 +31,9 @@ class AbstractFlightProvider(ABC):
         """Average seconds per query, used for time estimates."""
         return 1.0
 
+    async def close(self) -> None:  # noqa: B027 - optional hook, most providers have nothing to release
+        """Release network resources when the bot stops."""
+
     @abstractmethod
     async def search_flights(
         self,

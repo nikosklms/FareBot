@@ -2,15 +2,14 @@ import asyncio
 import json
 import logging
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections import deque
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from datetime import date
 from typing import Any, List, Optional
 
+import httpx
 from fast_flights import FlightQuery, Passengers, create_query
-from fast_flights.integrations.base import FetchIntegration
 from selectolax.lexbor import LexborHTMLParser
 
 from providers.base import AbstractFlightProvider, FlightOffer
@@ -19,61 +18,82 @@ from utils.date_parser import generate_date_sequence
 
 logger = logging.getLogger(__name__)
 
-# Concurrent Google Flights requests; higher values trigger rate limiting quickly.
-CONCURRENT_REQUESTS = 3
+# Concurrent Google Flights requests. Measured with tools/benchmark.py (2026-10-30): 5 gave
+# 434 queries/min sustained over 300 queries with no rate limiting; 8 was faster but each
+# request slowed down and CPU and memory climbed. Rerun the benchmark before raising it.
+CONCURRENT_REQUESTS = 5
 
 
 class GoogleRateLimitException(Exception):
     """Raised when Google Flights returns a CAPTCHA challenge or HTTP 429/403 rate limit response."""
 
 
-class UrllibFetchIntegration(FetchIntegration):
-    """Custom reliable HTTP fetcher for Google Flights to prevent TLS fingerprinting hangs."""
-    def fetch_html(self, q) -> str:
-        if isinstance(q, str):
-            url = f"https://www.google.com/travel/flights?q={urllib.parse.quote(q)}"
-        else:
-            url = f"https://www.google.com/travel/flights?{urllib.parse.urlencode(q.params())}"
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+RATE_LIMIT_STATUSES = (429, 403, 503)
+CAPTCHA_MARKERS = ("unusual traffic", "sorry/index", '<div id="recaptcha"', "title>429")
 
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9"
-            }
-        )
+
+class GoogleFlightsClient:
+    """Fetches Google Flights result pages over one long-lived HTTP client.
+
+    Reusing connections matters: in the EU every query is redirected through
+    consent.google.com, so opening fresh connections meant up to three TLS handshakes
+    per query. Asking for compression cuts each page from about 2.4 MB to 0.3 MB.
+
+    Cookies are never stored. The redirect sets a "consent pending" cookie, and when it
+    is sent back Google shows its consent page instead of the flight results.
+    """
+
+    def __init__(self, timeout: float = 12.0, transport: Optional[httpx.AsyncBaseTransport] = None) -> None:
+        self._timeout = timeout
+        self._transport = transport
+        self._client: Optional[httpx.AsyncClient] = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                headers=BROWSER_HEADERS,
+                timeout=self._timeout,
+                follow_redirects=True,
+                limits=httpx.Limits(max_keepalive_connections=10, keepalive_expiry=30),
+                cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
+                transport=self._transport,
+            )
+        return self._client
+
+    async def fetch_html(self, q) -> str:
+        url = f"https://www.google.com/travel/flights?{urllib.parse.urlencode(q.params())}"
         t0 = time.perf_counter()
-        logger.debug(f"[HTTP] Requesting Google Flights: {url[:100]}...")
         try:
-            with urllib.request.urlopen(req, timeout=12) as response:
-                status_code = getattr(response, "status", 200)
-                raw_bytes = response.read()
-                elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                content_len = len(raw_bytes)
-                logger.debug(f"[HTTP] Google Flights response: status={status_code}, size={content_len} bytes, latency={elapsed_ms:.1f}ms")
-
-                html = raw_bytes.decode("utf-8", errors="ignore")
-
-                # Check for genuine rate-limiting / CAPTCHA block signatures
-                html_lower = html.lower()
-                if "unusual traffic" in html_lower or "sorry/index" in html_lower or "<div id=\"recaptcha\"" in html_lower or "title>429" in html_lower:
-                    logger.error(f"[RATE_LIMIT] CAPTCHA / Rate limit page detected from Google Flights! ({url[:80]})")
-                    raise GoogleRateLimitException(f"Google Rate Limit / CAPTCHA detected for {url[:80]}")
-
-                return html
-        except urllib.error.HTTPError as e:
-            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            logger.error(f"[HTTP_ERROR] HTTP {e.code} error fetching Google Flights ({e.reason}) after {elapsed_ms:.1f}ms for {url[:80]}")
-            if e.code in (429, 403, 503):
-                logger.warning(f"[RATE_LIMIT] Received HTTP {e.code} status from Google Flights! Possible rate limiting.")
-                raise GoogleRateLimitException(f"HTTP {e.code}: {e.reason}") from e
+            response = await self._http().get(url)
+        except httpx.HTTPError as e:
+            logger.error(f"[HTTP_FAIL] {type(e).__name__} fetching Google Flights after "
+                         f"{(time.perf_counter() - t0) * 1000.0:.0f}ms: {e}")
             raise
-        except Exception as e:
-            if isinstance(e, GoogleRateLimitException):
-                raise
-            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            logger.error(f"[HTTP_FAIL] Exception fetching Google Flights after {elapsed_ms:.1f}ms: {e}")
-            raise
+        logger.debug(f"[HTTP] Google Flights response: status={response.status_code}, "
+                     f"size={len(response.content)} bytes, latency={(time.perf_counter() - t0) * 1000.0:.0f}ms")
+
+        if response.status_code in RATE_LIMIT_STATUSES:
+            logger.warning(f"[RATE_LIMIT] Received HTTP {response.status_code} status from Google Flights! "
+                           "Possible rate limiting.")
+            raise GoogleRateLimitException(f"HTTP {response.status_code}")
+        response.raise_for_status()
+
+        html = response.text
+        if any(marker in html.lower() for marker in CAPTCHA_MARKERS):
+            logger.error(f"[RATE_LIMIT] CAPTCHA / Rate limit page detected from Google Flights! ({url[:80]})")
+            raise GoogleRateLimitException(f"Google Rate Limit / CAPTCHA detected for {url[:80]}")
+        return html
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
 
 def build_google_flights_url(
     origin: str,
@@ -277,8 +297,8 @@ class FastFlightsProvider(AbstractFlightProvider):
 
     concurrency = CONCURRENT_REQUESTS
 
-    def __init__(self) -> None:
-        self._fetcher = UrllibFetchIntegration()
+    def __init__(self, client: Optional[GoogleFlightsClient] = None) -> None:
+        self._fetcher = client or GoogleFlightsClient()
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._latencies: deque[float] = deque(maxlen=100)
 
@@ -286,6 +306,13 @@ class FastFlightsProvider(AbstractFlightProvider):
         if not self._latencies:
             return 0.5
         return sum(self._latencies) / len(self._latencies)
+
+    def latency_samples(self) -> list[float]:
+        """Seconds per Google request (fetch and parse, not queue time), last 100 requests."""
+        return list(self._latencies)
+
+    async def close(self) -> None:
+        await self._fetcher.close()
 
     async def search_flights(
         self,
@@ -349,14 +376,15 @@ class FastFlightsProvider(AbstractFlightProvider):
             query_kwargs["max_stops"] = 0
         q = create_query(**query_kwargs)
 
-        loop = asyncio.get_running_loop()
         max_retries = 2
         async with self._semaphore:
             t0 = time.perf_counter()
             for attempt in range(max_retries + 1):
                 try:
-                    html = await loop.run_in_executor(None, self._fetcher.fetch_html, q)
-                    offers = parse_google_flights_payload_generic(html, origin, dest_code, departure_date, return_date, currency)
+                    html = await self._fetcher.fetch_html(q)
+                    # Parsing a results page takes tens of milliseconds; keep it off the event loop.
+                    offers = await asyncio.to_thread(parse_google_flights_payload_generic, html, origin, dest_code,
+                                                     departure_date, return_date, currency)
                     self._latencies.append(time.perf_counter() - t0)
                     return offers
                 except GoogleRateLimitException as e:

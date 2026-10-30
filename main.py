@@ -65,10 +65,14 @@ async def on_startup(app: Application) -> None:
     install_stop_signals(app)
 
 
+async def on_shutdown(app: Application) -> None:
+    await app.bot_data[SERVICES_KEY].provider.close()
+
+
 def build_application(services: Services, token: str = TELEGRAM_BOT_TOKEN,
                       request: Optional[BaseRequest] = None) -> Application:
     defaults = Defaults(parse_mode=ParseMode.HTML, link_preview_options=LinkPreviewOptions(is_disabled=True))
-    builder = ApplicationBuilder().token(token).defaults(defaults).post_init(on_startup)
+    builder = ApplicationBuilder().token(token).defaults(defaults).post_init(on_startup).post_shutdown(on_shutdown)
     if request:
         builder = builder.request(request).get_updates_request(request)
     app = builder.build()

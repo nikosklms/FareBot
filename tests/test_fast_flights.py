@@ -1,6 +1,10 @@
+import gzip
+import json
+
+import httpx
 import pytest
 from unittest.mock import patch, MagicMock, ANY
-from providers.fast_flights import FastFlightsProvider, parse_google_flights_payload_generic
+from providers.fast_flights import FastFlightsProvider, GoogleFlightsClient, parse_google_flights_payload_generic
 from providers.base import FlightOffer
 from tests.fakes import future
 
@@ -69,9 +73,22 @@ async def test_ath_to_bud_returns_wizz_air_lowest_price_first():
     lowest_offer = offers[0]
     assert lowest_offer.price < 1000.0, f"Implausible lowest price: {lowest_offer.price} ({lowest_offer.airline})"
 
+class StaticClient:
+    """Stands in for GoogleFlightsClient: returns the same page for every query."""
+
+    def __init__(self, html="<html></html>"):
+        self.html = html
+
+    async def fetch_html(self, q):
+        return self.html
+
+    async def close(self):
+        pass
+
+
 @pytest.mark.asyncio
 async def test_fast_flights_direct_only_filter():
-    provider = FastFlightsProvider()
+    provider = FastFlightsProvider(client=StaticClient())
 
     offer_direct = FlightOffer("ATH", "LON", "2026-08-15", price=150.0, is_direct=True)
     offer_stop = FlightOffer("ATH", "LON", "2026-08-15", price=120.0, is_direct=False)
@@ -79,22 +96,21 @@ async def test_fast_flights_direct_only_filter():
     with patch("providers.fast_flights.create_query") as mock_cq:
         mock_cq.return_value = MagicMock()
         with patch("providers.fast_flights.parse_google_flights_payload_generic", return_value=[offer_stop, offer_direct]):
-            with patch("providers.fast_flights.UrllibFetchIntegration.fetch_html", return_value="<html></html>"):
-                results_all = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=False)
-                assert len(results_all) == 2
+            results_all = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=False)
+            assert len(results_all) == 2
 
-                results_direct = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=True)
-                assert len(results_direct) == 1
-                assert results_direct[0].is_direct is True
+            results_direct = await provider.search_flights("ATH", "LON", "2026-08-15", direct_only=True)
+            assert len(results_direct) == 1
+            assert results_direct[0].is_direct is True
 
-                # Verify max_stops=0 was passed to create_query (NOT stops=0)
-                mock_cq.assert_called_with(
-                    flights=ANY,
-                    trip="one-way",
-                    passengers=ANY,
-                    currency="EUR",
-                    max_stops=0
-                )
+            # Verify max_stops=0 was passed to create_query (NOT stops=0)
+            mock_cq.assert_called_with(
+                flights=ANY,
+                trip="one-way",
+                passengers=ANY,
+                currency="EUR",
+                max_stops=0
+            )
 
 
 @pytest.mark.asyncio
@@ -182,31 +198,79 @@ async def test_bot_challenge_html_raises_google_rate_limit_exception():
     with pytest.raises(GoogleRateLimitException):
         parse_google_flights_payload_generic(captcha_html, "SKG", "VIE", "2026-10-31")
 
+def results_page(price=45.0, airline="Ryanair"):
+    leg = [None]*8 + [[10, 0], None, [12, 0]] + [None]*11 + [["flight_meta"]]
+    payload = [[None, [airline], [leg]], [[None, price]]]
+    return f"<script class=\"ds:1\">data:{json.dumps([payload])},</script>"
+
+
+def mock_client(handler):
+    return GoogleFlightsClient(transport=httpx.MockTransport(handler))
+
+
 @pytest.mark.asyncio
 async def test_fast_flights_exponential_backoff_retry_on_429():
-    """Verify that FastFlightsProvider retries with backoff when HTTP 429 occurs and succeeds if a subsequent retry works."""
+    """A 429 is retried with backoff, and the retry's results are returned."""
+    attempts = 0
+
+    def handler(request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429)
+        return httpx.Response(200, text=results_page())
+
+    provider = FastFlightsProvider(client=mock_client(handler))
+    offers = await provider.search_flights("SKG", "VIE", "2026-10-31")
+    assert [o.price for o in offers] == [45.0]
+    assert attempts == 2
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_client_follows_consent_redirect_and_decompresses():
+    """Mirrors Google in the EU: if the consent cookie set on the redirect is sent back,
+    consent.google.com shows its consent page instead of returning to the results."""
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if request.url.host == "consent.google.com":
+            if "SOCS" in request.headers.get("cookie", ""):
+                return httpx.Response(200, text="<title>Before you continue</title>")
+            return httpx.Response(302, headers={"location": "https://www.google.com/travel/flights?tfs=x&ok=1"})
+        if "ok" not in request.url.params:
+            return httpx.Response(302, headers={"location": "https://consent.google.com/m?continue=x",
+                                                "set-cookie": "SOCS=pending; Domain=.google.com; Path=/"})
+        body = gzip.compress(results_page(price=60.0).encode())
+        return httpx.Response(200, content=body, headers={"content-encoding": "gzip"})
+
+    client = mock_client(handler)
+    for tfs in ("abc", "def"):
+        html = await client.fetch_html(MagicMock(params=lambda tfs=tfs: {"tfs": tfs}))
+        assert "60.0" in html and "Before you continue" not in html
+    assert [r.url.host for r in seen[:3]] == ["www.google.com", "consent.google.com", "www.google.com"]
+    assert all("cookie" not in r.headers for r in seen)
+    assert "gzip" in seen[0].headers["accept-encoding"]
+    assert "Chrome" in seen[0].headers["user-agent"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [
+    httpx.Response(503),
+    httpx.Response(200, text="<html>Our systems have detected unusual traffic</html>"),
+])
+async def test_client_detects_rate_limiting(response):
     from providers.fast_flights import GoogleRateLimitException
-    provider = FastFlightsProvider()
-
-    attempt_counter = 0
-    leg = [None]*8 + [[10, 0], None, [12, 0]] + [None]*11 + [["flight_meta"]]
-    flight_node = [None, ["Ryanair"], [leg]]
-    payload = [flight_node, [[None, 45.0]]]
-    import json
-    valid_html = f"<script class=\"ds:1\">data:{json.dumps([payload])},</script>"
-
-    def mock_fetch(q):
-        nonlocal attempt_counter
-        attempt_counter += 1
-        if attempt_counter == 1:
-            raise GoogleRateLimitException("HTTP Error 429: Too Many Requests")
-        return valid_html
-
-    with patch("providers.fast_flights.UrllibFetchIntegration.fetch_html", side_effect=mock_fetch):
-        offers = await provider.search_flights("SKG", "VIE", "2026-10-31")
-        assert len(offers) == 1
-        assert offers[0].price == 45.0
-        assert attempt_counter == 2
+    client = mock_client(lambda request: response)
+    with pytest.raises(GoogleRateLimitException):
+        await client.fetch_html(MagicMock(params=lambda: {"tfs": "x"}))
+    await client.close()
 
 
-
+@pytest.mark.asyncio
+async def test_server_errors_give_no_offers_instead_of_crashing():
+    provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(500)))
+    assert await provider.search_flights("SKG", "VIE", "2026-10-31") == []
+    await provider.close()
