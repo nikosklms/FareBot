@@ -4,6 +4,7 @@ from telegram import Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
+from bot.handlers.share import open_shared
 from bot.wizard import CALENDAR_KEY, cancel_running_task
 from config import MAX_TRACKERS_PER_USER
 
@@ -46,12 +47,15 @@ Tracking a deal sets the target budget 10% below its price.
 
 📅 <b>Dates</b>: <code>2026-09-01</code> or a range <code>2026-09-01..2026-09-15</code>
 
-📊 /mytracks lets you pause, resume, edit (dates, budget, schedule and more) or delete your trackers and digests (up to {MAX_TRACKERS_PER_USER} active).
+📊 /mytracks lets you pause, resume, edit (dates, budget, schedule and more), share or delete your trackers and digests (up to {MAX_TRACKERS_PER_USER} active).
 
 ⬅️ Every wizard step has a Back button."""
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if context.args:  # opened through a share link
+        await open_shared(update, context, context.args[0])
+        return
     await update.message.reply_text(START_TEXT)
 
 

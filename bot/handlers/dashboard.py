@@ -26,7 +26,7 @@ def item_buttons(kind: str, item: Item) -> InlineKeyboardMarkup:
         row.append(button("▶️ Resume", f"dash:resume:{kind}:{item.id}"))
     row.append(button("✏️ Edit", f"dash:edit:{kind}:{item.id}"))
     row.append(button("🗑️ Delete", f"dash:del:{kind}:{item.id}"))
-    return InlineKeyboardMarkup([row])
+    return InlineKeyboardMarkup([row, [button("🔗 Share", f"sh:link:{kind}:{item.id}")]])
 
 
 async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
