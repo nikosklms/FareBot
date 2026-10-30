@@ -1,7 +1,8 @@
 import pytest
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from utils.date_parser import (
     days_ahead_window, describe_window, generate_date_sequence, get_preset_range, is_past, parse_date_or_range,
+    today_local,
 )
 
 def test_parse_single_iso_date():
@@ -68,7 +69,7 @@ def test_is_past_and_describe_window():
 
 
 def test_get_preset_range_next_7_days():
-    today = datetime.now(timezone.utc).date()
+    today = today_local()
     start_str, end_str = get_preset_range("next_7_days")
     exp_start = (today + timedelta(days=1)).strftime("%Y-%m-%d")
     exp_end = (today + timedelta(days=7)).strftime("%Y-%m-%d")
