@@ -19,7 +19,7 @@ from telegram.ext import (
 
 from bot import keyboards
 from bot.date_picker import RANGE, SINGLE, calendar_markup
-from bot.keyboards import CANCEL, button, markup, pairs
+from bot.keyboards import BACK, CANCEL, button, markup, pairs
 from bot.lifecycle import track_task
 from bot.services import get_services
 from utils.date_parser import MAX_RANGE_DAYS, PRESETS, get_preset_range, is_past, parse_date_or_range, today_utc
@@ -33,6 +33,7 @@ Context = ContextTypes.DEFAULT_TYPE
 OnAirport = Callable[[Update, Context, str], Awaitable[int]]
 OnDates = Callable[[Update, Context, str, Optional[str]], Awaitable[int]]
 OnDays = Callable[[Update, Context, int], Awaitable[int]]
+Ask = Callable[[Update, Context], Awaitable[int]]
 
 TEXT = filters.TEXT & ~filters.COMMAND
 TASK_KEY = "running_task"
@@ -74,12 +75,48 @@ async def end_on_command(update: Update, context: Context) -> int:
     return ConversationHandler.END
 
 
-def wizard_conversation(name: str, entry: CommandHandler | list[CommandHandler], states: dict[int, list[BaseHandler]]) -> ConversationHandler:
+class Steps:
+    """A wizard's questions, in order.
+
+    Each ask function shows one question, with the answers given so far, and returns
+    its conversation state. Answer handlers call next(); the Back button re-asks the
+    previous question, so every step can go back to the one before it.
+    """
+
+    def __init__(self, draft_name: str, *asks: Ask) -> None:
+        self.draft_name = draft_name
+        self.asks = asks
+
+    async def ask(self, update: Update, context: Context, index: int) -> int:
+        draft(context, self.draft_name)["step"] = index
+        return await self.asks[index](update, context)
+
+    async def first(self, update: Update, context: Context) -> int:
+        return await self.ask(update, context, 0)
+
+    async def next(self, update: Update, context: Context) -> int:
+        return await self.ask(update, context, self._current(context) + 1)
+
+    async def again(self, update: Update, context: Context) -> int:
+        return await self.ask(update, context, self._current(context))
+
+    async def back(self, update: Update, context: Context) -> int:
+        await update.callback_query.answer()
+        context.user_data.pop(CALENDAR_KEY, None)
+        return await self.ask(update, context, max(0, self._current(context) - 1))
+
+    def _current(self, context: Context) -> int:
+        return draft(context, self.draft_name).get("step", 0)
+
+
+def wizard_conversation(name: str, entry: CommandHandler | list[CommandHandler],
+                        states: dict[int, list[BaseHandler]], steps: Steps) -> ConversationHandler:
     return ConversationHandler(
         entry_points=entry if isinstance(entry, list) else [entry],
         states=states,
         fallbacks=[
             CallbackQueryHandler(cancel_pressed, pattern=f"^{CANCEL}$"),
+            CallbackQueryHandler(steps.back, pattern=f"^{BACK}$"),
             MessageHandler(filters.COMMAND, end_on_command),
         ],
         allow_reentry=True,
@@ -110,7 +147,7 @@ def cancel_running_task(context: Context) -> bool:
 # Airport step
 # ----------------------------------------------------------------------
 
-def airport_step(prefix: str, state: int, on_pick: OnAirport) -> list[BaseHandler]:
+def airport_step(prefix: str, state: int, on_pick: OnAirport, back: bool = True) -> list[BaseHandler]:
     """Typed city or code -> up to 4 matching airports as buttons -> on_pick(code)."""
 
     async def typed(update: Update, context: Context) -> int:
@@ -118,12 +155,12 @@ def airport_step(prefix: str, state: int, on_pick: OnAirport) -> list[BaseHandle
         if not matches:
             await update.message.reply_text(
                 "❌ I don't know that place. Try another city name or airport code.",
-                reply_markup=markup(),
+                reply_markup=markup(back=back),
             )
             return state
         await update.message.reply_text(
             "Which airport do you mean? (Or type another name.)",
-            reply_markup=keyboards.airport_choices(prefix, matches[:4]),
+            reply_markup=keyboards.airport_choices(prefix, matches[:4], back=back),
         )
         return state
 
@@ -143,15 +180,18 @@ def airport_step(prefix: str, state: int, on_pick: OnAirport) -> list[BaseHandle
 
 def dates_keyboard(prefix: str) -> InlineKeyboardMarkup:
     presets = [button(label, f"{prefix}:preset:{key}") for key, label in PRESETS.items()]
-    return markup(*pairs(presets + [button("📆 Calendar", f"{prefix}:cal:open")]))
+    return markup(*pairs(presets + [button("📆 Calendar", f"{prefix}:cal:open")]), back=True)
 
 
 DATES_PROMPT = ("Pick a preset, open the calendar, or type a date (<code>YYYY-MM-DD</code>) "
                 "or range (<code>YYYY-MM-DD..YYYY-MM-DD</code>):")
 
 
-def dates_step(prefix: str, state: int, on_dates: OnDates) -> list[BaseHandler]:
-    """Departure date or range from presets, the calendar, or typed text."""
+def dates_step(prefix: str, state: int, on_dates: OnDates, on_back: Ask) -> list[BaseHandler]:
+    """Departure date or range from presets, the calendar, or typed text.
+
+    on_back re-shows this step; it's what Back does from inside the calendar.
+    """
 
     async def typed(update: Update, context: Context) -> int:
         try:
@@ -159,11 +199,12 @@ def dates_step(prefix: str, state: int, on_dates: OnDates) -> list[BaseHandler]:
         except ValueError:
             await update.message.reply_text(
                 "❌ I couldn't read that date. Use <code>YYYY-MM-DD</code> or <code>YYYY-MM-DD..YYYY-MM-DD</code>.",
-                reply_markup=markup(),
+                reply_markup=markup(back=True),
             )
             return state
         if is_past(start):
-            await update.message.reply_text("❌ That date is in the past. Pick a future date.", reply_markup=markup())
+            await update.message.reply_text("❌ That date is in the past. Pick a future date.",
+                                            reply_markup=markup(back=True))
             return state
         return await on_dates(update, context, start, end)
 
@@ -175,17 +216,17 @@ def dates_step(prefix: str, state: int, on_dates: OnDates) -> list[BaseHandler]:
     return [
         MessageHandler(TEXT, typed),
         CallbackQueryHandler(preset, pattern=rf"^{prefix}:preset:({'|'.join(PRESETS)})$"),
-        *calendar_handlers(f"{prefix}:cal", state, on_dates),
+        *calendar_handlers(f"{prefix}:cal", state, on_dates, on_back),
     ]
 
 
 def timeframe_keyboard(prefix: str, day_options: list[int], default: int = 30) -> InlineKeyboardMarkup:
     labels = [f"{days} Days (Default)" if days == default else f"{days} Days" for days in day_options]
     day_buttons = [button(label, f"{prefix}:days:{days}") for label, days in zip(labels, day_options)]
-    return markup(*pairs(day_buttons), [button("📆 Calendar", f"{prefix}:cal:open")])
+    return markup(*pairs(day_buttons), [button("📆 Calendar", f"{prefix}:cal:open")], back=True)
 
 
-def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates) -> list[BaseHandler]:
+def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates, on_back: Ask) -> list[BaseHandler]:
     """How far ahead to look (typed or button), or specific dates from the calendar."""
 
     async def typed(update: Update, context: Context) -> int:
@@ -193,7 +234,7 @@ def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates) 
         if not text.isdigit() or not 1 <= int(text) <= MAX_RANGE_DAYS:
             await update.message.reply_text(
                 f"❌ Type a number of days between 1 and {MAX_RANGE_DAYS}, or tap a button.",
-                reply_markup=markup(),
+                reply_markup=markup(back=True),
             )
             return state
         return await on_days(update, context, int(text))
@@ -205,12 +246,12 @@ def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates) 
     return [
         MessageHandler(TEXT, typed),
         CallbackQueryHandler(picked, pattern=rf"^{prefix}:days:\d+$"),
-        *calendar_handlers(f"{prefix}:cal", state, on_dates),
+        *calendar_handlers(f"{prefix}:cal", state, on_dates, on_back),
     ]
 
 
-def calendar_handlers(prefix: str, state: int, on_dates: OnDates) -> list[BaseHandler]:
-    """Open, navigate, switch single/range mode, and pick days on the date picker."""
+def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask) -> list[BaseHandler]:
+    """Open, navigate, switch single/range mode, pick days, or close (Back) the date picker."""
 
     def picker(context: Context) -> dict[str, Any]:
         return context.user_data.setdefault(CALENDAR_KEY, {"mode": RANGE, "start": None, "month": None})
@@ -219,7 +260,8 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates) -> list[BaseHa
         cal = picker(context)
         year, month = (int(part) for part in cal["month"].split("-"))
         start = date.fromisoformat(cal["start"]) if cal["start"] else None
-        return calendar_markup(prefix, year, month, today_utc(), mode=cal["mode"], range_start=start)
+        return calendar_markup(prefix, year, month, today_utc(), mode=cal["mode"], range_start=start,
+                               back_data=f"{prefix}:close")
 
     async def open_picker(update: Update, context: Context) -> int:
         await update.callback_query.answer()
@@ -257,8 +299,14 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates) -> list[BaseHa
         context.user_data.pop(CALENDAR_KEY, None)
         return await on_dates(update, context, start, end if end != start else None)
 
+    async def close(update: Update, context: Context) -> int:
+        await update.callback_query.answer()
+        context.user_data.pop(CALENDAR_KEY, None)
+        return await on_close(update, context)
+
     return [
         CallbackQueryHandler(open_picker, pattern=rf"^{prefix}:open$"),
+        CallbackQueryHandler(close, pattern=rf"^{prefix}:close$"),
         CallbackQueryHandler(navigate, pattern=rf"^{prefix}:nav:\d{{4}}-\d{{2}}$"),
         CallbackQueryHandler(switch_mode, pattern=rf"^{prefix}:mode:({SINGLE}|{RANGE})$"),
         CallbackQueryHandler(pick_day, pattern=rf"^{prefix}:day:\d{{4}}-\d{{2}}-\d{{2}}$"),

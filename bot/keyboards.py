@@ -6,6 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from services.airports_data import REGION_LABELS
 
 CANCEL = "cancel"
+BACK = "back"
 NOOP = "noop"
 STOP_TASK = "task:stop"
 TRACK_ADD = "trk:add"
@@ -23,10 +24,16 @@ def cancel_button() -> InlineKeyboardButton:
     return button("❌ Cancel", CANCEL)
 
 
-def markup(*rows: list[InlineKeyboardButton], cancel: bool = True) -> InlineKeyboardMarkup:
+def back_button() -> InlineKeyboardButton:
+    return button("⬅️ Back", BACK)
+
+
+def markup(*rows: list[InlineKeyboardButton], cancel: bool = True, back: bool = False) -> InlineKeyboardMarkup:
+    """Rows of buttons, ending with [⬅️ Back] [❌ Cancel] when asked for."""
     keyboard = [row for row in rows if row]
-    if cancel:
-        keyboard.append([cancel_button()])
+    last_row = ([back_button()] if back else []) + ([cancel_button()] if cancel else [])
+    if last_row:
+        keyboard.append(last_row)
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -34,8 +41,9 @@ def pairs(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboardButton
     return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
 
 
-def airport_choices(prefix: str, matches: list[tuple[str, str, str, float]]) -> InlineKeyboardMarkup:
-    return markup(*[[button(f"{code} - {name} ({country})", f"{prefix}:{code}")] for code, name, country, _ in matches])
+def airport_choices(prefix: str, matches: list[tuple[str, str, str, float]], back: bool = False) -> InlineKeyboardMarkup:
+    return markup(*[[button(f"{code} - {name} ({country})", f"{prefix}:{code}")] for code, name, country, _ in matches],
+                  back=back)
 
 
 def quick_origins(prefix: str) -> InlineKeyboardMarkup:
@@ -43,7 +51,7 @@ def quick_origins(prefix: str) -> InlineKeyboardMarkup:
 
 
 def regions(prefix: str) -> InlineKeyboardMarkup:
-    return markup(*pairs([button(label, f"{prefix}:{key}") for key, label in REGION_LABELS.items()]))
+    return markup(*pairs([button(label, f"{prefix}:{key}") for key, label in REGION_LABELS.items()]), back=True)
 
 
 def sort_modes(prefix: str, default: Optional[str] = None) -> InlineKeyboardMarkup:
@@ -53,6 +61,7 @@ def sort_modes(prefix: str, default: Optional[str] = None) -> InlineKeyboardMark
         [button(label("💥 Biggest Discount %", "discount"), f"{prefix}:discount"),
          button(label("💶 Cheapest Price", "price"), f"{prefix}:price")],
         [button(label("🔀 Both Lists", "both"), f"{prefix}:both")],
+        back=True,
     )
 
 
@@ -60,12 +69,13 @@ def flight_types(prefix: str) -> InlineKeyboardMarkup:
     return markup(
         [button("✈️ Direct Flights Only", f"{prefix}:1")],
         [button("🔄 Any (Direct & With Stops)", f"{prefix}:0")],
+        back=True,
     )
 
 
 def result_limits(prefix: str) -> InlineKeyboardMarkup:
     labels = [f"{n} (Default)" if n == DEFAULT_RESULT_LIMIT else str(n) for n in RESULT_LIMITS]
-    return markup(*pairs([button(text, f"{prefix}:{n}") for text, n in zip(labels, RESULT_LIMITS)]))
+    return markup(*pairs([button(text, f"{prefix}:{n}") for text, n in zip(labels, RESULT_LIMITS)]), back=True)
 
 
 def stop_markup() -> InlineKeyboardMarkup:

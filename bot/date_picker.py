@@ -24,6 +24,7 @@ def calendar_markup(
     today: date,
     mode: str = RANGE,
     range_start: Optional[date] = None,
+    back_data: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """Days before today (or before the chosen range start) are shown as '·' and can't be picked.
 
@@ -58,6 +59,7 @@ def calendar_markup(
 
     toggle = (button("📅 Pick a range", f"{prefix}:mode:{RANGE}") if mode == SINGLE
               else button("📅 Pick one day", f"{prefix}:mode:{SINGLE}"))
-    keyboard.append([toggle, cancel_button()])
+    keyboard.append([toggle])
+    keyboard.append(([button("⬅️ Back", back_data)] if back_data else []) + [cancel_button()])
     return InlineKeyboardMarkup(keyboard)
 

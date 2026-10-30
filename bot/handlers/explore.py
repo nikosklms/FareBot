@@ -11,11 +11,11 @@ from bot.deal_buttons import COLLAPSED, remember_deal_buttons
 from bot.formatting import deal_report, eur, progress_text, query_scope, short_window, split_message
 from bot.lifecycle import RESTART_NOTICE
 from bot.keyboards import (
-    DEFAULT_RESULT_LIMIT, quick_origins, regions, result_limits, sort_modes, stop_markup,
+    DEFAULT_RESULT_LIMIT, markup, quick_origins, regions, result_limits, sort_modes, stop_markup,
 )
 from bot.services import Services, get_services
 from bot.wizard import (
-    TEXT, Context, airport_step, choice_step, draft, respond, run_in_background, start_draft,
+    TEXT, Context, Steps, airport_step, choice_step, draft, respond, run_in_background, start_draft,
     timeframe_keyboard, timeframe_step, wizard_conversation,
 )
 from services.airports_data import REGION_LABELS, region_display_name
@@ -38,11 +38,7 @@ async def start(update: Update, context: Context) -> int:
         await _shortcut(update, context, context.args)
         return ConversationHandler.END
     start_draft(context, DRAFT)
-    await update.message.reply_text(
-        "🌟 <b>Explore flight deals</b>\n\n🛫 <b>Step 1/5</b>: Pick an origin airport or type a city name:",
-        reply_markup=quick_origins("exp:org"),
-    )
-    return ORIGIN
+    return await STEPS.first(update, context)
 
 
 async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
@@ -64,24 +60,51 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
                       min(max(limit, 1), MAX_RESULTS), budget or None)
 
 
-async def origin_picked(update: Update, context: Context, code: str) -> int:
-    draft(context, DRAFT)["origin"] = code
-    await respond(update, f"🛫 <b>From</b>: {code}\n\n🌍 <b>Step 2/5</b>: Which region?", regions("exp:reg"))
+async def ask_origin(update: Update, context: Context) -> int:
+    await respond(update, "🌟 <b>Explore flight deals</b>\n\n🛫 <b>Step 1/5</b>: Pick an origin airport or type a "
+                          "city name:", quick_origins("exp:org"))
+    return ORIGIN
+
+
+async def ask_region(update: Update, context: Context) -> int:
+    await respond(update, f"🛫 <b>From</b>: {draft(context, DRAFT)['origin']}\n\n🌍 <b>Step 2/5</b>: Which region?",
+                  regions("exp:reg"))
     return REGION
 
 
-async def region_picked(update: Update, context: Context, region: str) -> int:
-    draft(context, DRAFT)["region"] = region
-    await respond(update, f"🌍 <b>Region</b>: {region_display_name(region)}\n\n"
+async def ask_sort(update: Update, context: Context) -> int:
+    await respond(update, f"🌍 <b>Region</b>: {region_display_name(draft(context, DRAFT)['region'])}\n\n"
                           "📊 <b>Step 3/5</b>: How should deals be ranked?", sort_modes("exp:sort"))
     return SORT
 
 
-async def sort_picked(update: Update, context: Context, sort_mode: str) -> int:
-    draft(context, DRAFT)["sort"] = sort_mode
+async def ask_window(update: Update, context: Context) -> int:
     await respond(update, "📅 <b>Step 4/5</b>: How far ahead should I look? Tap a button, type a number of days, "
                           "or pick dates on the calendar:", timeframe_keyboard("exp:when", DAY_OPTIONS, DEFAULT_DAYS))
     return WINDOW
+
+
+async def ask_limit(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    await respond(update, f"📅 <b>Departures</b>: {describe_window(d['start'], d['end'])}\n\n"
+                          f"📊 <b>Step 5/5</b>: How many deals should I show? (1–{MAX_RESULTS})",
+                  result_limits("exp:lim"))
+    return LIMIT
+
+
+async def origin_picked(update: Update, context: Context, code: str) -> int:
+    draft(context, DRAFT)["origin"] = code
+    return await STEPS.next(update, context)
+
+
+async def region_picked(update: Update, context: Context, region: str) -> int:
+    draft(context, DRAFT)["region"] = region
+    return await STEPS.next(update, context)
+
+
+async def sort_picked(update: Update, context: Context, sort_mode: str) -> int:
+    draft(context, DRAFT)["sort"] = sort_mode
+    return await STEPS.next(update, context)
 
 
 async def days_picked(update: Update, context: Context, days: int) -> int:
@@ -91,10 +114,7 @@ async def days_picked(update: Update, context: Context, days: int) -> int:
 async def dates_picked(update: Update, context: Context, start_date: str, end_date: Optional[str]) -> int:
     d = draft(context, DRAFT)
     d["start"], d["end"] = start_date, end_date
-    await respond(update, f"📅 <b>Departures</b>: {describe_window(start_date, end_date)}\n\n"
-                          f"📊 <b>Step 5/5</b>: How many deals should I show? (1–{MAX_RESULTS})",
-                  result_limits("exp:lim"))
-    return LIMIT
+    return await STEPS.next(update, context)
 
 
 async def limit_picked(update: Update, context: Context, value: str) -> int:
@@ -106,9 +126,13 @@ async def limit_picked(update: Update, context: Context, value: str) -> int:
 async def limit_typed(update: Update, context: Context) -> int:
     text = update.message.text.strip()
     if not text.isdigit() or not 1 <= int(text) <= MAX_RESULTS:
-        await update.message.reply_text(f"❌ Type a number from 1 to {MAX_RESULTS}, or tap a button.")
+        await update.message.reply_text(f"❌ Type a number from 1 to {MAX_RESULTS}, or tap a button.",
+                                        reply_markup=markup(back=True))
         return LIMIT
     return await limit_picked(update, context, text)
+
+
+STEPS = Steps(DRAFT, ask_origin, ask_region, ask_sort, ask_window, ask_limit)
 
 
 async def run_explore(update: Update, context: Context, origin: str, region: str, start_date: str,
@@ -163,9 +187,9 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
 
 def conversation() -> ConversationHandler:
     return wizard_conversation("explore", CommandHandler("explore", start), {
-        ORIGIN: airport_step("exp:org", ORIGIN, origin_picked),
+        ORIGIN: airport_step("exp:org", ORIGIN, origin_picked, back=False),
         REGION: [choice_step("exp:reg", region_picked, "|".join(REGION_LABELS))],
         SORT: [choice_step("exp:sort", sort_picked, "discount|price|both")],
-        WINDOW: timeframe_step("exp:when", WINDOW, days_picked, dates_picked),
+        WINDOW: timeframe_step("exp:when", WINDOW, days_picked, dates_picked, STEPS.again),
         LIMIT: [choice_step("exp:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
-    })
+    }, STEPS)

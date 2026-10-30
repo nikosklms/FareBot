@@ -13,7 +13,7 @@ from bot.keyboards import button, flight_types, markup, stop_markup, track_butto
 from bot.services import Services, get_services
 from bot.wizard import (
     DATES_PROMPT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
-    run_in_background, start_draft, wizard_conversation,
+    Steps, run_in_background, start_draft, wizard_conversation,
 )
 from providers.fast_flights import build_google_flights_url
 from services.progress import Progress
@@ -32,11 +32,7 @@ async def start(update: Update, context: Context) -> int:
         await _shortcut(update, context, context.args)
         return ConversationHandler.END
     start_draft(context, DRAFT)
-    await update.message.reply_text(
-        "🔍 <b>Flight search</b>\n\n🛫 <b>Step 1/4</b>: Where are you flying from? (e.g. Athens, ATH)",
-        reply_markup=markup(),
-    )
-    return ORIGIN
+    return await STEPS.first(update, context)
 
 
 async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
@@ -61,33 +57,56 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     await run_search(update, context, origin_matches[0][0], destination_matches[0][0], start_date, end_date, direct_only)
 
 
-async def origin_picked(update: Update, context: Context, code: str) -> int:
-    draft(context, DRAFT)["origin"] = code
-    await respond(update, f"🛫 <b>From</b>: {code}\n\n🛬 <b>Step 2/4</b>: Where are you flying to? (e.g. London, LON)",
-                  markup())
+async def ask_origin(update: Update, context: Context) -> int:
+    await respond(update, "🔍 <b>Flight search</b>\n\n🛫 <b>Step 1/4</b>: Where are you flying from? "
+                          "(e.g. Athens, ATH)", markup())
+    return ORIGIN
+
+
+async def ask_destination(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    await respond(update, f"🛫 <b>From</b>: {d['origin']}\n\n🛬 <b>Step 2/4</b>: Where are you flying to? "
+                          "(e.g. London, LON)", markup(back=True))
     return DESTINATION
 
 
-async def destination_picked(update: Update, context: Context, code: str) -> int:
+async def ask_dates(update: Update, context: Context) -> int:
     d = draft(context, DRAFT)
-    d["destination"] = code
-    await respond(update, f"📍 <b>Route</b>: {d['origin']} ✈️ {code}\n\n📅 <b>Step 3/4</b>: {DATES_PROMPT}",
+    await respond(update, f"📍 <b>Route</b>: {d['origin']} ✈️ {d['destination']}\n\n📅 <b>Step 3/4</b>: {DATES_PROMPT}",
                   dates_keyboard("src:date"))
     return DATES
+
+
+async def ask_flight_type(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    await respond(update, f"📅 <b>Date</b>: {describe_window(d['start'], d['end'])}\n\n"
+                          "⚙️ <b>Step 4/4</b>: Which flights do you want?", flight_types("src:direct"))
+    return FLIGHT_TYPE
+
+
+async def origin_picked(update: Update, context: Context, code: str) -> int:
+    draft(context, DRAFT)["origin"] = code
+    return await STEPS.next(update, context)
+
+
+async def destination_picked(update: Update, context: Context, code: str) -> int:
+    draft(context, DRAFT)["destination"] = code
+    return await STEPS.next(update, context)
 
 
 async def dates_picked(update: Update, context: Context, start_date: str, end_date: Optional[str]) -> int:
     d = draft(context, DRAFT)
     d["start"], d["end"] = start_date, end_date
-    await respond(update, f"📅 <b>Date</b>: {describe_window(start_date, end_date)}\n\n"
-                          "⚙️ <b>Step 4/4</b>: Which flights do you want?", flight_types("src:direct"))
-    return FLIGHT_TYPE
+    return await STEPS.next(update, context)
 
 
 async def flight_type_picked(update: Update, context: Context, value: str) -> int:
     d = draft(context, DRAFT)
     await run_search(update, context, d["origin"], d["destination"], d["start"], d["end"], value == "1")
     return ConversationHandler.END
+
+
+STEPS = Steps(DRAFT, ask_origin, ask_destination, ask_dates, ask_flight_type)
 
 
 async def run_search(update: Update, context: Context, origin: str, destination: str,
@@ -162,8 +181,8 @@ async def _edit_quietly(message: Message, text: str, reply_markup: Optional[Inli
 
 def conversation() -> ConversationHandler:
     return wizard_conversation("search", CommandHandler("search", start), {
-        ORIGIN: airport_step("src:org", ORIGIN, origin_picked),
+        ORIGIN: airport_step("src:org", ORIGIN, origin_picked, back=False),
         DESTINATION: airport_step("src:dst", DESTINATION, destination_picked),
-        DATES: dates_step("src:date", DATES, dates_picked),
+        DATES: dates_step("src:date", DATES, dates_picked, STEPS.again),
         FLIGHT_TYPE: [choice_step("src:direct", flight_type_picked, "0|1")],
-    })
+    }, STEPS)

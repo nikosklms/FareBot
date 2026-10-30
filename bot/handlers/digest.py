@@ -9,7 +9,8 @@ from bot.formatting import budget_text, digest_card
 from bot.keyboards import DEFAULT_RESULT_LIMIT, button, markup, pairs, quick_origins, regions, result_limits, sort_modes
 from bot.services import get_services
 from bot.wizard import (
-    TEXT, Context, airport_step, choice_step, draft, respond, start_draft, timeframe_keyboard, timeframe_step,
+    TEXT, Context, Steps, airport_step, choice_step, draft, respond, start_draft, timeframe_keyboard,
+    timeframe_step,
     wizard_conversation,
 )
 from config import MAX_TRACKERS_PER_USER
@@ -44,11 +45,7 @@ async def start(update: Update, context: Context) -> int:
         await _shortcut(update, context, context.args)
         return ConversationHandler.END
     start_draft(context, DRAFT)
-    await update.message.reply_text(
-        "🗞️ <b>Weekly flight deal digest</b>\n\n🛫 <b>Step 1/8</b>: Pick an origin airport or type a city name:",
-        reply_markup=quick_origins("dig:org"),
-    )
-    return ORIGIN
+    return await STEPS.first(update, context)
 
 
 async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
@@ -77,35 +74,79 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     })
 
 
-async def origin_picked(update: Update, context: Context, code: str) -> int:
-    draft(context, DRAFT)["origin"] = code
-    await respond(update, f"🛫 <b>From</b>: {code}\n\n🌍 <b>Step 2/8</b>: Which region?", regions("dig:reg"))
+async def ask_origin(update: Update, context: Context) -> int:
+    await respond(update, "🗞️ <b>Weekly flight deal digest</b>\n\n🛫 <b>Step 1/8</b>: Pick an origin airport or type "
+                          "a city name:", quick_origins("dig:org"))
+    return ORIGIN
+
+
+async def ask_region(update: Update, context: Context) -> int:
+    await respond(update, f"🛫 <b>From</b>: {draft(context, DRAFT)['origin']}\n\n🌍 <b>Step 2/8</b>: Which region?",
+                  regions("dig:reg"))
     return REGION
 
 
-async def region_picked(update: Update, context: Context, region: str) -> int:
-    draft(context, DRAFT)["region"] = region
-    await respond(update, f"🌍 <b>Region</b>: {region_display_name(region)}\n\n"
+async def ask_sort(update: Update, context: Context) -> int:
+    await respond(update, f"🌍 <b>Region</b>: {region_display_name(draft(context, DRAFT)['region'])}\n\n"
                           "📊 <b>Step 3/8</b>: How should deals be ranked?", sort_modes("dig:sort", default="both"))
     return SORT
 
 
-async def sort_picked(update: Update, context: Context, sort_mode: str) -> int:
-    draft(context, DRAFT)["sort"] = sort_mode
+async def ask_budget(update: Update, context: Context) -> int:
     budgets = [button(f"€{amount}", f"dig:bud:{amount}") for amount in BUDGET_OPTIONS]
     await respond(update, "🎯 <b>Step 4/8</b>: Maximum price per flight? Tap a button or type an amount in EUR:",
-                  markup(*pairs(budgets), [button("Any Budget 💶", "dig:bud:0")]))
+                  markup(*pairs(budgets), [button("Any Budget 💶", "dig:bud:0")], back=True))
     return BUDGET
 
 
-async def budget_picked(update: Update, context: Context, value: str) -> int:
-    budget = float(value)
-    draft(context, DRAFT)["budget"] = budget or None
-    await respond(update, f"🎯 <b>Budget</b>: {budget_text(budget)}\n\n"
+async def ask_window(update: Update, context: Context) -> int:
+    await respond(update, f"🎯 <b>Budget</b>: {budget_text(draft(context, DRAFT)['budget'])}\n\n"
                           "📅 <b>Step 5/8</b>: Which departures should each digest cover? Tap or type a number of "
                           "days ahead, or pick fixed dates on the calendar:",
                   timeframe_keyboard("dig:when", DAY_OPTIONS, DEFAULT_DAYS))
     return WINDOW
+
+
+async def ask_day(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    window = f"next {d['days']} days" if d["days"] else describe_window(d["start"], d["end"])
+    days = [button(f"{day} (Default)" if day == "Sunday" else day, f"dig:day:{day}") for day in WEEKDAYS]
+    await respond(update, f"📅 <b>Departures</b>: {window}\n\n⏰ <b>Step 6/8</b>: Which day should it arrive?",
+                  markup(*pairs(days), back=True))
+    return DAY
+
+
+async def ask_time(update: Update, context: Context) -> int:
+    times = [button(f"{t} (Default)" if t == "15:00" else t, f"dig:time:{t}") for t in TIME_OPTIONS]
+    await respond(update, f"⏰ <b>Day</b>: {draft(context, DRAFT)['day']}\n\n🕒 <b>Step 7/8</b>: What time? "
+                          "Tap or type <code>HH:MM</code>:", markup(*pairs(times), back=True))
+    return TIME
+
+
+async def ask_limit(update: Update, context: Context) -> int:
+    await respond(update, f"🕒 <b>Time</b>: {draft(context, DRAFT)['time']}\n\n📊 <b>Step 8/8</b>: How many deals "
+                          f"per digest? (1–{MAX_RESULTS})", result_limits("dig:lim"))
+    return LIMIT
+
+
+async def origin_picked(update: Update, context: Context, code: str) -> int:
+    draft(context, DRAFT)["origin"] = code
+    return await STEPS.next(update, context)
+
+
+async def region_picked(update: Update, context: Context, region: str) -> int:
+    draft(context, DRAFT)["region"] = region
+    return await STEPS.next(update, context)
+
+
+async def sort_picked(update: Update, context: Context, sort_mode: str) -> int:
+    draft(context, DRAFT)["sort"] = sort_mode
+    return await STEPS.next(update, context)
+
+
+async def budget_picked(update: Update, context: Context, value: str) -> int:
+    draft(context, DRAFT)["budget"] = float(value) or None
+    return await STEPS.next(update, context)
 
 
 async def budget_typed(update: Update, context: Context) -> int:
@@ -114,7 +155,8 @@ async def budget_typed(update: Update, context: Context) -> int:
     except ValueError:
         budget = -1
     if budget < 0:
-        await update.message.reply_text("❌ Type an amount like <code>80</code>, or <code>0</code> for any budget.")
+        await update.message.reply_text("❌ Type an amount like <code>80</code>, or <code>0</code> for any budget.",
+                                        reply_markup=markup(back=True))
         return BUDGET
     return await budget_picked(update, context, str(budget))
 
@@ -122,41 +164,30 @@ async def budget_typed(update: Update, context: Context) -> int:
 async def days_picked(update: Update, context: Context, days: int) -> int:
     d = draft(context, DRAFT)
     d["days"], d["start"], d["end"] = days, None, None
-    return await _ask_day(update, f"next {days} days")
+    return await STEPS.next(update, context)
 
 
 async def dates_picked(update: Update, context: Context, start_date: str, end_date: Optional[str]) -> int:
     d = draft(context, DRAFT)
     d["days"], d["start"], d["end"] = None, start_date, end_date
-    return await _ask_day(update, describe_window(start_date, end_date))
-
-
-async def _ask_day(update: Update, window: str) -> int:
-    days = [button(f"{day} (Default)" if day == "Sunday" else day, f"dig:day:{day}") for day in WEEKDAYS]
-    await respond(update, f"📅 <b>Departures</b>: {window}\n\n⏰ <b>Step 6/8</b>: Which day should it arrive?",
-                  markup(*pairs(days)))
-    return DAY
+    return await STEPS.next(update, context)
 
 
 async def day_picked(update: Update, context: Context, day: str) -> int:
     draft(context, DRAFT)["day"] = day
-    times = [button(f"{t} (Default)" if t == "15:00" else t, f"dig:time:{t}") for t in TIME_OPTIONS]
-    await respond(update, f"⏰ <b>Day</b>: {day}\n\n🕒 <b>Step 7/8</b>: What time? Tap or type <code>HH:MM</code>:",
-                  markup(*pairs(times)))
-    return TIME
+    return await STEPS.next(update, context)
 
 
 async def time_picked(update: Update, context: Context, clock: str) -> int:
     draft(context, DRAFT)["time"] = clock
-    await respond(update, f"🕒 <b>Time</b>: {clock}\n\n📊 <b>Step 8/8</b>: How many deals per digest? (1–{MAX_RESULTS})",
-                  result_limits("dig:lim"))
-    return LIMIT
+    return await STEPS.next(update, context)
 
 
 async def time_typed(update: Update, context: Context) -> int:
     clock = parse_clock(update.message.text)
     if not clock:
-        await update.message.reply_text("❌ Type a time like <code>15:00</code>, or tap a button.")
+        await update.message.reply_text("❌ Type a time like <code>15:00</code>, or tap a button.",
+                                        reply_markup=markup(back=True))
         return TIME
     return await time_picked(update, context, clock)
 
@@ -171,9 +202,13 @@ async def limit_picked(update: Update, context: Context, value: str) -> int:
 async def limit_typed(update: Update, context: Context) -> int:
     text = update.message.text.strip()
     if not text.isdigit() or not 1 <= int(text) <= MAX_RESULTS:
-        await update.message.reply_text(f"❌ Type a number from 1 to {MAX_RESULTS}, or tap a button.")
+        await update.message.reply_text(f"❌ Type a number from 1 to {MAX_RESULTS}, or tap a button.",
+                                        reply_markup=markup(back=True))
         return LIMIT
     return await limit_picked(update, context, text)
+
+
+STEPS = Steps(DRAFT, ask_origin, ask_region, ask_sort, ask_budget, ask_window, ask_day, ask_time, ask_limit)
 
 
 async def create_digest(update: Update, context: Context, d: dict) -> Optional[Digest]:
@@ -200,12 +235,12 @@ async def create_digest(update: Update, context: Context, d: dict) -> Optional[D
 
 def conversation() -> ConversationHandler:
     return wizard_conversation("digest", CommandHandler("digest", start), {
-        ORIGIN: airport_step("dig:org", ORIGIN, origin_picked),
+        ORIGIN: airport_step("dig:org", ORIGIN, origin_picked, back=False),
         REGION: [choice_step("dig:reg", region_picked, "|".join(REGION_LABELS))],
         SORT: [choice_step("dig:sort", sort_picked, "discount|price|both")],
         BUDGET: [choice_step("dig:bud", budget_picked, r"\d+"), MessageHandler(TEXT, budget_typed)],
-        WINDOW: timeframe_step("dig:when", WINDOW, days_picked, dates_picked),
+        WINDOW: timeframe_step("dig:when", WINDOW, days_picked, dates_picked, STEPS.again),
         DAY: [choice_step("dig:day", day_picked, "|".join(WEEKDAYS))],
         TIME: [choice_step("dig:time", time_picked, r"\d{2}:\d{2}"), MessageHandler(TEXT, time_typed)],
         LIMIT: [choice_step("dig:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
-    })
+    }, STEPS)

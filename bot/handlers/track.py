@@ -9,7 +9,7 @@ from bot.keyboards import TRACK_ADD, button, flight_types, markup
 from bot.services import get_services
 from bot.wizard import (
     DATES_PROMPT, TEXT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
-    start_draft, wizard_conversation,
+    Steps, start_draft, wizard_conversation,
 )
 from config import MAX_TRACKERS_PER_USER, MIN_POLL_INTERVAL_HOURS
 from daemon.scheduler import schedule_tracker
@@ -105,11 +105,7 @@ async def start(update: Update, context: Context) -> int:
         await _shortcut(update, context, context.args)
         return ConversationHandler.END
     start_draft(context, DRAFT)
-    await update.message.reply_text(
-        "🔔 <b>New price tracker</b>\n\n🛫 <b>Step 1/6</b>: Where are you flying from? (e.g. Athens, ATH)",
-        reply_markup=markup(),
-    )
-    return ORIGIN
+    return await STEPS.first(update, context)
 
 
 async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
@@ -143,35 +139,68 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     await update.message.reply_text(tracker_created_text(tracker))
 
 
-async def origin_picked(update: Update, context: Context, code: str) -> int:
-    draft(context, DRAFT)["origin"] = code
-    await respond(update, f"🛫 <b>From</b>: {code}\n\n🛬 <b>Step 2/6</b>: Where are you flying to? (e.g. London, LON)",
-                  markup())
+async def ask_origin(update: Update, context: Context) -> int:
+    await respond(update, "🔔 <b>New price tracker</b>\n\n🛫 <b>Step 1/6</b>: Where are you flying from? "
+                          "(e.g. Athens, ATH)", markup())
+    return ORIGIN
+
+
+async def ask_destination(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    await respond(update, f"🛫 <b>From</b>: {d['origin']}\n\n🛬 <b>Step 2/6</b>: Where are you flying to? "
+                          "(e.g. London, LON)", markup(back=True))
     return DESTINATION
 
 
-async def destination_picked(update: Update, context: Context, code: str) -> int:
+async def ask_dates(update: Update, context: Context) -> int:
     d = draft(context, DRAFT)
-    d["destination"] = code
-    await respond(update, f"📍 <b>Route</b>: {d['origin']} ✈️ {code}\n\n📅 <b>Step 3/6</b>: {DATES_PROMPT}",
+    await respond(update, f"📍 <b>Route</b>: {d['origin']} ✈️ {d['destination']}\n\n📅 <b>Step 3/6</b>: {DATES_PROMPT}",
                   dates_keyboard("trk:date"))
     return DATES
+
+
+async def ask_flight_type(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    await respond(update, f"📅 <b>Date</b>: {describe_window(d['start'], d['end'])}\n\n"
+                          "⚙️ <b>Step 4/6</b>: Which flights should I watch?", flight_types("trk:direct"))
+    return FLIGHT_TYPE
+
+
+async def ask_budget(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    await respond(update, f"⚙️ <b>Flights</b>: {flight_type_label(d['direct_only'])}\n\n"
+                          "💶 <b>Step 5/6</b>: What's your maximum price in EUR? (e.g. <code>150</code>)",
+                  markup(back=True))
+    return BUDGET
+
+
+async def ask_frequency(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    hours = markup(*[[button(f"Every {h} hours", f"trk:freq:{h}")] for h in FREQUENCIES], back=True)
+    await respond(update, f"🎯 <b>Budget</b>: {eur(d['budget'])}\n\n⏰ <b>Step 6/6</b>: How often should I check?",
+                  hours)
+    return FREQUENCY
+
+
+async def origin_picked(update: Update, context: Context, code: str) -> int:
+    draft(context, DRAFT)["origin"] = code
+    return await STEPS.next(update, context)
+
+
+async def destination_picked(update: Update, context: Context, code: str) -> int:
+    draft(context, DRAFT)["destination"] = code
+    return await STEPS.next(update, context)
 
 
 async def dates_picked(update: Update, context: Context, start_date: str, end_date: Optional[str]) -> int:
     d = draft(context, DRAFT)
     d["start"], d["end"] = start_date, end_date
-    await respond(update, f"📅 <b>Date</b>: {describe_window(start_date, end_date)}\n\n"
-                          "⚙️ <b>Step 4/6</b>: Which flights should I watch?", flight_types("trk:direct"))
-    return FLIGHT_TYPE
+    return await STEPS.next(update, context)
 
 
 async def flight_type_picked(update: Update, context: Context, value: str) -> int:
-    direct_only = value == "1"
-    draft(context, DRAFT)["direct_only"] = direct_only
-    await respond(update, f"⚙️ <b>Flights</b>: {flight_type_label(direct_only)}\n\n"
-                          "💶 <b>Step 5/6</b>: What's your maximum price in EUR? (e.g. <code>150</code>)", markup())
-    return BUDGET
+    draft(context, DRAFT)["direct_only"] = value == "1"
+    return await STEPS.next(update, context)
 
 
 async def budget_typed(update: Update, context: Context) -> int:
@@ -180,13 +209,10 @@ async def budget_typed(update: Update, context: Context) -> int:
     except ValueError:
         budget = 0
     if budget <= 0:
-        await update.message.reply_text("❌ Type a price above 0, e.g. <code>150</code>.", reply_markup=markup())
+        await update.message.reply_text("❌ Type a price above 0, e.g. <code>150</code>.", reply_markup=markup(back=True))
         return BUDGET
     draft(context, DRAFT)["budget"] = budget
-    hours = markup(*[[button(f"Every {h} hours", f"trk:freq:{h}")] for h in FREQUENCIES])
-    await update.message.reply_text(f"🎯 <b>Budget</b>: {eur(budget)}\n\n⏰ <b>Step 6/6</b>: How often should I check?",
-                                    reply_markup=hours)
-    return FREQUENCY
+    return await STEPS.next(update, context)
 
 
 async def frequency_picked(update: Update, context: Context, value: str) -> int:
@@ -203,15 +229,18 @@ async def frequency_picked(update: Update, context: Context, value: str) -> int:
     return ConversationHandler.END
 
 
+STEPS = Steps(DRAFT, ask_origin, ask_destination, ask_dates, ask_flight_type, ask_budget, ask_frequency)
+
+
 def conversation() -> ConversationHandler:
     return wizard_conversation("track", CommandHandler("track", start), {
-        ORIGIN: airport_step("trk:org", ORIGIN, origin_picked),
+        ORIGIN: airport_step("trk:org", ORIGIN, origin_picked, back=False),
         DESTINATION: airport_step("trk:dst", DESTINATION, destination_picked),
-        DATES: dates_step("trk:date", DATES, dates_picked),
+        DATES: dates_step("trk:date", DATES, dates_picked, STEPS.again),
         FLIGHT_TYPE: [choice_step("trk:direct", flight_type_picked, "0|1")],
         BUDGET: [MessageHandler(TEXT, budget_typed)],
         FREQUENCY: [choice_step("trk:freq", frequency_picked, "|".join(map(str, FREQUENCIES)))],
-    })
+    }, STEPS)
 
 
 track_button_handler = CallbackQueryHandler(track_button_pressed, pattern=rf"^{TRACK_ADD}:")
