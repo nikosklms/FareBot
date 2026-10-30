@@ -1,21 +1,41 @@
+from datetime import timezone
+
 import pytest
-from unittest.mock import MagicMock
+
+from bot.services import Services
+from database.db import Database
+from main import build_application
+from services.resolver import LocationResolver
+from tests.fakes import USER_ID, BotHarness, FakeProvider, FakeTelegram
+
 
 @pytest.fixture(autouse=True)
-def setup_test_allowed_users(monkeypatch):
-    """Ensure mock user IDs in unit tests pass authorization, except explicit unauthorized test IDs."""
-    class TestAllowedUsers(list):
-        def __contains__(self, item):
-            if item in (99999999, 77777):  # Explicitly unauthorized test IDs for test_auth.py
-                return False
-            if isinstance(item, MagicMock) or item is None:
-                return True
-            if item in (42, 55, 100, 999, 123456789, 987654321):
-                return True
-            return super().__contains__(item)
+def allowed_users(monkeypatch, tmp_path):
+    monkeypatch.setattr("bot.auth.get_allowed_users", lambda: [USER_ID])
+    monkeypatch.setattr("bot.auth.UNAUTHORIZED_LOG", tmp_path / "unauthorized_access.log")
 
-    test_users = TestAllowedUsers([123456789, 987654321])
-    monkeypatch.setattr("config.get_allowed_users", lambda: test_users)
-    monkeypatch.setattr("config.ALLOWED_USERS", test_users)
-    monkeypatch.setattr("bot.handlers.auth.get_allowed_users", lambda: test_users)
-    monkeypatch.setattr("bot.handlers.auth.ALLOWED_USERS", test_users)
+
+@pytest.fixture
+async def db(tmp_path):
+    database = Database(str(tmp_path / "test.db"))
+    await database.migrate()
+    return database
+
+
+@pytest.fixture
+def provider():
+    return FakeProvider()
+
+
+@pytest.fixture
+def services(db, provider):
+    return Services(db=db, provider=provider, resolver=LocationResolver(), timezone=timezone.utc)
+
+
+@pytest.fixture
+async def bot(services):
+    telegram = FakeTelegram()
+    app = build_application(services, token="123:TEST", request=telegram)
+    await app.initialize()
+    yield BotHarness(app, telegram, services)
+    await app.shutdown()

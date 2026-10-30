@@ -1,6 +1,8 @@
 import pytest
-from datetime import datetime, timedelta, timezone
-from utils.date_parser import parse_date_or_range, generate_date_sequence, get_preset_range
+from datetime import date, datetime, timedelta, timezone
+from utils.date_parser import (
+    days_ahead_window, describe_window, generate_date_sequence, get_preset_range, is_past, parse_date_or_range,
+)
 
 def test_parse_single_iso_date():
     start, end = parse_date_or_range("2026-09-01")
@@ -36,13 +38,33 @@ def test_generate_date_sequence_90_days():
     dates = generate_date_sequence("2026-08-17", "2026-11-14")
     assert len(dates) == 90
 
-def test_generate_date_sequence_custom_98_days():
-    from services.explore_engine import build_timeframe_date_range
-    dep_range = build_timeframe_date_range(98)
-    start_date, end_date = dep_range.split("..")
-    dates = generate_date_sequence(start_date, end_date)
-    assert len(dates) == 98
+def test_days_ahead_window_covers_requested_days():
+    start_date, end_date = days_ahead_window(98, today=date(2027, 1, 1))
+    assert (start_date, end_date) == ("2027-01-02", "2027-04-09")
+    assert len(generate_date_sequence(start_date, end_date)) == 98
 
+
+def test_parse_reversed_and_same_day_ranges():
+    assert parse_date_or_range("2026-09-15..2026-09-01") == ("2026-09-01", "2026-09-15")
+    assert parse_date_or_range("2026-09-01..2026-09-01") == ("2026-09-01", None)
+
+
+@pytest.mark.parametrize("bad", ["", "tomorrow", "2026-13-01", "2026-09-01..soon"])
+def test_parse_rejects_garbage(bad):
+    with pytest.raises(ValueError):
+        parse_date_or_range(bad)
+
+
+def test_this_weekend_is_next_saturday_and_sunday():
+    assert get_preset_range("this_weekend", today=date(2027, 1, 6)) == ("2027-01-09", "2027-01-10")
+    assert get_preset_range("this_weekend", today=date(2027, 1, 9)) == ("2027-01-16", "2027-01-17")
+
+
+def test_is_past_and_describe_window():
+    assert is_past("2027-01-01", today=date(2027, 1, 2))
+    assert not is_past("2027-01-02", today=date(2027, 1, 2))
+    assert describe_window("2027-01-01", None) == "2027-01-01"
+    assert describe_window("2027-01-01", "2027-01-05") == "2027-01-01 ➔ 2027-01-05"
 
 
 def test_get_preset_range_next_7_days():

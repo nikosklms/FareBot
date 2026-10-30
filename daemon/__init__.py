@@ -1,3 +1,9 @@
-from .scheduler import TrackerDaemonScheduler, register_active_trackers_on_startup, register_active_trackers, schedule_tracker_job, unschedule_tracker_job, schedule_digest_job, run_digest_weekly_job, run_daily_cleanup_job
+from .scheduler import (
+    register_jobs,
+    schedule_digest,
+    schedule_tracker,
+    unschedule_digest,
+    unschedule_tracker,
+)
 
-__all__ = ["TrackerDaemonScheduler", "register_active_trackers_on_startup", "register_active_trackers", "schedule_tracker_job", "unschedule_tracker_job", "schedule_digest_job", "run_digest_weekly_job", "run_daily_cleanup_job"]
+__all__ = ["register_jobs", "schedule_digest", "schedule_tracker", "unschedule_digest", "unschedule_tracker"]

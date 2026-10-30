@@ -1,59 +1,42 @@
-from .common import start_command, help_command, cancel_command, cancel_callback
-from .search import (
-    search_command, handle_search_origin, select_search_origin_callback,
-    handle_search_destination, select_search_destination_callback, handle_search_date, handle_search_date_preset_callback,
-    open_calendar_search_callback, handle_search_calendar_date_selection,
-    search_calendar_nav_callback, search_calendar_mode_callback, search_calendar_ignore_callback,
-    select_search_flight_type_callback, execute_search, search_track_callback_handler,
-    SEARCH_ORIGIN, SEARCH_DESTINATION, SEARCH_DATE, SEARCH_FLIGHT_TYPE
-)
-from .track import (
-    start_newtrack, handle_origin_input, select_origin_callback,
-    handle_destination_input, select_destination_callback, handle_departure_date, handle_date_preset_callback,
-    open_calendar_track_callback, calendar_nav_callback, track_calendar_mode_callback, track_calendar_ignore_callback,
-    select_flight_type_callback, handle_budget, select_frequency_callback, handle_calendar_date_selection,
-    ORIGIN, DESTINATION, DEPARTURE_DATE, FLIGHT_TYPE, BUDGET, FREQUENCY
-)
-from .dashboard import mytracks_command, dashboard_callback_handler, handle_edit_budget_input
-from .explore import (
-    start_explore_wizard, handle_explore_origin_input, select_explore_origin_callback,
-    select_explore_region_callback, select_explore_sort_callback, handle_explore_timeframe_input, select_explore_timeframe_callback,
-    open_calendar_explore_callback, explore_calendar_nav_callback, explore_calendar_mode_callback,
-    explore_calendar_ignore_callback, handle_explore_calendar_date_selection,
-    handle_explore_limit_input, select_explore_limit_callback, track_deal_callback,
-    EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_SORT, EXPLORE_TIMEFRAME, EXPLORE_LIMIT
-)
-from .digest import (
-    start_digest_wizard, handle_digest_origin_input, select_digest_origin_callback,
-    select_digest_region_callback, select_digest_sort_callback, handle_digest_budget_input, select_digest_budget_callback,
-    handle_digest_timeframe_input, select_digest_timeframe_callback, select_digest_day_callback,
-    handle_digest_time_input, select_digest_time_callback, handle_digest_limit_input,
-    select_digest_limit_callback, open_calendar_digest_callback, digest_calendar_nav_callback,
-    digest_calendar_mode_callback, digest_calendar_ignore_callback, handle_digest_calendar_date_selection,
-    DIGEST_ORIGIN, DIGEST_REGION, DIGEST_SORT, DIGEST_BUDGET, DIGEST_TIMEFRAME, DIGEST_DAY, DIGEST_TIME, DIGEST_LIMIT
-)
+from telegram import Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, TypeHandler
 
-__all__ = [
-    "start_command", "help_command", "cancel_command", "cancel_callback",
-    "search_command", "handle_search_origin", "select_search_origin_callback",
-    "handle_search_destination", "select_search_destination_callback", "handle_search_date", "handle_search_date_preset_callback",
-    "select_search_flight_type_callback", "execute_search", "search_track_callback_handler",
-    "SEARCH_ORIGIN", "SEARCH_DESTINATION", "SEARCH_DATE", "SEARCH_FLIGHT_TYPE",
-    "start_newtrack", "handle_origin_input", "select_origin_callback",
-    "handle_destination_input", "select_destination_callback", "handle_departure_date", "handle_date_preset_callback",
-    "select_flight_type_callback", "handle_budget", "select_frequency_callback", "handle_calendar_date_selection",
-    "ORIGIN", "DESTINATION", "DEPARTURE_DATE", "FLIGHT_TYPE", "BUDGET", "FREQUENCY",
-    "mytracks_command", "dashboard_callback_handler", "handle_edit_budget_input",
-    "start_explore_wizard", "handle_explore_origin_input", "select_explore_origin_callback",
-    "select_explore_region_callback", "select_explore_sort_callback", "handle_explore_timeframe_input", "select_explore_timeframe_callback",
-    "handle_explore_limit_input",
-    "select_explore_limit_callback", "track_deal_callback",
-    "EXPLORE_ORIGIN", "EXPLORE_REGION", "EXPLORE_SORT", "EXPLORE_TIMEFRAME", "EXPLORE_LIMIT",
-    "start_digest_wizard", "handle_digest_origin_input", "select_digest_origin_callback",
-    "select_digest_region_callback", "select_digest_sort_callback", "handle_digest_budget_input", "select_digest_budget_callback",
-    "handle_digest_timeframe_input", "select_digest_timeframe_callback", "select_digest_day_callback",
-    "handle_digest_time_input", "select_digest_time_callback", "handle_digest_limit_input",
-    "select_digest_limit_callback", "open_calendar_digest_callback", "digest_calendar_nav_callback",
-    "digest_calendar_mode_callback", "digest_calendar_ignore_callback", "handle_digest_calendar_date_selection",
-    "DIGEST_ORIGIN", "DIGEST_REGION", "DIGEST_SORT", "DIGEST_BUDGET", "DIGEST_TIMEFRAME", "DIGEST_DAY", "DIGEST_TIME", "DIGEST_LIMIT"
+from bot.auth import auth_gate
+from bot.deal_buttons import toggle_deals_handler
+from bot.handlers import dashboard, digest, explore, search, track
+from bot.handlers.common import (
+    cancel_command, error_handler, help_command, noop_pressed, start_command, stop_task_pressed,
+)
+from bot.keyboards import NOOP, STOP_TASK
+from bot.wizard import TEXT
+
+BOT_COMMANDS = [
+    ("search", "🔍 Search flights"),
+    ("track", "🔔 Track a route's price"),
+    ("explore", "🌟 Find deals to a region"),
+    ("digest", "🗞️ Weekly deal digest"),
+    ("mytracks", "📊 Manage trackers and digests"),
+    ("help", "❓ Help and shortcuts"),
+    ("cancel", "❌ Cancel the current action"),
 ]
+
+
+def register_handlers(app: Application) -> None:
+    """Group -1 checks access, group 0 holds global handlers, and each wizard gets its own
+    group so that starting one wizard ends any other that was open."""
+    app.add_handler(TypeHandler(Update, auth_gate), group=-1)
+    app.add_handlers([
+        CommandHandler("start", start_command),
+        CommandHandler("help", help_command),
+        CommandHandler("cancel", cancel_command),
+        CommandHandler("mytracks", dashboard.mytracks_command),
+        dashboard.dashboard_handler,
+        track.track_button_handler,
+        toggle_deals_handler,
+        CallbackQueryHandler(stop_task_pressed, pattern=f"^{STOP_TASK}$"),
+        CallbackQueryHandler(noop_pressed, pattern=f"^{NOOP}$"),
+        MessageHandler(TEXT, dashboard.budget_typed),
+    ], group=0)
+    for group, wizard in enumerate([search, track, explore, digest], start=1):
+        app.add_handler(wizard.conversation(), group=group)
+    app.add_error_handler(error_handler)

@@ -1,308 +1,148 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from telegram.error import Forbidden, TelegramError
-from daemon.scheduler import TrackerDaemonScheduler, register_active_trackers_on_startup
+from datetime import timezone
+
+from database.models import ACTIVE, EXPIRED, PAUSED
+from daemon.scheduler import check_tracker, register_jobs, schedule_digest, send_digest
 from providers.base import FlightOffer
-
-@pytest.mark.asyncio
-async def test_scheduler_check_price_match():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 1, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-10-15", "max_budget": 200.0, "consecutive_failures": 0, "status": "ACTIVE"
-    })
-    db_mock.log_price = AsyncMock()
-    db_mock.update_tracker_status = AsyncMock()
-    db_mock.reset_failure_count = AsyncMock()
-
-    provider_mock = MagicMock()
-    provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-10-15", price=180.0, airline="Aegean")
-    ])
-
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
-
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=1, bot=bot_mock)
-
-    db_mock.log_price.assert_called_once_with(1, 180.0, "Aegean")
-    db_mock.update_tracker_status.assert_called_once_with(1, "PAUSED")
-    bot_mock.send_message.assert_called_once()
-
-@pytest.mark.asyncio
-async def test_scheduler_polls_date_range():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 10, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-09-01", "departure_date_end": "2026-09-10",
-        "max_budget": 150.0, "status": "ACTIVE", "direct_only": 0, "consecutive_failures": 0
-    })
-    db_mock.log_price = AsyncMock()
-    db_mock.update_tracker_status = AsyncMock()
-    db_mock.reset_failure_count = AsyncMock()
-
-    provider_mock = MagicMock()
-    provider_mock.search_flights_range = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-09-05", price=120.0, airline="Aegean")
-    ])
-
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
-
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=10, bot=bot_mock)
-
-    provider_mock.search_flights_range.assert_called_once_with(
-        origin="ATH", destination="LON", start_date="2026-09-01", end_date="2026-09-10", direct_only=False
-    )
-    db_mock.log_price.assert_called_once_with(10, 120.0, "Aegean")
-    db_mock.update_tracker_status.assert_called_once_with(10, "PAUSED")
-
-@pytest.mark.asyncio
-async def test_scheduler_3_failures_triggers_pause():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 2, "user_id": 101, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-10-15", "max_budget": 200.0, "consecutive_failures": 2, "status": "ACTIVE"
-    })
-    db_mock.increment_failure_count = AsyncMock(return_value=3)
-    db_mock.update_tracker_status = AsyncMock()
-
-    provider_mock = MagicMock()
-    provider_mock.search_flights = AsyncMock(return_value=[])
-
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
-
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=2, bot=bot_mock)
-
-    db_mock.increment_failure_count.assert_called_once_with(2)
-    db_mock.update_tracker_status.assert_called_once_with(2, "PAUSED")
-    bot_mock.send_message.assert_called_once()
-    assert "3 attempts" in bot_mock.send_message.call_args[1]["text"]
-
-@pytest.mark.asyncio
-async def test_scheduler_past_departure_date_expires():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 3, "user_id": 102, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2020-01-01", "max_budget": 200.0, "consecutive_failures": 0, "status": "ACTIVE"
-    })
-    db_mock.update_tracker_status = AsyncMock()
-
-    provider_mock = MagicMock()
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
-
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=3, bot=bot_mock)
-
-    db_mock.update_tracker_status.assert_called_once_with(3, "EXPIRED")
-    bot_mock.send_message.assert_called_once()
-    assert "expired" in bot_mock.send_message.call_args[1]["text"].lower()
-
-@pytest.mark.asyncio
-async def test_scheduler_notification_button_payloads():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 4, "user_id": 103, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-10-15", "max_budget": 250.0, "consecutive_failures": 0, "status": "ACTIVE"
-    })
-    db_mock.log_price = AsyncMock()
-    db_mock.update_tracker_status = AsyncMock()
-    db_mock.reset_failure_count = AsyncMock()
-
-    provider_mock = MagicMock()
-    provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-10-15", price=210.0, airline="British Airways", booking_url="http://test.url")
-    ])
-
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
-
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=4, bot=bot_mock)
-
-    bot_mock.send_message.assert_called_once()
-    kwargs = bot_mock.send_message.call_args[1]
-    reply_markup = kwargs["reply_markup"]
-    assert reply_markup is not None
-    inline_keyboard = reply_markup.inline_keyboard
-    assert len(inline_keyboard) == 2
-    assert inline_keyboard[0][0].url == "http://test.url"
-    assert "View Best Offer" in inline_keyboard[0][0].text
-    assert "dash_pause_4" in inline_keyboard[1][0].callback_data
-    assert "dash_del_4" in inline_keyboard[1][1].callback_data
-
-@pytest.mark.asyncio
-async def test_scheduler_handles_forbidden_user_blocks_bot():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 5, "user_id": 104, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-10-15", "max_budget": 250.0, "consecutive_failures": 0, "status": "ACTIVE"
-    })
-    db_mock.log_price = AsyncMock()
-    db_mock.update_tracker_status = AsyncMock()
-    db_mock.reset_failure_count = AsyncMock()
-
-    provider_mock = MagicMock()
-    provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-10-15", price=200.0, airline="Aegean")
-    ])
-
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock(side_effect=Forbidden("Bot was blocked by the user"))
-
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=5, bot=bot_mock)
-
-    db_mock.update_tracker_status.assert_called_with(5, "PAUSED")
-
-@pytest.mark.asyncio
-async def test_register_active_trackers_on_startup():
-    db_mock = MagicMock()
-    db_mock.get_active_trackers = AsyncMock(return_value=[
-        {"id": 10, "frequency_hours": 6},
-        {"id": 11, "frequency_hours": 12}
-    ])
-    provider_mock = MagicMock()
-
-    app_mock = MagicMock()
-    job_queue_mock = MagicMock()
-    app_mock.job_queue = job_queue_mock
-
-    registered = await register_active_trackers_on_startup(app_mock, db_mock, provider_mock)
-    assert registered == 2
-    assert job_queue_mock.run_repeating.call_count == 2
-
-def test_schedule_and_unschedule_tracker_job():
-    from daemon.scheduler import schedule_tracker_job, unschedule_tracker_job
-
-    job_queue_mock = MagicMock()
-    mock_job = MagicMock()
-    job_queue_mock.get_jobs_by_name.return_value = [mock_job]
-
-    schedule_tracker_job(job_queue_mock, tracker_id=99, frequency_hours=12)
-    job_queue_mock.run_repeating.assert_called_once()
-    assert job_queue_mock.run_repeating.call_args[1]["name"] == "tracker_job_99"
-    assert mock_job.schedule_removal.call_count >= 1
-
-    unschedule_tracker_job(job_queue_mock, tracker_id=99)
-    job_queue_mock.get_jobs_by_name.assert_any_call("tracker_job_99")
-    assert mock_job.schedule_removal.call_count >= 2
-
-@pytest.mark.asyncio
-async def test_scheduler_polls_with_direct_only_flag():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 50, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-10-15", "max_budget": 200.0, "direct_only": 1,
-        "consecutive_failures": 0, "status": "ACTIVE"
-    })
-    db_mock.log_price = AsyncMock()
-    db_mock.update_tracker_status = AsyncMock()
-    db_mock.reset_failure_count = AsyncMock()
-
-    provider_mock = MagicMock()
-    provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("ATH", "LON", "2026-10-15", price=180.0, airline="Aegean", is_direct=True)
-    ])
-
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
-
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=50, bot=bot_mock)
-
-    provider_mock.search_flights.assert_called_once_with(
-        origin="ATH", destination="LON", departure_date="2026-10-15", direct_only=True
-    )
+from tests.fakes import USER_ID, future
 
 
-@pytest.mark.asyncio
-async def test_scheduler_alert_includes_flight_times():
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 60, "user_id": 100, "origin_code": "SKG", "destination_code": "ORY",
-        "departure_date": "2027-04-03", "max_budget": 100.0, "direct_only": 1,
-        "consecutive_failures": 0, "status": "ACTIVE"
-    })
-    db_mock.log_price = AsyncMock()
-    db_mock.update_tracker_status = AsyncMock()
-    db_mock.reset_failure_count = AsyncMock()
+def offers_at(*prices, **extra):
+    def offers(origin, destination, day):
+        return [FlightOffer(origin, destination, day, price=p, airline=f"Air{i}", **extra) for i, p in enumerate(prices)]
+    return offers
 
-    provider_mock = MagicMock()
-    provider_mock.search_flights = AsyncMock(return_value=[
-        FlightOffer("SKG", "ORY", "2027-04-03", price=85.0, airline="Transavia", is_direct=True, departure_time="17:45", arrival_time="19:55")
-    ])
 
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
+async def tracker(bot, start=None, end=None, budget=100.0, direct_only=False):
+    return await bot.services.db.create_tracker(USER_ID, "ATH", "LON", start or future(10), budget,
+                                                departure_date_end=end, direct_only=direct_only)
 
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=60, bot=bot_mock)
 
-    bot_mock.send_message.assert_called_once()
-    msg_text = bot_mock.send_message.call_args[1]["text"]
-    assert "17:45" in msg_text
-    assert "19:55" in msg_text
-    assert "Top" in msg_text
-    assert "Matching Offers" in msg_text
+async def test_price_under_budget_sends_alert_and_pauses(bot, provider):
+    provider.offers = offers_at(130.0, 90.0, 95.0, 99.0, 120.0, 140.0, departure_time="08:00", arrival_time="10:30")
+    t = await tracker(bot)
 
-@pytest.mark.asyncio
-async def test_scheduler_alert_shows_top_5_offers():
-    """Verify that tracker alerts show top 5 matching offers with per-result booking links."""
-    db_mock = MagicMock()
-    db_mock.get_tracker_by_id = AsyncMock(return_value={
-        "id": 70, "user_id": 100, "origin_code": "ATH", "destination_code": "LON",
-        "departure_date": "2026-10-15", "max_budget": 300.0, "direct_only": 0,
-        "consecutive_failures": 0, "status": "ACTIVE"
-    })
-    db_mock.log_price = AsyncMock()
-    db_mock.update_tracker_status = AsyncMock()
-    db_mock.reset_failure_count = AsyncMock()
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False
 
-    offers = [
-        FlightOffer("ATH", "LON", "2026-10-15", price=180.0, airline="Aegean", is_direct=True, departure_time="08:00", arrival_time="10:30", booking_url="http://url1"),
-        FlightOffer("ATH", "LON", "2026-10-15", price=200.0, airline="BA", is_direct=False, departure_time="12:00", arrival_time="16:00", booking_url="http://url2"),
-        FlightOffer("ATH", "LON", "2026-10-15", price=220.0, airline="Ryanair", is_direct=True, departure_time="15:00", arrival_time="17:30", booking_url="http://url3"),
-    ]
+    updated = await bot.services.db.get_tracker(t.id)
+    assert (updated.status, updated.last_price_found) == (PAUSED, 90.0)
+    alert = bot.telegram.last_text
+    assert "PRICE DROP ALERT" in alert and "Top 5 offers" in alert
+    assert alert.index("€90.00") < alert.index("€95.00") and "€140.00" not in alert
+    assert "08:00 ➔ 10:30" in alert
+    assert bot.telegram.button_data("Set Lower Budget") == f"dash:budget:t:{t.id}"
+    assert bot.telegram.button_data("Delete") == f"dash:del:t:{t.id}"
 
-    provider_mock = MagicMock()
-    provider_mock.search_flights = AsyncMock(return_value=offers)
 
-    bot_mock = MagicMock()
-    bot_mock.send_message = AsyncMock()
+async def test_price_over_budget_keeps_polling_quietly(bot, provider):
+    provider.offers = offers_at(150.0)
+    t = await tracker(bot)
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    assert (await bot.services.db.get_tracker(t.id)).last_price_found == 150.0
+    assert bot.telegram.calls_to("sendMessage") == []
 
-    scheduler = TrackerDaemonScheduler(db_mock, provider_mock)
-    await scheduler.poll_tracker(tracker_id=70, bot=bot_mock)
 
-    bot_mock.send_message.assert_called_once()
-    msg_text = bot_mock.send_message.call_args[1]["text"]
+async def test_range_and_direct_only_are_used(bot, provider):
+    provider.offers = offers_at(150.0)
+    t = await tracker(bot, start=future(10), end=future(12), direct_only=True)
+    await check_tracker(bot.services, bot.app.bot, t.id)
+    assert sorted(provider.queries) == [("ATH", "LON", future(d), True) for d in (10, 11, 12)]
 
-    # All 3 offers should appear
-    assert "Aegean" in msg_text
-    assert "BA" in msg_text
-    assert "Ryanair" in msg_text
 
-    # Per-result booking URL hyperlinks
-    assert "http://url1" in msg_text
-    assert "http://url2" in msg_text
-    assert "http://url3" in msg_text
+async def test_repeated_failures_pause_tracker(bot, provider):
+    t = await tracker(bot)
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False
+    assert (await bot.services.db.get_tracker(t.id)).status == PAUSED
+    assert "after 3 attempts" in bot.telegram.last_text
 
-    # Flight type badges
-    assert "Direct ✈️" in msg_text
-    assert "1+ Stops 🔄" in msg_text
 
-    # Times should be present
-    assert "08:00" in msg_text
-    assert "16:00" in msg_text
+async def test_past_departure_expires(bot):
+    t = await tracker(bot, start="2020-01-01")
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False
+    assert (await bot.services.db.get_tracker(t.id)).status == EXPIRED
+    assert "expired" in bot.telegram.last_text
 
-    # Header should say top 3 (since only 3 offers)
-    assert "Top 3 Matching Offers" in msg_text
 
-    # Lowest price logged
-    db_mock.log_price.assert_called_once_with(70, 180.0, "Aegean")
+async def test_inactive_tracker_is_not_checked(bot, provider):
+    t = await tracker(bot)
+    await bot.services.db.set_tracker_status(t.id, PAUSED)
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False
+    assert provider.queries == []
 
+
+async def test_blocked_user_pauses_tracker(bot, provider):
+    provider.offers = offers_at(50.0)
+    bot.telegram.blocked_chats.add(USER_ID)
+    t = await tracker(bot)
+    await check_tracker(bot.services, bot.app.bot, t.id)
+    assert (await bot.services.db.get_tracker(t.id)).status == PAUSED
+
+
+async def test_send_digest_report(bot, provider):
+    provider.offers = offers_at(40.0, typical_min=90.0, typical_max=110.0)
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=2, max_results=3)
+
+    assert await send_digest(bot.services, bot.app.bot, digest.id) is True
+
+    texts = bot.telegram.texts
+    assert "Searching deals for next 2 days" in texts[0]
+    assert "Weekly Flight Digest: ATH → Oceania" in texts[-1]
+    assert "BIGGEST DISCOUNTS" in texts[-1] and "CHEAPEST FLIGHTS" in texts[-1]
+    assert {day for _, _, day, _ in provider.queries} == {future(1), future(2)}
+
+
+async def test_digest_with_no_deals(bot):
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=1, max_budget=10.0)
+    assert await send_digest(bot.services, bot.app.bot, digest.id) is True
+    assert "No deals found this week (budget: €10.00)" in bot.telegram.last_text
+
+
+async def test_digest_with_past_fixed_dates_expires(bot, provider):
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "europe", departure_date="2020-01-01")
+    assert await send_digest(bot.services, bot.app.bot, digest.id) is False
+    assert (await bot.services.db.get_digest(digest.id)).status == EXPIRED
+    assert provider.queries == []
+
+
+async def test_register_jobs_schedules_everything(bot):
+    db = bot.services.db
+    first = await tracker(bot)
+    second = await tracker(bot, start=future(20))
+    paused = await tracker(bot, start=future(30))
+    await db.set_tracker_status(paused.id, PAUSED)
+    digest = await db.create_digest(USER_ID, "ATH", "europe", days_ahead=30, delivery_day="Monday", delivery_time="09:30")
+
+    bot.services.timezone = timezone.utc
+    await register_jobs(bot.app)
+
+    assert sorted(bot.jobs()) == sorted([f"tracker_job_{first.id}", f"tracker_job_{second.id}",
+                                         f"digest_job_{digest.id}", "daily_cleanup"])
+    [digest_job] = bot.app.job_queue.get_jobs_by_name(f"digest_job_{digest.id}")
+    assert "day_of_week='mon'" in str(digest_job.job.trigger)
+    assert (await db.get_tracker(first.id)).status == ACTIVE
+
+
+async def test_digest_report_has_collapsible_track_buttons(bot, provider):
+    provider.offers = offers_at(40.0, typical_min=90.0, typical_max=110.0)
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=1, max_results=2)
+
+    await send_digest(bot.services, bot.app.bot, digest.id, bot.user_data)
+    assert bot.telegram.last_buttons() == [("🔔 Track a deal", "deals:show")]
+
+    report_message = bot.telegram.last_message_id
+    await bot.press("deals:show", message_id=report_message)
+    first_deal = bot.telegram.button_data("Track #1")
+    assert first_deal.startswith("trk:add:ATH:") and first_deal.endswith(":36.00:0")
+
+    await bot.press(first_deal)
+    [tracker] = await bot.services.db.list_trackers(USER_ID)
+    assert tracker.max_budget == 36.0
+    assert "Tracking started" in bot.telegram.last_text
+
+
+async def test_digest_job_runs_with_the_users_data(bot):
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "europe", days_ahead=30)
+    schedule_digest(bot.app.job_queue, digest, timezone.utc)
+    [job] = bot.app.job_queue.get_jobs_by_name(f"digest_job_{digest.id}")
+    assert job.user_id == USER_ID and job.chat_id == USER_ID

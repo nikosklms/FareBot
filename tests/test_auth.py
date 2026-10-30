@@ -1,100 +1,39 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from telegram.ext import ConversationHandler
-from bot.handlers.auth import restricted
+import json
 
-@pytest.mark.asyncio
-async def test_restricted_decorator_allows_authorized_user():
-    """Authorized user in ALLOWED_USERS should be allowed to execute handler."""
-    dummy_handler = AsyncMock(return_value="success")
-    decorated = restricted(dummy_handler)
+import aiosqlite
 
-    update = MagicMock()
-    update.effective_user.id = 123456789
-    context = MagicMock()
+from bot import auth
 
-    result = await decorated(update, context)
-
-    assert result == "success"
-    dummy_handler.assert_called_once_with(update, context)
+INTRUDER = 77777
 
 
-@pytest.mark.asyncio
-async def test_restricted_decorator_blocks_unauthorized_user_message(tmp_path, monkeypatch):
-    """Unauthorized user sending a message should receive Access Denied and ConversationHandler.END."""
-    log_file = tmp_path / "unauthorized_access.log"
-    monkeypatch.setattr("bot.handlers.auth.LOG_FILE_PATH", str(log_file))
-
-    dummy_handler = AsyncMock(return_value="should_not_be_called")
-    decorated = restricted(dummy_handler)
-
-    update = MagicMock()
-    update.effective_user.id = 99999999  # Unauthorized ID
-    update.message = MagicMock()
-    update.message.reply_text = AsyncMock()
-    update.callback_query = None
-    context = MagicMock()
-
-    result = await decorated(update, context)
-
-    assert result == ConversationHandler.END
-    dummy_handler.assert_not_called()
-    update.message.reply_text.assert_called_once()
-    assert "Access Denied" in update.message.reply_text.call_args[0][0]
+async def test_allowed_user_reaches_handlers(bot):
+    await bot.send("/start")
+    assert "Welcome to Fare Bot" in bot.telegram.last_text
 
 
-@pytest.mark.asyncio
-async def test_restricted_decorator_blocks_unauthorized_user_callback(tmp_path, monkeypatch):
-    """Unauthorized user triggering a callback query should get an alert answer and ConversationHandler.END."""
-    log_file = tmp_path / "unauthorized_access.log"
-    monkeypatch.setattr("bot.handlers.auth.LOG_FILE_PATH", str(log_file))
+async def test_unauthorized_message_is_blocked_logged_and_reported(bot):
+    await bot.send("/search ATH PAR", user_id=INTRUDER)
 
-    dummy_handler = AsyncMock(return_value="should_not_be_called")
-    decorated = restricted(dummy_handler)
+    sent = bot.telegram.calls_to("sendMessage")
+    admin_alert, denial = sent
+    assert admin_alert["chat_id"] == 123 and "Unauthorized access attempt" in admin_alert["text"]
+    assert "/search ATH PAR" in admin_alert["text"]
+    assert denial["chat_id"] == INTRUDER and "Access denied" in denial["text"]
 
-    update = MagicMock()
-    update.effective_user.id = 99999999  # Unauthorized ID
-    update.message = None
-    update.callback_query = MagicMock()
-    update.callback_query.answer = AsyncMock()
-    context = MagicMock()
+    entry = json.loads(auth.UNAUTHORIZED_LOG.read_text())
+    assert entry["user_id"] == INTRUDER and entry["input"] == "/search ATH PAR"
+    async with aiosqlite.connect(bot.services.db.path) as conn:
+        async with conn.execute("SELECT user_id, input_text FROM unauthorized_attempts") as cur:
+            assert await cur.fetchall() == [(INTRUDER, "/search ATH PAR")]
 
-    result = await decorated(update, context)
 
-    assert result == ConversationHandler.END
-    dummy_handler.assert_not_called()
-    update.callback_query.answer.assert_called_once_with("⛔ Access Denied: Unauthorized user", show_alert=True)
+async def test_unauthorized_button_press_gets_alert(bot):
+    await bot.press("dash:del:t:1", user_id=INTRUDER)
+    answer = bot.telegram.calls_to("answerCallbackQuery")[-1]
+    assert answer["text"] == "⛔ Access denied" and answer["show_alert"] is True
 
-@pytest.mark.asyncio
-async def test_restricted_decorator_writes_persistent_log_file(tmp_path, monkeypatch):
-    """Unauthorized attempt should be appended to persistent log file logs/unauthorized_access.log."""
-    import os
-    log_file = tmp_path / "unauthorized_access.log"
-    monkeypatch.setattr("bot.handlers.auth.LOG_FILE_PATH", str(log_file))
 
-    dummy_handler = AsyncMock(return_value="should_not_be_called")
-    decorated = restricted(dummy_handler)
-
-    update = MagicMock()
-    user = MagicMock()
-    user.id = 77777
-    user.username = "intruder_joe"
-    user.full_name = "Joe Intruder"
-    update.effective_user = user
-    update.message = MagicMock()
-    update.message.text = "/search ATH PAR"
-    update.callback_query = None
-    context = MagicMock()
-
-    await decorated(update, context)
-
-    assert os.path.exists(str(log_file))
-    content = log_file.read_text().strip()
-    assert "\n" in content
-    import json
-    data = json.loads(content)
-    assert data["user_id"] == 77777
-    assert data["username"] == "@intruder_joe"
-    assert data["full_name"] == "Joe Intruder"
-    assert data["input"] == "/search ATH PAR"
-    assert "timestamp" in data
+async def test_unauthorized_user_never_reaches_wizard(bot):
+    await bot.send("/track", user_id=INTRUDER)
+    assert INTRUDER not in bot.app.user_data or "track" not in bot.app.user_data[INTRUDER]

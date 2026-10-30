@@ -1,118 +1,131 @@
-import pytest
-import os
-import tempfile
-from database.db import DatabaseManager
+import aiosqlite
 
-@pytest.mark.asyncio
-async def test_db_init_and_tracker_crud():
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        db_path = tmp.name
+from database.models import ACTIVE, EXPIRED, PAUSED
+from tests.fakes import future
 
-    try:
-        db = DatabaseManager(db_path)
-        await db.init_db()
 
-        count = await db.get_active_trackers_count(12345)
-        assert count == 0
+async def make_tracker(db, user_id=1, origin="ATH", destination="LON", start=None, **kwargs):
+    return await db.create_tracker(user_id=user_id, origin_code=origin, destination_code=destination,
+                                   departure_date=start or future(30), max_budget=kwargs.pop("max_budget", 100.0),
+                                   **kwargs)
 
-        tracker_id = await db.create_tracker(
-            user_id=12345,
-            origin_code="ATH",
-            origin_name="Athens Intl",
-            destination_code="LON",
-            destination_name="London All",
-            departure_date="2026-08-15",
-            max_budget=250.0
-        )
-        assert tracker_id > 0
 
-        count = await db.get_active_trackers_count(12345)
-        assert count == 1
+async def test_create_and_read_tracker(db):
+    tracker = await make_tracker(db, start=future(10), departure_date_end=future(15), direct_only=True)
 
-        active = await db.get_active_trackers()
-        assert len(active) == 1
-        assert active[0]["origin_code"] == "ATH"
-        assert active[0]["max_budget"] == 250.0
+    assert tracker.id > 0
+    assert tracker.status == ACTIVE
+    assert tracker.direct_only is True
+    assert tracker.departure_date_end == future(15)
+    assert tracker.last_departure_date == future(15)
+    assert await db.get_tracker(tracker.id) == tracker
+    assert await db.list_trackers(1) == [tracker]
+    assert await db.active_trackers() == [tracker]
 
-    finally:
-        if os.path.exists(db_path):
-            os.remove(db_path)
 
-@pytest.mark.asyncio
-async def test_db_tracker_status_and_failures():
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        db_path = tmp.name
+async def test_find_tracker_matches_active_or_paused_only(db):
+    tracker = await make_tracker(db, start=future(10))
+    assert (await db.find_tracker(1, "ATH", "LON", future(10))).id == tracker.id
+    assert await db.find_tracker(1, "ATH", "LON", future(11)) is None
+    assert await db.find_tracker(2, "ATH", "LON", future(10)) is None
 
-    try:
-        db = DatabaseManager(db_path)
-        await db.init_db()
+    await db.set_tracker_status(tracker.id, PAUSED)
+    assert await db.find_tracker(1, "ATH", "LON", future(10)) is not None
+    await db.set_tracker_status(tracker.id, EXPIRED)
+    assert await db.find_tracker(1, "ATH", "LON", future(10)) is None
 
-        t_id = await db.create_tracker(
-            user_id=100, origin_code="ATH", origin_name="Athens",
-            destination_code="LON", destination_name="London",
-            departure_date="2026-08-15", max_budget=300.0
-        )
 
-        # Test failure increment
-        fails = await db.increment_failure_count(t_id)
-        assert fails == 1
-        fails = await db.increment_failure_count(t_id)
-        assert fails == 2
+async def test_record_price_and_failures(db):
+    tracker = await make_tracker(db)
+    assert await db.record_failure(tracker.id) == 1
+    assert await db.record_failure(tracker.id) == 2
 
-        # Test reset failure
-        await db.reset_failure_count(t_id)
-        tracker = await db.get_tracker_by_id(t_id)
-        assert tracker["consecutive_failures"] == 0
+    await db.record_price(tracker.id, 80.0, "Aegean")
+    updated = await db.get_tracker(tracker.id)
+    assert updated.last_price_found == 80.0
+    assert updated.consecutive_failures == 0
+    assert updated.last_checked_at is not None
 
-        # Test update status
-        await db.update_tracker_status(t_id, "PAUSED")
-        tracker = await db.get_tracker_by_id(t_id)
-        assert tracker["status"] == "PAUSED"
 
-        # Test log price
-        await db.log_price(t_id, 280.0, "Aegean")
-        tracker = await db.get_tracker_by_id(t_id)
-        assert tracker["last_price_found"] == 280.0
+async def test_delete_tracker_removes_price_history(db):
+    tracker = await make_tracker(db)
+    await db.record_price(tracker.id, 80.0, "Aegean")
+    await db.delete_tracker(tracker.id)
 
-        # Test user trackers list
-        user_trackers = await db.get_user_trackers(100)
-        assert len(user_trackers) == 1
+    assert await db.get_tracker(tracker.id) is None
+    async with aiosqlite.connect(db.path) as conn:
+        async with conn.execute("SELECT COUNT(*) FROM price_history") as cur:
+            assert (await cur.fetchone())[0] == 0
 
-        # Test expired query
-        expired = await db.get_expired_trackers("2026-09-01")
-        assert len(expired) == 0  # Departure date is 2026-08-15, which is < 2026-09-01, but status is PAUSED!
 
-        await db.update_tracker_status(t_id, "ACTIVE")
-        expired = await db.get_expired_trackers("2026-09-01")
-        assert len(expired) == 1
+async def test_digest_crud_and_find(db):
+    rolling = await db.create_digest(user_id=1, origin_code="ATH", region="europe", days_ahead=30,
+                                     delivery_day="Friday", delivery_time="18:00")
+    fixed = await db.create_digest(user_id=1, origin_code="ATH", region="europe", max_budget=80.0,
+                                   departure_date=future(10), departure_date_end=future(20))
 
-        # Test delete tracker
-        await db.delete_tracker(t_id)
-        user_trackers = await db.get_user_trackers(100)
-        assert len(user_trackers) == 0
+    assert rolling.max_budget is None and rolling.days_ahead == 30
+    assert (await db.find_digest(1, "ATH", "europe", 30, None, None)).id == rolling.id
+    assert (await db.find_digest(1, "ATH", "europe", None, future(10), future(20))).id == fixed.id
+    assert await db.find_digest(1, "ATH", "europe", 60, None, None) is None
 
-    finally:
-        if os.path.exists(db_path):
-            os.remove(db_path)
+    await db.set_digest_budget(rolling.id, 50.0)
+    await db.set_digest_status(rolling.id, PAUSED)
+    updated = await db.get_digest(rolling.id)
+    assert updated.max_budget == 50.0 and updated.status == PAUSED
+    assert [d.id for d in await db.active_digests()] == [fixed.id]
 
-@pytest.mark.asyncio
-async def test_db_direct_only_tracker_field():
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        db_path = tmp.name
+    await db.delete_digest(fixed.id)
+    assert [d.id for d in await db.list_digests(1)] == [rolling.id]
 
-    try:
-        db = DatabaseManager(db_path)
-        await db.init_db()
 
-        t_id = await db.create_tracker(
-            user_id=200, origin_code="ATH", origin_name="Athens",
-            destination_code="LON", destination_name="London",
-            departure_date="2026-08-15", max_budget=200.0, direct_only=1
-        )
+async def test_count_active_includes_trackers_and_digests(db):
+    await make_tracker(db)
+    paused = await make_tracker(db, destination="PAR")
+    await db.set_tracker_status(paused.id, PAUSED)
+    await db.create_digest(user_id=1, origin_code="ATH", region="asia", days_ahead=30)
 
-        tracker = await db.get_tracker_by_id(t_id)
-        assert tracker["direct_only"] == 1
-    finally:
-        if os.path.exists(db_path):
-            os.remove(db_path)
+    assert await db.count_active(1) == 2
+    assert await db.count_active(2) == 0
 
+
+async def test_digest_window_rolling_and_fixed(db):
+    from datetime import date
+    rolling = await db.create_digest(user_id=1, origin_code="ATH", region="europe", days_ahead=7)
+    fixed = await db.create_digest(user_id=1, origin_code="ATH", region="asia", departure_date="2027-01-05")
+
+    assert rolling.window(date(2027, 1, 1)) == ("2027-01-02", "2027-01-08")
+    assert fixed.window(date(2027, 1, 1)) == ("2027-01-05", None)
+
+
+async def test_purge_stale_expires_and_deletes(db):
+    past = (await make_tracker(db, start="2020-01-01")).id
+    range_still_open = (await make_tracker(db, start="2020-01-01", departure_date_end=future(5))).id
+    upcoming = (await make_tracker(db, start=future(5))).id
+    old_expired = (await make_tracker(db, start="2020-01-01")).id
+    old_paused = (await make_tracker(db, start=future(5))).id
+    past_digest = (await db.create_digest(user_id=1, origin_code="ATH", region="asia", departure_date="2020-01-01")).id
+    rolling_digest = (await db.create_digest(user_id=1, origin_code="ATH", region="europe", days_ahead=30)).id
+
+    async with aiosqlite.connect(db.path) as conn:
+        await conn.execute("UPDATE trackers SET status = 'EXPIRED', created_at = '2000-01-01' WHERE id = ?", (old_expired,))
+        await conn.execute("UPDATE trackers SET status = 'PAUSED', created_at = '2000-01-01' WHERE id = ?", (old_paused,))
+        await conn.commit()
+
+    stats = await db.purge_stale()
+
+    assert (await db.get_tracker(past)).status == EXPIRED
+    assert (await db.get_tracker(range_still_open)).status == ACTIVE
+    assert (await db.get_tracker(upcoming)).status == ACTIVE
+    assert await db.get_tracker(old_expired) is None
+    assert await db.get_tracker(old_paused) is None
+    assert (await db.get_digest(past_digest)).status == EXPIRED
+    assert (await db.get_digest(rolling_digest)).status == ACTIVE
+    assert stats == {"expired": 2, "purged": 2}
+
+
+async def test_log_unauthorized_attempt(db):
+    await db.log_unauthorized_attempt(77, "@intruder", "Joe", "/search")
+    async with aiosqlite.connect(db.path) as conn:
+        async with conn.execute("SELECT user_id, username, input_text FROM unauthorized_attempts") as cur:
+            assert await cur.fetchall() == [(77, "@intruder", "/search")]

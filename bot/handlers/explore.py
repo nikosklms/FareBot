@@ -1,535 +1,171 @@
+"""/explore wizard and shortcut: best deals from one airport to a whole region."""
+import asyncio
 import logging
-import time
-from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram import Message, Update
+from telegram.error import BadRequest
+from telegram.ext import CommandHandler, ConversationHandler, MessageHandler
 
-from config import DB_PATH, MAX_TRACKERS_PER_USER
-from database.db import DatabaseManager
-from bot.handlers.auth import restricted
-from bot.inline_calendar import create_calendar
-from services.explore_engine import run_explore_query, build_timeframe_date_range, format_explore_deal_item
-from services.resolver import LocationResolver
+from bot.deal_buttons import COLLAPSED, remember_deal_buttons
+from bot.formatting import deal_report, eur, progress_text, query_scope, short_window, split_message
+from bot.lifecycle import RESTART_NOTICE
+from bot.keyboards import (
+    DEFAULT_RESULT_LIMIT, quick_origins, regions, result_limits, sort_modes, stop_markup,
+)
+from bot.services import Services, get_services
+from bot.wizard import (
+    TEXT, Context, airport_step, choice_step, draft, respond, run_in_background, start_draft,
+    timeframe_keyboard, timeframe_step, wizard_conversation,
+)
+from services.airports_data import REGION_LABELS, region_display_name
+from services.explore_engine import find_deals, rank_deals
+from utils.date_parser import days_ahead_window, describe_window
 
 logger = logging.getLogger(__name__)
-db_manager = DatabaseManager(DB_PATH)
-resolver = LocationResolver()
 
-EXPLORE_ORIGIN, EXPLORE_REGION, EXPLORE_SORT, EXPLORE_TIMEFRAME, EXPLORE_BUDGET, EXPLORE_LIMIT = range(6)
+ORIGIN, REGION, SORT, WINDOW, LIMIT = range(5)
+DRAFT = "explore"
+DAY_OPTIONS = [7, 14, 30, 60, 90]
+DEFAULT_DAYS = 30
+MAX_RESULTS = 20
+USAGE = ("Usage: <code>/explore ATH europe [days] [budget] [results]</code>\n"
+         f"Regions: {', '.join(REGION_LABELS)}")
 
-@restricted
-async def start_explore_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start interactive /explore wizard or execute one-line shortcut if args provided."""
-    user_id = update.effective_user.id if update.effective_user else "unknown"
-    args = context.args or []
-    logger.info(f"[EXPLORE] User {user_id} invoked /explore with args={args}")
 
-    # One-line shortcut execution
-    if len(args) >= 2:
-        origin = args[0].upper()
-        region = args[1].lower()
-
-        tf = 30
-        max_budget = None
-        limit = 10
-
-        if len(args) > 2:
-            if args[2].isdigit():
-                tf = int(args[2])
-            elif len(args) > 3 and args[3].isdigit():
-                tf = int(args[2])
-                max_budget = float(args[3])
-            else:
-                try:
-                    max_budget = float(args[2])
-                except ValueError:
-                    pass
-
-        if len(args) > 3 and max_budget is None and args[3].isdigit():
-            max_budget = float(args[3])
-
-        dep_date = build_timeframe_date_range(tf)
-        start_date, end_date = dep_date.split("..")
-        header_text = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({start_date} ➔ {end_date})..."
-        sent_msg = await update.message.reply_text(header_text, parse_mode="Markdown")
-
-        from bot.handlers.common import build_status_estimate_text
-
-        async def status_cb(est_seconds: float, total_queries: int, num_airports: int, num_days: int) -> None:
-            active_task = context.user_data.get("active_explore_task")
-            if active_task and hasattr(active_task, "cancelled") and active_task.cancelled():
-                return
-            try:
-                status_text = build_status_estimate_text(
-                    header_text=header_text,
-                    est_seconds=est_seconds,
-                    total_queries=total_queries,
-                    num_airports=num_airports,
-                    num_days=num_days
-                )
-                await sent_msg.edit_text(status_text, parse_mode="Markdown")
-            except Exception:
-                pass
-
-        import asyncio
-        context.user_data["active_explore_task"] = asyncio.current_task()
-
-        try:
-            deals = await run_explore_query(
-                origin, region, dep_date, max_budget=max_budget, max_results=limit, status_callback=status_cb
-            )
-            await _render_explore_deals(update.message, origin, region, deals)
-        except asyncio.CancelledError:
-            logger.info("[EXPLORE] Shortcut explore task cancelled.")
-            return ConversationHandler.END
-        finally:
-            context.user_data.pop("active_explore_task", None)
-
+async def start(update: Update, context: Context) -> int:
+    if context.args:
+        await _shortcut(update, context, context.args)
         return ConversationHandler.END
-
-    # Start multi-step wizard
-    context.user_data.clear()
-    buttons = [
-        [InlineKeyboardButton("ATH - Athens", callback_data="expl_org_ATH_Athens"), InlineKeyboardButton("SKG - Thessaloniki", callback_data="expl_org_SKG_Thessaloniki")],
-        [InlineKeyboardButton("HER - Heraklion", callback_data="expl_org_HER_Heraklion"), InlineKeyboardButton("LON - London", callback_data="expl_org_LON_London")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
-    ]
-
+    start_draft(context, DRAFT)
     await update.message.reply_text(
-        "🌟 **Explore Top Flight Deals Wizard**\n\n"
-        "🛫 **Step 1/5**: Select origin airport:\n"
-        "Select a quick origin airport below or type city/airport name (e.g., 'Athens', 'ATH'):",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons)
+        "🌟 <b>Explore flight deals</b>\n\n🛫 <b>Step 1/5</b>: Pick an origin airport or type a city name:",
+        reply_markup=quick_origins("exp:org"),
     )
-    return EXPLORE_ORIGIN
+    return ORIGIN
 
-@restricted
-async def handle_explore_origin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
-    matches = resolver.resolve(text)
 
+async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
+    """ORIGIN REGION [DAYS] [BUDGET] [RESULTS]"""
+    region = args[1].lower() if len(args) > 1 else ""
+    numbers = args[2:5]
+    if region not in REGION_LABELS or not all(n.replace(".", "", 1).isdigit() for n in numbers):
+        await update.message.reply_text(USAGE)
+        return
+    matches = get_services(context).resolver.resolve(args[0])
     if not matches:
-        await update.message.reply_text("❌ Location not recognized. Please try typing another city or airport name.")
-        return EXPLORE_ORIGIN
+        await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
+        return
+    days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
+    budget = float(numbers[1]) if len(numbers) > 1 else 0
+    limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
+    start_date, end_date = days_ahead_window(max(1, days))
+    await run_explore(update, context, matches[0][0], region, start_date, end_date, "both",
+                      min(max(limit, 1), MAX_RESULTS), budget or None)
 
-    buttons = [
-        [InlineKeyboardButton(f"{iata} - {name} ({country})", callback_data=f"expl_org_{iata}_{name}")]
-        for iata, name, country, score in matches[:4]
-    ]
-    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")])
 
-    await update.message.reply_text("Please confirm your origin airport:", reply_markup=InlineKeyboardMarkup(buttons))
-    return EXPLORE_ORIGIN
+async def origin_picked(update: Update, context: Context, code: str) -> int:
+    draft(context, DRAFT)["origin"] = code
+    await respond(update, f"🛫 <b>From</b>: {code}\n\n🌍 <b>Step 2/5</b>: Which region?", regions("exp:reg"))
+    return REGION
 
-@restricted
-async def select_explore_origin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    parts = query.data.split("_", 3)
-    iata, name = parts[2], parts[3]
-    context.user_data["explore_origin"] = iata
 
-    buttons = [
-        [InlineKeyboardButton("🇪🇺 Europe", callback_data="expl_reg_europe"), InlineKeyboardButton("🏝️ Greek Islands", callback_data="expl_reg_islands")],
-        [InlineKeyboardButton("🕌 Middle East", callback_data="expl_reg_middle_east"), InlineKeyboardButton("⛩️ Asia", callback_data="expl_reg_asia")],
-        [InlineKeyboardButton("🌍 Africa", callback_data="expl_reg_africa"), InlineKeyboardButton("🦘 Oceania", callback_data="expl_reg_oceania")],
-        [InlineKeyboardButton("💃 Latin America", callback_data="expl_reg_latin_america"), InlineKeyboardButton("🗽 North America", callback_data="expl_reg_north_america")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
-    ]
+async def region_picked(update: Update, context: Context, region: str) -> int:
+    draft(context, DRAFT)["region"] = region
+    await respond(update, f"🌍 <b>Region</b>: {region_display_name(region)}\n\n"
+                          "📊 <b>Step 3/5</b>: How should deals be ranked?", sort_modes("exp:sort"))
+    return SORT
 
-    await query.message.edit_text(
-        f"✅ Origin set to: **{iata} - {name}**\n\n"
-        "🌍 **Step 2/5**: Select a destination region to explore:",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    return EXPLORE_REGION
 
-@restricted
-async def select_explore_region_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    region = query.data.split("_", 2)[2]
-    context.user_data["explore_region"] = region
+async def sort_picked(update: Update, context: Context, sort_mode: str) -> int:
+    draft(context, DRAFT)["sort"] = sort_mode
+    await respond(update, "📅 <b>Step 4/5</b>: How far ahead should I look? Tap a button, type a number of days, "
+                          "or pick dates on the calendar:", timeframe_keyboard("exp:when", DAY_OPTIONS, DEFAULT_DAYS))
+    return WINDOW
 
-    buttons = [
-        [InlineKeyboardButton("💶 Cheapest Price", callback_data="expl_sort_price"), InlineKeyboardButton("💥 Highest Discount %", callback_data="expl_sort_discount")],
-        [InlineKeyboardButton("🔀 Show Both Lists", callback_data="expl_sort_both")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
-    ]
 
-    await query.message.edit_text(
-        f"✅ Region set to: **{region.upper().replace('_', ' ')}**\n\n"
-        "📊 **Step 3/6**: How would you like flight deals sorted?",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    return EXPLORE_SORT
+async def days_picked(update: Update, context: Context, days: int) -> int:
+    return await dates_picked(update, context, *days_ahead_window(days))
 
-@restricted
-async def select_explore_sort_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    sort_mode = query.data.replace("expl_sort_", "")
-    context.user_data["explore_sort"] = sort_mode
 
-    buttons = [
-        [InlineKeyboardButton("⚡ Next Weekend (7d)", callback_data="expl_tf_7"), InlineKeyboardButton("📅 14 Days", callback_data="expl_tf_14")],
-        [InlineKeyboardButton("🗓️ 30 Days (Default)", callback_data="expl_tf_30"), InlineKeyboardButton("✈️ 60 Days", callback_data="expl_tf_60")],
-        [InlineKeyboardButton("🌍 90 Days", callback_data="expl_tf_90"), InlineKeyboardButton("📆 Custom Calendar", callback_data="open_cal_explore")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
-    ]
+async def dates_picked(update: Update, context: Context, start_date: str, end_date: Optional[str]) -> int:
+    d = draft(context, DRAFT)
+    d["start"], d["end"] = start_date, end_date
+    await respond(update, f"📅 <b>Departures</b>: {describe_window(start_date, end_date)}\n\n"
+                          f"📊 <b>Step 5/5</b>: How many deals should I show? (1–{MAX_RESULTS})",
+                  result_limits("exp:lim"))
+    return LIMIT
 
-    sort_labels = {
-        "price": "Cheapest Price 💶",
-        "discount": "Highest Discount % 💥",
-        "both": "Show Both Lists 🔀"
-    }
-    label = sort_labels.get(sort_mode, sort_mode)
 
-    await query.message.edit_text(
-        f"✅ Sort mode set to: **{label}**\n\n"
-        "📅 **Step 4/6**: Select departure timeframe horizon, open the custom calendar, or type days ahead (e.g. '45'):",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    return EXPLORE_TIMEFRAME
-
-@restricted
-async def open_calendar_explore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    context.user_data["cal_mode"] = "range"
-    context.user_data.pop("cal_start_date", None)
-    now = datetime.now(timezone.utc)
-    calendar_markup = create_calendar(now.year, now.month, mode="range")
-    await query.message.edit_text(
-        "📆 **Interactive Date Picker**\nSelect departure date on calendar below:",
-        reply_markup=calendar_markup,
-        parse_mode="Markdown"
-    )
-    return EXPLORE_TIMEFRAME
-
-@restricted
-async def explore_calendar_nav_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    target = query.data.replace("cal_nav_", "")
-    year, month = map(int, target.split("-"))
-    mode = context.user_data.get("cal_mode", "single")
-    start_date = context.user_data.get("cal_start_date")
-    calendar_markup = create_calendar(year, month, mode=mode, start_date=start_date)
-    await query.message.edit_reply_markup(reply_markup=calendar_markup)
-    return EXPLORE_TIMEFRAME
-
-@restricted
-async def explore_calendar_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    target_mode = query.data.replace("cal_mode_", "")
-    context.user_data["cal_mode"] = target_mode
-    if target_mode == "single":
-        context.user_data.pop("cal_start_date", None)
-
-    year, month = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
-    if query.message and query.message.reply_markup:
-        for row in query.message.reply_markup.inline_keyboard:
-            for btn in row:
-                if btn.callback_data and btn.callback_data.startswith("cal_nav_"):
-                    try:
-                        prev_year, prev_month = map(int, btn.callback_data.replace("cal_nav_", "").split("-"))
-                        if prev_month == 12:
-                            year, month = prev_year + 1, 1
-                        else:
-                            year, month = prev_year, prev_month + 1
-                        break
-                    except ValueError:
-                        pass
-            if "cal_nav_" in str(query.message.reply_markup):
-                break
-    start_date = context.user_data.get("cal_start_date")
-    calendar_markup = create_calendar(year, month, mode=target_mode, start_date=start_date)
-    await query.message.edit_reply_markup(reply_markup=calendar_markup)
-    return EXPLORE_TIMEFRAME
-
-@restricted
-async def explore_calendar_ignore_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    return EXPLORE_TIMEFRAME
-
-@restricted
-async def handle_explore_calendar_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    clicked_date = query.data.replace("cal_day_", "")
-    mode = context.user_data.get("cal_mode", "single")
-
-    if mode == "range":
-        start_date = context.user_data.get("cal_start_date")
-        if not start_date:
-            context.user_data["cal_start_date"] = clicked_date
-            dt = datetime.strptime(clicked_date, "%Y-%m-%d")
-            calendar_markup = create_calendar(dt.year, dt.month, mode="range", start_date=clicked_date)
-            await query.message.edit_text(
-                f"📆 **Interactive Date Picker (Range Mode)**\nSelect **END** departure date (Start: `{clicked_date}`):",
-                reply_markup=calendar_markup,
-                parse_mode="Markdown"
-            )
-            return EXPLORE_TIMEFRAME
-        else:
-            context.user_data.pop("cal_start_date", None)
-            dep_date = start_date if start_date == clicked_date else f"{start_date}..{clicked_date}"
-            dates = sorted([start_date, clicked_date])
-            target_end = dates[1]
-    else:
-        dep_date = clicked_date
-        target_end = clicked_date
-
-    context.user_data["explore_departure_date"] = dep_date
-    today = datetime.now(timezone.utc).date()
-    end_dt = datetime.strptime(target_end, "%Y-%m-%d").date()
-    days_diff = max(1, (end_dt - today).days)
-    context.user_data["explore_timeframe"] = days_diff
-
-    return await _ask_explore_limit(query.message, context, is_callback=True)
-
-@restricted
-async def handle_explore_timeframe_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
-    if not text.isdigit() or not (1 <= int(text) <= 330):
-        await update.message.reply_text("❌ Please enter a number between 1 and 330 days ahead (e.g. '30') or tap a button below.")
-        return EXPLORE_TIMEFRAME
-
-    context.user_data.pop("explore_departure_date", None)
-    context.user_data["explore_timeframe"] = int(text)
-    return await _ask_explore_limit(update.message, context)
-
-@restricted
-async def select_explore_timeframe_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    days = int(query.data.split("_")[2])
-    context.user_data.pop("explore_departure_date", None)
-    context.user_data["explore_timeframe"] = days
-    return await _ask_explore_limit(query.message, context, is_callback=True)
-
-async def _ask_explore_limit(message, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False) -> int:
-    tf = context.user_data.get("explore_timeframe", 30)
-
-    buttons = [
-        [InlineKeyboardButton("5", callback_data="expl_lim_5"), InlineKeyboardButton("10 (Default)", callback_data="expl_lim_10")],
-        [InlineKeyboardButton("15", callback_data="expl_lim_15"), InlineKeyboardButton("20", callback_data="expl_lim_20")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_wizard")]
-    ]
-
-    msg_text = (
-        f"✅ Departure Timeframe set to: **{tf} Days Ahead**\n\n"
-        "📊 **Step 5/5**: How many top flight deal results would you like to view? (1 to 20, default 10):"
-    )
-
-    if is_callback:
-        await message.edit_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
-    else:
-        await message.reply_text(msg_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
-
-    return EXPLORE_LIMIT
-
-@restricted
-async def handle_explore_limit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
-    if not text.isdigit() or not (1 <= int(text) <= 20):
-        await update.message.reply_text("❌ Please enter a number between 1 and 20 (or tap a button below).")
-        return EXPLORE_LIMIT
-
-    limit = int(text)
-    return await _execute_wizard_explore(update.message, context, limit)
-
-@restricted
-async def select_explore_limit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    limit = int(query.data.split("_")[2])
-    return await _execute_wizard_explore(query.message, context, limit, is_callback=True)
-
-async def _execute_wizard_explore(message, context: ContextTypes.DEFAULT_TYPE, limit: int, is_callback: bool = False) -> int:
-    t_start = time.perf_counter()
-    origin = context.user_data.get("explore_origin", "ATH")
-    region = context.user_data.get("explore_region", "europe")
-    sort_mode = context.user_data.get("explore_sort", "both")
-    tf = context.user_data.get("explore_timeframe", 30)
-    custom_dep_date = context.user_data.get("explore_departure_date")
-
-    today = datetime.now(timezone.utc).date()
-    if custom_dep_date:
-        dep_date = custom_dep_date
-        if ".." in custom_dep_date:
-            d_parts = custom_dep_date.split("..")
-            date_display = f"{d_parts[0]} ➔ {d_parts[1]}"
-        else:
-            date_display = custom_dep_date
-    else:
-        dep_date = build_timeframe_date_range(tf)
-        start_date, end_date = dep_date.split("..")
-        date_display = f"{start_date} ➔ {end_date}"
-
-    logger.info(f"[EXPLORE] Executing wizard explore: origin={origin}, region={region}, date={dep_date}, sort={sort_mode}, limit={limit}")
-
-    header_text = f"🔍 Exploring top flight deals from **{origin}** to **{region.upper().replace('_', ' ')}** ({date_display})..."
-
-    if is_callback:
-        sent_msg = await message.edit_text(header_text, parse_mode="Markdown")
-    else:
-        sent_msg = await message.reply_text(header_text, parse_mode="Markdown")
-
-    from bot.handlers.common import build_status_estimate_text
-
-    async def status_cb(est_seconds: float, total_queries: int, num_airports: int, num_days: int) -> None:
-        active_task = context.user_data.get("active_explore_task")
-        if active_task and hasattr(active_task, "cancelled") and active_task.cancelled():
-            return
-        try:
-            status_text = build_status_estimate_text(
-                header_text=header_text,
-                est_seconds=est_seconds,
-                total_queries=total_queries,
-                num_airports=num_airports,
-                num_days=num_days
-            )
-            await sent_msg.edit_text(status_text, parse_mode="Markdown")
-        except Exception:
-            pass
-
-    import asyncio
-    context.user_data["active_explore_task"] = asyncio.current_task()
-
-    try:
-        deals = await run_explore_query(
-            origin, region, dep_date, sort_by=sort_mode, max_results=limit, status_callback=status_cb
-        )
-        await _render_explore_deals(message, origin, region, deals)
-    except asyncio.CancelledError:
-        logger.info("[EXPLORE] Explore wizard execution task cancelled.")
-        return ConversationHandler.END
-    finally:
-        context.user_data.pop("active_explore_task", None)
-
-    elapsed_s = time.perf_counter() - t_start
-    logger.info(f"[EXPLORE] Finished wizard explore rendering for origin={origin}, region={region} in {elapsed_s:.2f}s")
-
-    context.user_data.clear()
+async def limit_picked(update: Update, context: Context, value: str) -> int:
+    d = draft(context, DRAFT)
+    await run_explore(update, context, d["origin"], d["region"], d["start"], d["end"], d["sort"], int(value))
     return ConversationHandler.END
 
-def _format_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True) -> tuple[str, InlineKeyboardButton]:
-    line = format_explore_deal_item(d, idx, show_percentage=show_percentage)
-    cb_data = f"track_deal_{d['origin_code']}_{d['destination_code']}_{d['departure_date']}_{d['price']}"
-    btn = InlineKeyboardButton(f"🔔 Track Deal #{idx} (€{d['price']:.0f})", callback_data=cb_data)
-    return line, btn
 
-async def _render_explore_deals(message, origin: str, region: str, deals: Dict[str, Any] | List[Dict[str, Any]]) -> None:
-    has_deals = False
-    if isinstance(deals, dict):
-        has_deals = bool(deals.get("discount_deals") or deals.get("cheapest_deals"))
-    elif isinstance(deals, list):
-        has_deals = bool(deals)
+async def limit_typed(update: Update, context: Context) -> int:
+    text = update.message.text.strip()
+    if not text.isdigit() or not 1 <= int(text) <= MAX_RESULTS:
+        await update.message.reply_text(f"❌ Type a number from 1 to {MAX_RESULTS}, or tap a button.")
+        return LIMIT
+    return await limit_picked(update, context, text)
 
-    reg_disp = region.upper().replace("_", " ")
 
-    if not has_deals:
-        await message.reply_text(
-            f"ℹ️ **No flight deals found for {origin} → {reg_disp}** matching your criteria.\n\n"
-            f"💡 *Tip: Try selecting 'Any Budget' or increasing your target budget threshold in the wizard.*",
-            parse_mode="Markdown"
-        )
-        return
+async def run_explore(update: Update, context: Context, origin: str, region: str, start_date: str,
+                      end_date: Optional[str], sort_mode: str, limit: int, max_budget: Optional[float] = None) -> None:
+    title = f"🌟 <b>Deals from {origin} to {region_display_name(region)}</b>"
+    status = await respond(update, f"{title}\n📅 {short_window(start_date, end_date)}\n\n⏳ Starting…", stop_markup())
+    run_in_background(context, update, _explore_and_report(
+        get_services(context), context.user_data, status, title, origin, region, start_date, end_date, sort_mode,
+        limit, max_budget))
 
-    msg_lines = [f"🌟 **Top Flight Deals for {origin} → {region.upper().replace('_', ' ')}**\n"]
-    buttons = []
 
-    if isinstance(deals, dict):
-        discount_deals = deals.get("discount_deals", [])
-        cheapest_deals = deals.get("cheapest_deals", [])
+async def _explore_and_report(services: Services, user_data: dict, status: Message, title: str, origin: str,
+                              region: str, start_date: str, end_date: Optional[str], sort_mode: str, limit: int,
+                              max_budget: Optional[float]) -> None:
+    when = short_window(start_date, end_date)
+    headline = f"{title}\n📅 {when}"
 
-        button_idx = 1
-        if discount_deals:
-            msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
-            for d in discount_deals:
-                line, btn = _format_deal_item(d, button_idx, show_percentage=True)
-                msg_lines.append(line)
-                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
-                button_idx += 1
-
-        if cheapest_deals:
-            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
-            for d in cheapest_deals:
-                line, btn = _format_deal_item(d, button_idx, show_percentage=False)
-                msg_lines.append(line)
-                buttons.append([InlineKeyboardButton(f"🔔 Track #{button_idx} ({d['destination_code']} €{d['price']:.0f})", callback_data=btn.callback_data)])
-                button_idx += 1
-    else:
-        for idx, d in enumerate(deals, start=1):
-            line, btn = _format_deal_item(d, idx, show_percentage=False)
-            msg_lines.append(line)
-            buttons.append([btn])
-
-    await message.reply_text(
-        "\n".join(msg_lines),
-        parse_mode="Markdown",
-        disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-@restricted
-async def track_deal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """1-Tap Callback button handler to quickly track an explored flight deal."""
-    query = update.callback_query
-    await query.answer()
-
-    user_id = update.effective_user.id
-    parts = query.data.split("_")
-    if len(parts) < 6:
-        await query.answer("❌ Invalid deal tracking data.", show_alert=True)
-        return
-
-    origin, dest, dep_date, deal_price = parts[2], parts[3], parts[4], float(parts[5])
-    target_budget = round(deal_price * 0.90, 2)
-
-    active_count = await db_manager.get_active_trackers_count(user_id)
-    if active_count >= MAX_TRACKERS_PER_USER:
-        await query.answer(f"⚠️ Limit reached ({MAX_TRACKERS_PER_USER} active trackers max).", show_alert=True)
-        return
-
-    if await db_manager.has_active_tracker(user_id, origin, dest, dep_date):
-        await query.answer(f"ℹ️ You are already tracking {origin} → {dest} on {dep_date}!", show_alert=True)
-        return
-
-    tracker_id = await db_manager.create_tracker(
-        user_id=user_id,
-        origin_code=origin,
-        origin_name=origin,
-        destination_code=dest,
-        destination_name=dest,
-        departure_date=dep_date,
-        max_budget=target_budget,
-        frequency_hours=6
-    )
-
-    from daemon.scheduler import schedule_tracker_job
-    schedule_tracker_job(context.job_queue, tracker_id, frequency_hours=6)
+    async def progress(done: int, total: int, seconds: float, airports: int, days: int) -> None:
+        try:
+            details = f"{when} · {query_scope(airports, days)}"
+            await status.edit_text(progress_text(title, details, done, total, seconds), reply_markup=stop_markup())
+        except BadRequest:
+            pass
 
     try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+        deals = await find_deals(services.provider, origin, region, start_date, end_date,
+                                 max_budget=max_budget, on_progress=progress)
+    except asyncio.CancelledError:
+        notice = RESTART_NOTICE if services.shutting_down else "⏹ Search stopped."
+        try:
+            await status.edit_text(f"{headline}\n\n{notice}")
+        except BadRequest:
+            pass
+        raise
 
-    if query.message:
-        await query.message.reply_text(
-            f"✅ **Deal Tracked!**\n\n"
-            f"🔔 Created Tracker #{tracker_id} for **{origin} ✈️ {dest}** on **{dep_date}**\n"
-            f"🎯 Target Budget: **€{target_budget:.2f}** (10% below deal price €{deal_price:.2f})\n"
-            f"⏰ Polling frequency: Every 6 hours",
-            parse_mode="Markdown"
-        )
+    sections = rank_deals(deals, sort_mode, limit, region)
+    if not sections:
+        budget_note = f" under {eur(max_budget)}" if max_budget else ""
+        await status.edit_text(f"{headline}\n\nℹ️ No deals found{budget_note}. Try a wider date window.")
+        return
+
+    chunks = split_message(deal_report(headline, sections))
+    message = status
+    for index, chunk in enumerate(chunks):
+        reply_markup = COLLAPSED if index == len(chunks) - 1 else None
+        if index == 0:
+            message = await status.edit_text(chunk, reply_markup=reply_markup)
+        else:
+            message = await status.reply_text(chunk, reply_markup=reply_markup)
+    remember_deal_buttons(user_data, message.message_id, sections)
+
+
+def conversation() -> ConversationHandler:
+    return wizard_conversation("explore", CommandHandler("explore", start), {
+        ORIGIN: airport_step("exp:org", ORIGIN, origin_picked),
+        REGION: [choice_step("exp:reg", region_picked, "|".join(REGION_LABELS))],
+        SORT: [choice_step("exp:sort", sort_picked, "discount|price|both")],
+        WINDOW: timeframe_step("exp:when", WINDOW, days_picked, dates_picked),
+        LIMIT: [choice_step("exp:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
+    })

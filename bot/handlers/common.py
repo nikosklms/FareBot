@@ -1,108 +1,86 @@
+import logging
+
 from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler
-from bot.handlers.auth import restricted
+from telegram.error import BadRequest
+from telegram.ext import ContextTypes
 
-@restricted
+from bot.wizard import CALENDAR_KEY, PENDING_BUDGET_KEY, cancel_running_task
+from config import MAX_TRACKERS_PER_USER
+
+logger = logging.getLogger(__name__)
+
+
+START_TEXT = """✈️ <b>Welcome to Fare Bot!</b>
+
+I search Google Flights and watch prices for you in the background.
+
+<b>Commands</b>
+🔍 /search - Search flights for a date or date range
+🔔 /track - Get an alert when a route drops below your budget
+🌟 /explore - Find the best deals from an airport to a whole region
+🗞️ /digest - Get a weekly deal report on a day and time you choose
+📊 /mytracks - Manage your trackers and digests
+❓ /help - Shortcuts and examples
+❌ /cancel - Stop the current wizard or search"""
+
+HELP_TEXT = f"""📖 <b>Fare Bot Guide</b>
+
+Every command starts a step-by-step wizard. Add arguments to skip it:
+
+🔍 <b>Search</b>
+<code>/search ATH LON 2026-09-01</code>
+<code>/search ATH LON 2026-09-01..2026-09-15 direct</code>
+
+🔔 <b>Track</b> (checks every 6 hours)
+<code>/track ATH LON 2026-09-01 150</code>
+<code>/track ATH LON 2026-09-01..2026-09-15 150 direct</code>
+
+🌟 <b>Explore</b>: origin, region, then optional days ahead (default 30), budget (0 = any) and number of results (default 10)
+<code>/explore ATH europe 30 100 10</code>
+Tracking a deal sets the target budget 10% below its price.
+
+🗞️ <b>Digest</b>: origin, region, then optional days ahead, budget, delivery day@time and number of results
+<code>/digest ATH europe 30 80 Sunday@15:00 10</code>
+
+🌍 <b>Regions</b>: europe, islands, middle_east, asia, africa, oceania, latin_america, north_america
+
+📅 <b>Dates</b>: <code>2026-09-01</code> or a range <code>2026-09-01..2026-09-15</code>
+
+📊 /mytracks lets you pause, resume, edit the budget of, or delete your trackers and digests (up to {MAX_TRACKERS_PER_USER} active)."""
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    welcome_text = (
-        "✈️ **Welcome to Fare Bot!**\n\n"
-        "I search flights & track price drops with automatic background alerts.\n\n"
-        "**Available Commands:**\n"
-        "🌟 `/explore` - Interactive wizard for top discount flight deals by region & timeframe\n"
-        "🗞️ `/digest` - Interactive wizard for weekly recurring flight deal digests\n"
-        "🔍 `/search` - Instant flight search (Single date or Date range)\n"
-        "🔔 `/track` or `/newtrack` - Start background price tracking\n"
-        "📊 `/mytracks` - Manage active price trackers, digests & edit budgets\n"
-        "❓ `/help` - View complete guide and syntax examples\n\n"
-        "**Quick Shortcuts:**\n"
-        "• Deal Discovery: `/explore ATH europe 30 100 10`\n"
-        "• Weekly Digest: `/digest ATH europe 30 80 Sunday@15:00 10`\n"
-        "• Range Search: `/search ATH LON 2026-09-01..2026-09-15`\n"
-        "• Range Track: `/track ATH LON 2026-09-01..2026-09-15 150`"
-    )
-    if update.message:
-        await update.message.reply_text(welcome_text, parse_mode="Markdown")
+    await update.message.reply_text(START_TEXT)
 
-@restricted
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    help_text = (
-        "📖 **Fare Bot User Guide**\n\n"
-        "🌟 **Deal Discovery (`/explore`)**\n"
-        "• Interactive wizard: `/explore` (Step-by-step origin, region, departure timeframe 7d..90d, budget & limit)\n"
-        "• Direct shortcut: `/explore ATH europe 30 100 10` (scans 30 days ahead by default)\n"
-        "• 1-Tap Track buttons automatically set a target budget **10% below deal price**!\n\n"
-        "🗞️ **Weekly Digest (`/digest`)**\n"
-        "• Interactive wizard: `/digest` (Step-by-step origin, region, budget, timeframe, delivery day/time & limit)\n"
-        "• Direct shortcut: `/digest ATH europe 30 80 Sunday@15:00 10`\n"
-        "• Configurable delivery schedule: Pick any day of the week and custom delivery time in `HH:MM` format (e.g., `Tuesday@08:30`).\n"
-        "• Scans for flight deals **30 days ahead by default** (configurable to 14d, 30d, 60d, 90d).\n\n"
-        "🔍 **Instant Search (`/search`)**\n"
-        "• Interactive wizard: `/search` (step-by-step with interactive calendar picker)\n"
-        "• Direct shortcut single date: `/search ATH LON 2026-09-01`\n"
-        "• Direct shortcut date range: `/search ATH LON 2026-09-01..2026-09-15`\n\n"
-        "🔔 **Price Tracker (`/track` or `/newtrack`)**\n"
-        "• Interactive wizard: `/track` (step-by-step with interactive calendar picker)\n"
-        "• Direct shortcut single date: `/track ATH LON 2026-09-01 150`\n"
-        "• Direct shortcut date range: `/track ATH LON 2026-09-01..2026-09-15 150`\n\n"
-        "📅 **Interactive Calendar & Date Formats:**\n"
-        "• Interactive 7-column calendar widget with month navigation (`«` / `»`)\n"
-        "• `2026-09-01..2026-09-15` or `2026-09-01:2026-09-15`\n\n"
-        "📊 **Management (`/mytracks`)**\n"
-        "• View, edit target budgets, pause, resume, or delete your active trackers and weekly digests (up to 20 max)."
-    )
-    if update.message:
-        await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(HELP_TEXT)
 
-@restricted
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message:
-        await update.message.reply_text("❌ Action cancelled.", parse_mode="Markdown")
-    return ConversationHandler.END
 
-@restricted
-async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Global /cancel; any open wizard also ends because it sees a command."""
+    stopped = cancel_running_task(context)
+    context.user_data.pop(PENDING_BUDGET_KEY, None)
+    context.user_data.pop(CALENDAR_KEY, None)
+    await update.message.reply_text("❌ Cancelled." + (" The running search was stopped." if stopped else ""))
+
+
+async def stop_task_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if query:
-        await query.answer()
-        active_task = context.user_data.pop("active_explore_task", None)
-        if active_task and hasattr(active_task, "cancel"):
-            try:
-                active_task.cancel()
-            except Exception:
-                pass
-        if query.message and hasattr(query.message, "edit_text"):
-            try:
-                await query.message.edit_text("❌ Action cancelled.")
-            except Exception:
-                pass
-    return ConversationHandler.END
+    stopped = cancel_running_task(context)
+    await query.answer("Stopping…" if stopped else "Nothing is running.")
 
-def build_status_estimate_text(
-    header_text: str,
-    est_seconds: float,
-    total_queries: int = 1,
-    num_airports: int = 1,
-    num_days: int = 1
-) -> str:
-    """Format status text with dynamic execution time estimate and ETA clock."""
-    from datetime import datetime, timedelta
-    completion_dt = datetime.now().astimezone() + timedelta(seconds=est_seconds)
-    completion_clock = completion_dt.strftime("%H:%M")
 
-    if est_seconds >= 60:
-        mins_lower = max(1, int(est_seconds // 60))
-        mins_upper = mins_lower + 2
-        time_text = f"⏱️ **Estimated Completion**: ~{mins_lower}–{mins_upper} mins (around **{completion_clock}**)"
-    else:
-        secs_lower = max(5, int(est_seconds))
-        secs_upper = secs_lower + 5
-        time_text = f"⏱️ **Estimated Completion**: ~{secs_lower}–{secs_upper} secs (around **{completion_clock}**)"
+async def noop_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.callback_query.answer()
 
-    if total_queries > 1:
-        if num_days > 1:
-            details_text = f"📊 **Queries**: {total_queries} flights across {num_airports} airports & {num_days} days"
-        else:
-            details_text = f"📊 **Queries**: {total_queries} flights across {num_airports} airports"
-        return f"{header_text}\n\n{time_text}\n{details_text}"
-    else:
-        return f"{header_text}\n\n{time_text}"
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Unhandled error while processing an update", exc_info=context.error)
+    if isinstance(context.error, BadRequest) and "not modified" in str(context.error):
+        return
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await context.bot.send_message(update.effective_chat.id, "⚠️ Something went wrong. Please try again.")
+        except Exception:
+            logger.warning("Could not notify user about the error", exc_info=True)

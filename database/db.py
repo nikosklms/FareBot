@@ -1,308 +1,489 @@
-import sqlite3
+import logging
+import re
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from typing import Any, AsyncIterator, Optional
+
 import aiosqlite
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone, timedelta
-from config import DB_PATH
 
-def init_db(db_path: Optional[str] = None):
-    """Synchronously initialize SQLite database tables."""
-    target_path = db_path or DB_PATH
-    conn = sqlite3.connect(target_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS trackers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                origin_code TEXT NOT NULL,
-                origin_name TEXT NOT NULL,
-                destination_code TEXT NOT NULL,
-                destination_name TEXT NOT NULL,
-                departure_date TEXT NOT NULL,
-                return_date TEXT,
-                max_budget REAL NOT NULL,
-                currency TEXT DEFAULT 'EUR',
-                frequency_hours INTEGER DEFAULT 6,
-                direct_only INTEGER DEFAULT 0,
-                status TEXT DEFAULT 'ACTIVE',
-                consecutive_failures INTEGER DEFAULT 0,
-                last_checked_at TIMESTAMP,
-                last_price_found REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        try:
-            cursor.execute("ALTER TABLE trackers ADD COLUMN direct_only INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            cursor.execute("ALTER TABLE trackers ADD COLUMN departure_date_end TEXT")
-        except sqlite3.OperationalError:
-            pass
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS price_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tracker_id INTEGER NOT NULL,
-                price REAL NOT NULL,
-                airline TEXT,
-                checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(tracker_id) REFERENCES trackers(id) ON DELETE CASCADE
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS unauthorized_attempts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                username TEXT,
-                full_name TEXT,
-                input_text TEXT,
-                attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-    finally:
-        conn.close()
+from database.models import ACTIVE, EXPIRED, PAUSED, WEEKDAYS, Digest, Tracker
 
-class DatabaseManager:
-    def __init__(self, db_path: str = DB_PATH):
-        self.db_path = db_path
+logger = logging.getLogger(__name__)
 
-    async def init_db(self):
-        """Initialize tables asynchronously according to design spec."""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS trackers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    origin_code TEXT NOT NULL,
-                    origin_name TEXT NOT NULL,
-                    destination_code TEXT NOT NULL,
-                    destination_name TEXT NOT NULL,
-                    departure_date TEXT NOT NULL,
-                    departure_date_end TEXT,
-                    return_date TEXT,
-                    max_budget REAL NOT NULL,
-                    currency TEXT DEFAULT 'EUR',
-                    frequency_hours INTEGER DEFAULT 6,
-                    direct_only INTEGER DEFAULT 0,
-                    status TEXT DEFAULT 'ACTIVE',
-                    consecutive_failures INTEGER DEFAULT 0,
-                    last_checked_at TIMESTAMP,
-                    last_price_found REAL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            try:
-                await db.execute("ALTER TABLE trackers ADD COLUMN direct_only INTEGER DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                await db.execute("ALTER TABLE trackers ADD COLUMN departure_date_end TEXT")
-            except sqlite3.OperationalError:
-                pass
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS price_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tracker_id INTEGER NOT NULL,
-                    price REAL NOT NULL,
-                    airline TEXT,
-                    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(tracker_id) REFERENCES trackers(id) ON DELETE CASCADE
-                )
-            """)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS unauthorized_attempts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    username TEXT,
-                    full_name TEXT,
-                    input_text TEXT,
-                    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            await db.commit()
+SCHEMA_VERSION = 1
+
+TRACKERS_DDL = """
+CREATE TABLE {name} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    origin_code TEXT NOT NULL,
+    destination_code TEXT NOT NULL,
+    departure_date TEXT NOT NULL,
+    departure_date_end TEXT,
+    max_budget REAL NOT NULL,
+    frequency_hours INTEGER NOT NULL DEFAULT 6,
+    direct_only INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_checked_at TIMESTAMP,
+    last_price_found REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+DIGESTS_DDL = """
+CREATE TABLE digests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    origin_code TEXT NOT NULL,
+    region TEXT NOT NULL,
+    max_budget REAL,
+    days_ahead INTEGER,
+    departure_date TEXT,
+    departure_date_end TEXT,
+    sort_mode TEXT NOT NULL DEFAULT 'both',
+    delivery_day TEXT NOT NULL DEFAULT 'Sunday',
+    delivery_time TEXT NOT NULL DEFAULT '15:00',
+    max_results INTEGER NOT NULL DEFAULT 10,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+PRICE_HISTORY_DDL = """
+CREATE TABLE {name} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tracker_id INTEGER NOT NULL REFERENCES trackers(id) ON DELETE CASCADE,
+    price REAL NOT NULL,
+    airline TEXT,
+    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+UNAUTHORIZED_DDL = """
+CREATE TABLE IF NOT EXISTS unauthorized_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    full_name TEXT,
+    input_text TEXT,
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+TRACKER_COLUMNS = [
+    "id", "user_id", "origin_code", "destination_code", "departure_date", "departure_date_end",
+    "max_budget", "frequency_hours", "direct_only", "status", "consecutive_failures",
+    "last_checked_at", "last_price_found", "created_at",
+]
+
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+CLOCK = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _tracker(row: aiosqlite.Row) -> Tracker:
+    data = dict(row)
+    data["direct_only"] = bool(data["direct_only"])
+    return Tracker(**data)
+
+
+def _digest(row: aiosqlite.Row) -> Digest:
+    return Digest(**dict(row))
+
+
+class Database:
+    def __init__(self, path: str):
+        self.path = path
+
+    @asynccontextmanager
+    async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        async with aiosqlite.connect(self.path, timeout=15.0) as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA foreign_keys = ON")
+            yield conn
+
+    # ------------------------------------------------------------------
+    # Schema
+    # ------------------------------------------------------------------
+
+    async def migrate(self) -> None:
+        """Bring the database file up to SCHEMA_VERSION."""
+        async with aiosqlite.connect(self.path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("PRAGMA user_version") as cur:
+                version = (await cur.fetchone())[0]
+            if version >= SCHEMA_VERSION:
+                return
+            await _migrate_to_v1(conn)
+            await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            await conn.commit()
+            logger.info("Database migrated to schema version %d", SCHEMA_VERSION)
+
+    # ------------------------------------------------------------------
+    # Trackers
+    # ------------------------------------------------------------------
 
     async def create_tracker(
         self,
         user_id: int,
         origin_code: str,
-        origin_name: str,
         destination_code: str,
-        destination_name: str,
         departure_date: str,
         max_budget: float,
-        return_date: Optional[str] = None,
+        departure_date_end: Optional[str] = None,
         frequency_hours: int = 6,
-        currency: str = "EUR",
-        direct_only: int = 0,
-        departure_date_end: Optional[str] = None
-    ) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                INSERT INTO trackers (
-                    user_id, origin_code, origin_name, destination_code, destination_name,
-                    departure_date, departure_date_end, return_date, max_budget, frequency_hours, currency, direct_only
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                user_id, origin_code, origin_name, destination_code, destination_name,
-                departure_date, departure_date_end, return_date, max_budget, frequency_hours, currency, direct_only
-            ))
+        direct_only: bool = False,
+    ) -> Tracker:
+        async with self._connect() as db:
+            cur = await db.execute(
+                "INSERT INTO trackers (user_id, origin_code, destination_code, departure_date,"
+                " departure_date_end, max_budget, frequency_hours, direct_only)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, origin_code, destination_code, departure_date,
+                 departure_date_end, max_budget, frequency_hours, int(direct_only)),
+            )
             await db.commit()
-            return cursor.lastrowid
+            tracker_id = cur.lastrowid
+        return await self.get_tracker(tracker_id)
 
+    async def get_tracker(self, tracker_id: int) -> Optional[Tracker]:
+        async with self._connect() as db:
+            async with db.execute("SELECT * FROM trackers WHERE id = ?", (tracker_id,)) as cur:
+                row = await cur.fetchone()
+        return _tracker(row) if row else None
 
-    async def get_active_trackers_count(self, user_id: int) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
+    async def list_trackers(self, user_id: int) -> list[Tracker]:
+        async with self._connect() as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM trackers WHERE user_id = ? AND status = 'ACTIVE'",
-                (user_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row else 0
+                "SELECT * FROM trackers WHERE user_id = ? ORDER BY created_at DESC, id DESC", (user_id,)
+            ) as cur:
+                return [_tracker(r) for r in await cur.fetchall()]
 
-    async def get_active_trackers(self) -> List[Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM trackers WHERE status = 'ACTIVE'") as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+    async def active_trackers(self) -> list[Tracker]:
+        async with self._connect() as db:
+            async with db.execute("SELECT * FROM trackers WHERE status = ?", (ACTIVE,)) as cur:
+                return [_tracker(r) for r in await cur.fetchall()]
 
-    async def get_tracker_by_id(self, tracker_id: int) -> Optional[Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM trackers WHERE id = ?", (tracker_id,)) as cursor:
-                row = await cursor.fetchone()
-                return dict(row) if row else None
-
-    async def get_user_trackers(self, user_id: int) -> List[Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
+    async def find_tracker(
+        self, user_id: int, origin_code: str, destination_code: str, departure_date: str
+    ) -> Optional[Tracker]:
+        """An existing active or paused tracker for the same route and start date."""
+        async with self._connect() as db:
             async with db.execute(
-                "SELECT * FROM trackers WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
-            ) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+                "SELECT * FROM trackers WHERE user_id = ? AND origin_code = ? AND destination_code = ?"
+                " AND departure_date = ? AND status IN (?, ?) LIMIT 1",
+                (user_id, origin_code, destination_code, departure_date, ACTIVE, PAUSED),
+            ) as cur:
+                row = await cur.fetchone()
+        return _tracker(row) if row else None
 
-    async def update_tracker_status(self, tracker_id: int, status: str):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE trackers SET status = ? WHERE id = ?", (status, tracker_id)
-            )
-            await db.commit()
+    async def set_tracker_status(self, tracker_id: int, status: str) -> None:
+        await self._execute("UPDATE trackers SET status = ? WHERE id = ?", (status, tracker_id))
 
-    async def update_tracker_budget(self, tracker_id: int, new_budget: float):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE trackers SET max_budget = ?, status = 'ACTIVE' WHERE id = ?",
-                (new_budget, tracker_id)
-            )
-            await db.commit()
+    async def set_tracker_budget(self, tracker_id: int, max_budget: float) -> None:
+        await self._execute("UPDATE trackers SET max_budget = ? WHERE id = ?", (max_budget, tracker_id))
 
-    async def increment_failure_count(self, tracker_id: int) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE trackers SET consecutive_failures = consecutive_failures + 1 WHERE id = ?",
-                (tracker_id,)
-            )
-            await db.commit()
-            async with db.execute(
-                "SELECT consecutive_failures FROM trackers WHERE id = ?", (tracker_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row else 0
+    async def delete_tracker(self, tracker_id: int) -> None:
+        await self._execute("DELETE FROM trackers WHERE id = ?", (tracker_id,))
 
-    async def reset_failure_count(self, tracker_id: int):
-        async with aiosqlite.connect(self.db_path) as db:
+    async def record_price(self, tracker_id: int, price: float, airline: Optional[str]) -> None:
+        """Store a successful check: price history row, last price, failure counter reset."""
+        async with self._connect() as db:
             await db.execute(
-                "UPDATE trackers SET consecutive_failures = 0 WHERE id = ?", (tracker_id,)
-            )
-            await db.commit()
-
-    async def log_price(self, tracker_id: int, price: float, airline: Optional[str] = None):
-        async with aiosqlite.connect(self.db_path) as db:
-            now = datetime.now(timezone.utc).isoformat()
-            await db.execute(
-                "UPDATE trackers SET last_price_found = ?, last_checked_at = ? WHERE id = ?",
-                (price, now, tracker_id)
+                "UPDATE trackers SET last_price_found = ?, last_checked_at = ?, consecutive_failures = 0"
+                " WHERE id = ?",
+                (price, _now(), tracker_id),
             )
             await db.execute(
                 "INSERT INTO price_history (tracker_id, price, airline) VALUES (?, ?, ?)",
-                (tracker_id, price, airline)
+                (tracker_id, price, airline),
             )
             await db.commit()
 
-    async def delete_tracker(self, tracker_id: int):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("DELETE FROM price_history WHERE tracker_id = ?", (tracker_id,))
-            await db.execute("DELETE FROM trackers WHERE id = ?", (tracker_id,))
-            await db.commit()
-
-    async def get_expired_trackers(self, current_date_str: str) -> List[Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
-                "SELECT * FROM trackers WHERE status = 'ACTIVE' AND departure_date < ?",
-                (current_date_str,)
-            ) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
-
-    async def log_unauthorized_attempt(self, user_id: int, username: Optional[str], full_name: Optional[str], input_text: Optional[str]):
-        async with aiosqlite.connect(self.db_path) as db:
+    async def record_failure(self, tracker_id: int) -> int:
+        """Count a failed check and return the consecutive failure total."""
+        async with self._connect() as db:
             await db.execute(
-                "INSERT INTO unauthorized_attempts (user_id, username, full_name, input_text) VALUES (?, ?, ?, ?)",
-                (user_id, username, full_name, input_text)
+                "UPDATE trackers SET consecutive_failures = consecutive_failures + 1, last_checked_at = ?"
+                " WHERE id = ?",
+                (_now(), tracker_id),
             )
             await db.commit()
+            async with db.execute("SELECT consecutive_failures FROM trackers WHERE id = ?", (tracker_id,)) as cur:
+                row = await cur.fetchone()
+        return row[0] if row else 0
 
-    async def update_budget(self, tracker_id: int, new_budget: float) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE trackers SET max_budget = ? WHERE id = ?",
-                (new_budget, tracker_id)
+    # ------------------------------------------------------------------
+    # Digests
+    # ------------------------------------------------------------------
+
+    async def create_digest(
+        self,
+        user_id: int,
+        origin_code: str,
+        region: str,
+        max_budget: Optional[float] = None,
+        days_ahead: Optional[int] = None,
+        departure_date: Optional[str] = None,
+        departure_date_end: Optional[str] = None,
+        sort_mode: str = "both",
+        delivery_day: str = "Sunday",
+        delivery_time: str = "15:00",
+        max_results: int = 10,
+    ) -> Digest:
+        async with self._connect() as db:
+            cur = await db.execute(
+                "INSERT INTO digests (user_id, origin_code, region, max_budget, days_ahead, departure_date,"
+                " departure_date_end, sort_mode, delivery_day, delivery_time, max_results)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, origin_code, region, max_budget, days_ahead, departure_date,
+                 departure_date_end, sort_mode, delivery_day, delivery_time, max_results),
             )
             await db.commit()
+            digest_id = cur.lastrowid
+        return await self.get_digest(digest_id)
 
-    async def has_active_tracker(self, user_id: int, origin_code: str, destination_code: str, departure_date: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+    async def get_digest(self, digest_id: int) -> Optional[Digest]:
+        async with self._connect() as db:
+            async with db.execute("SELECT * FROM digests WHERE id = ?", (digest_id,)) as cur:
+                row = await cur.fetchone()
+        return _digest(row) if row else None
+
+    async def list_digests(self, user_id: int) -> list[Digest]:
+        async with self._connect() as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM trackers WHERE user_id = ? AND origin_code = ? AND destination_code = ? AND departure_date = ? AND status IN ('ACTIVE', 'PAUSED')",
-                (user_id, origin_code, destination_code, departure_date)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return (row[0] > 0) if row else False
+                "SELECT * FROM digests WHERE user_id = ? ORDER BY created_at DESC, id DESC", (user_id,)
+            ) as cur:
+                return [_digest(r) for r in await cur.fetchall()]
 
-    async def has_active_digest(self, user_id: int, origin_code: str, region_code: str, departure_date: str) -> bool:
-        async with aiosqlite.connect(self.db_path) as db:
+    async def active_digests(self) -> list[Digest]:
+        async with self._connect() as db:
+            async with db.execute("SELECT * FROM digests WHERE status = ?", (ACTIVE,)) as cur:
+                return [_digest(r) for r in await cur.fetchall()]
+
+    async def find_digest(
+        self,
+        user_id: int,
+        origin_code: str,
+        region: str,
+        days_ahead: Optional[int],
+        departure_date: Optional[str],
+        departure_date_end: Optional[str],
+    ) -> Optional[Digest]:
+        """An existing active or paused digest with the same origin, region and window."""
+        async with self._connect() as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM trackers WHERE user_id = ? AND origin_code = ? AND destination_code = ? AND departure_date = ? AND status IN ('ACTIVE', 'PAUSED')",
-                (user_id, origin_code, region_code, departure_date)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return (row[0] > 0) if row else False
+                "SELECT * FROM digests WHERE user_id = ? AND origin_code = ? AND region = ?"
+                " AND days_ahead IS ? AND departure_date IS ? AND departure_date_end IS ?"
+                " AND status IN (?, ?) LIMIT 1",
+                (user_id, origin_code, region, days_ahead, departure_date, departure_date_end, ACTIVE, PAUSED),
+            ) as cur:
+                row = await cur.fetchone()
+        return _digest(row) if row else None
 
-    async def purge_stale_trackers(self) -> Dict[str, int]:
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        cutoff_30d = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
-        cutoff_60d = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S")
+    async def set_digest_status(self, digest_id: int, status: str) -> None:
+        await self._execute("UPDATE digests SET status = ? WHERE id = ?", (status, digest_id))
 
-        async with aiosqlite.connect(self.db_path, timeout=15.0) as db:
-            # Rule 1: Mark past departure active trackers as EXPIRED
-            cursor = await db.execute(
-                "UPDATE trackers SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND departure_date < ?",
-                (today_str,)
+    async def set_digest_budget(self, digest_id: int, max_budget: Optional[float]) -> None:
+        await self._execute("UPDATE digests SET max_budget = ? WHERE id = ?", (max_budget, digest_id))
+
+    async def delete_digest(self, digest_id: int) -> None:
+        await self._execute("DELETE FROM digests WHERE id = ?", (digest_id,))
+
+    # ------------------------------------------------------------------
+    # Shared
+    # ------------------------------------------------------------------
+
+    async def count_active(self, user_id: int) -> int:
+        """Active trackers plus active digests, for the per-user limit."""
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT (SELECT COUNT(*) FROM trackers WHERE user_id = ? AND status = ?)"
+                " + (SELECT COUNT(*) FROM digests WHERE user_id = ? AND status = ?)",
+                (user_id, ACTIVE, user_id, ACTIVE),
+            ) as cur:
+                return (await cur.fetchone())[0]
+
+    async def log_unauthorized_attempt(
+        self, user_id: Optional[int], username: str, full_name: str, input_text: str
+    ) -> None:
+        await self._execute(
+            "INSERT INTO unauthorized_attempts (user_id, username, full_name, input_text) VALUES (?, ?, ?, ?)",
+            (user_id or 0, username, full_name, input_text),
+        )
+
+    async def purge_stale(self) -> dict[str, int]:
+        """Expire past-dated trackers and fixed-window digests, then delete old leftovers.
+
+        Expired rows are deleted 30 days after creation, paused rows after 60.
+        """
+        today = datetime.now(timezone.utc).date().isoformat()
+        expired_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+        paused_cutoff = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S")
+
+        async with self._connect() as db:
+            expired = 0
+            cur = await db.execute(
+                "UPDATE trackers SET status = ? WHERE status = ? AND COALESCE(departure_date_end, departure_date) < ?",
+                (EXPIRED, ACTIVE, today),
             )
-            expired_count = cursor.rowcount
-
-            # Rule 2 & 3: Purge old expired or long-paused trackers
-            cursor = await db.execute(
-                "DELETE FROM trackers WHERE (status = 'EXPIRED' AND created_at < ?) OR (status = 'PAUSED' AND created_at < ?)",
-                (cutoff_30d, cutoff_60d)
+            expired += cur.rowcount
+            cur = await db.execute(
+                "UPDATE digests SET status = ? WHERE status = ? AND days_ahead IS NULL"
+                " AND COALESCE(departure_date_end, departure_date) < ?",
+                (EXPIRED, ACTIVE, today),
             )
-            purged_count = cursor.rowcount
+            expired += cur.rowcount
 
-            # Cleanup orphan price history
-            await db.execute("DELETE FROM price_history WHERE tracker_id NOT IN (SELECT id FROM trackers)")
+            purged = 0
+            for table in ("trackers", "digests"):
+                cur = await db.execute(
+                    f"DELETE FROM {table} WHERE (status = ? AND created_at < ?) OR (status = ? AND created_at < ?)",
+                    (EXPIRED, expired_cutoff, PAUSED, paused_cutoff),
+                )
+                purged += cur.rowcount
             await db.commit()
 
-            return {"expired": expired_count, "purged": purged_count}
+        return {"expired": expired, "purged": purged}
+
+    async def _execute(self, sql: str, params: tuple[Any, ...]) -> None:
+        async with self._connect() as db:
+            await db.execute(sql, params)
+            await db.commit()
+
+
+# ----------------------------------------------------------------------
+# Migration from the pre-versioned schema
+# ----------------------------------------------------------------------
+
+async def _table_exists(conn: aiosqlite.Connection, name: str) -> bool:
+    async with conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)) as cur:
+        return await cur.fetchone() is not None
+
+
+async def _migrate_to_v1(conn: aiosqlite.Connection) -> None:
+    """Create the v1 schema, converting a legacy database in place if one exists.
+
+    Legacy databases kept digests in the trackers table (destination_code
+    'REGION:<NAME>') with their settings packed into departure_date in
+    several historical formats. Those rows move to the digests table with
+    their ids preserved; plain trackers are copied as-is.
+    """
+    await conn.execute("PRAGMA foreign_keys = OFF")
+    await conn.execute(UNAUTHORIZED_DDL)
+
+    if not await _table_exists(conn, "trackers"):
+        await conn.execute(TRACKERS_DDL.format(name="trackers"))
+        await conn.execute(DIGESTS_DDL)
+        await conn.execute(PRICE_HISTORY_DDL.format(name="price_history"))
+        return
+
+    await conn.execute(TRACKERS_DDL.format(name="trackers_v1"))
+    await conn.execute(DIGESTS_DDL)
+    await conn.execute(PRICE_HISTORY_DDL.format(name="price_history_v1"))
+
+    async with conn.execute("SELECT * FROM trackers") as cur:
+        legacy_rows = [dict(r) for r in await cur.fetchall()]
+
+    for row in legacy_rows:
+        if str(row.get("destination_code", "")).startswith("REGION:"):
+            digest = _digest_from_legacy(row)
+            columns = ", ".join(digest)
+            await conn.execute(
+                f"INSERT INTO digests ({columns}) VALUES ({', '.join('?' for _ in digest)})",
+                tuple(digest.values()),
+            )
+        else:
+            tracker = {col: row.get(col) for col in TRACKER_COLUMNS}
+            tracker["frequency_hours"] = tracker["frequency_hours"] or 6
+            tracker["direct_only"] = tracker["direct_only"] or 0
+            tracker["status"] = tracker["status"] or ACTIVE
+            tracker["consecutive_failures"] = tracker["consecutive_failures"] or 0
+            await conn.execute(
+                f"INSERT INTO trackers_v1 ({', '.join(TRACKER_COLUMNS)})"
+                f" VALUES ({', '.join('?' for _ in TRACKER_COLUMNS)})",
+                tuple(tracker[col] for col in TRACKER_COLUMNS),
+            )
+
+    if await _table_exists(conn, "price_history"):
+        await conn.execute(
+            "INSERT INTO price_history_v1 (id, tracker_id, price, airline, checked_at)"
+            " SELECT id, tracker_id, price, airline, checked_at FROM price_history"
+            " WHERE tracker_id IN (SELECT id FROM trackers_v1)"
+        )
+        await conn.execute("DROP TABLE price_history")
+
+    await conn.execute("DROP TABLE trackers")
+    await conn.execute("ALTER TABLE trackers_v1 RENAME TO trackers")
+    await conn.execute("ALTER TABLE price_history_v1 RENAME TO price_history")
+    logger.info("Converted legacy database: %d rows migrated", len(legacy_rows))
+
+
+def _digest_from_legacy(row: dict[str, Any]) -> dict[str, Any]:
+    packed = str(row.get("departure_date") or "")
+    start = None
+    end = row.get("departure_date_end")
+    days = row.get("timeframe_days")
+    sort_mode = row.get("sort_mode") or "both"
+    schedule = row.get("delivery_schedule")
+
+    window = packed
+    if "|" in packed:
+        parts = packed.split("|")
+        window = parts[0]
+        if len(parts) >= 3:
+            sort_mode = parts[1]
+        schedule = schedule or parts[-1]
+    elif "@" in packed:
+        schedule = schedule or packed
+        window = ""
+
+    if ".." in window:
+        start, end = window.split("..", 1)
+    elif window.endswith("d") and window[:-1].isdigit():
+        days = int(window[:-1])
+    elif window.isdigit():
+        days = int(window)
+    elif ISO_DATE.match(window):
+        start = window
+
+    if start is None:
+        end = None
+        days = days or 30
+    else:
+        days = None
+
+    day, time = _parse_schedule(schedule)
+    budget = row.get("max_budget") or None
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "origin_code": row["origin_code"],
+        "region": row["destination_code"].split(":", 1)[1].lower(),
+        "max_budget": budget,
+        "days_ahead": days,
+        "departure_date": start,
+        "departure_date_end": end,
+        "sort_mode": sort_mode if sort_mode in ("discount", "price", "both") else "both",
+        "delivery_day": day,
+        "delivery_time": time,
+        "max_results": row.get("max_results") or 10,
+        "status": row.get("status") or ACTIVE,
+        "created_at": row.get("created_at"),
+    }
+
+
+def _parse_schedule(schedule: Optional[str]) -> tuple[str, str]:
+    """'Friday@18:00' -> ('Friday', '18:00'), falling back to Sunday 15:00."""
+    day, time = "Sunday", "15:00"
+    if schedule and "@" in schedule:
+        raw_day, raw_time = schedule.split("@", 1)
+        day = next((d for d in WEEKDAYS if d.lower() == raw_day.strip().lower()), day)
+        match = CLOCK.match(raw_time.strip())
+        if match:
+            time = f"{int(match.group(1)):02d}:{match.group(2)}"
+    return day, time

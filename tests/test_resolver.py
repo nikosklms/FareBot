@@ -1,4 +1,5 @@
 import pytest
+
 from services.resolver import LocationResolver
 
 def test_resolver_exact_match():
@@ -41,3 +42,30 @@ def test_resolver_global_cities():
         assert len(matches) > 0
         matched_iatas = [m[0] for m in matches]
         assert any(code in expected_iatas for code in matched_iatas)
+
+
+@pytest.mark.parametrize("typed, expected_first", [
+    ("la", "LAX"), ("lossangeles", "LAX"), ("athnes", "ATH"), ("sidney", "SYD"),
+    ("crete", "HER"), ("korea", "SEL"), ("kos", "KGS"), ("Zürich", "ZRH"),
+    ("seattle", "SEA"), ("zanzibar", "ZNZ"), ("hong kong", "HKG"),
+])
+def test_resolver_guesses_what_people_type(typed, expected_first):
+    assert LocationResolver().resolve(typed)[0][0] == expected_first
+
+
+def test_city_codes_come_before_single_airports():
+    codes = [m[0] for m in LocationResolver().resolve("paris")]
+    assert codes[:3] == ["PAR", "CDG", "ORY"]
+
+
+def test_short_text_matches_word_starts_not_middles():
+    codes = [m[0] for m in LocationResolver().resolve("la")]
+    assert "KTT" not in codes and "JMK" not in codes  # 'Kalamata', 'Island'
+
+
+def test_always_guesses_and_offers_unlisted_codes():
+    resolver = LocationResolver()
+    assert len(resolver.resolve("lol")) == 5
+    assert resolver.resolve("bhx")[0][0] == "BHX"
+    assert [m[0] for m in resolver.resolve("kos")][:2] == ["KGS", "KOS"]
+    assert resolver.resolve("   ") == []

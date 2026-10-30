@@ -23,8 +23,14 @@ class FlightOffer:
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-
 class AbstractFlightProvider(ABC):
+    # Requests the provider runs in parallel, used for time estimates.
+    concurrency: int = 1
+
+    def average_latency(self) -> float:
+        """Average seconds per query, used for time estimates."""
+        return 1.0
+
     @abstractmethod
     async def search_flights(
         self,

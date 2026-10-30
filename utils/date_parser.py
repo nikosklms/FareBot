@@ -1,67 +1,69 @@
-import re
-from datetime import datetime, timedelta, timezone
-from typing import Tuple, Optional, List
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
-ISO_DATE_REGEX = r"^\d{4}-\d{2}-\d{2}$"
+MAX_RANGE_DAYS = 330
+RANGE_SEPARATORS = ["..", ":", " to ", " - "]
+PRESETS = {
+    "next_7_days": "🗓️ Next 7 Days",
+    "next_14_days": "✈️ Next 14 Days",
+    "this_weekend": "📅 This Weekend",
+}
 
-def parse_date_or_range(raw_input: str) -> Tuple[str, Optional[str]]:
-    """
-    Parses a string into (start_date, end_date).
-    Supports formats:
-    - '2026-09-01' -> ('2026-09-01', None)
-    - '2026-09-01..2026-09-15' -> ('2026-09-01', '2026-09-15')
-    - '2026-09-01:2026-09-15' -> ('2026-09-01', '2026-09-15')
-    - '2026-09-01 to 2026-09-15' -> ('2026-09-01', '2026-09-15')
+
+def today_utc() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def parse_date_or_range(raw_input: str) -> tuple[str, Optional[str]]:
+    """Parse 'YYYY-MM-DD' or a range like 'YYYY-MM-DD..YYYY-MM-DD' into (start, end).
+
+    Ranges also accept ':', ' to ' and ' - ' as separators. Reversed ranges
+    are swapped. Raises ValueError on anything else.
     """
     clean = raw_input.strip()
-    separators = ["..", ":", " to ", " - "]
-    
-    for sep in separators:
-        if sep in clean:
-            parts = [p.strip() for p in clean.split(sep)]
-            if len(parts) == 2:
-                start_dt = datetime.strptime(parts[0], "%Y-%m-%d")
-                end_dt = datetime.strptime(parts[1], "%Y-%m-%d")
-                if end_dt < start_dt:
-                    start_dt, end_dt = end_dt, start_dt
-                return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+    for sep in RANGE_SEPARATORS:
+        parts = [p.strip() for p in clean.split(sep)]
+        if len(parts) == 2:
+            start, end = sorted(date.fromisoformat(p) for p in parts)
+            if start == end:
+                return start.isoformat(), None
+            return start.isoformat(), end.isoformat()
+    return date.fromisoformat(clean).isoformat(), None
 
-    # Single date
-    dt = datetime.strptime(clean, "%Y-%m-%d")
-    return dt.strftime("%Y-%m-%d"), None
 
-def generate_date_sequence(start_date: str, end_date: str, max_days: Optional[int] = 330) -> List[str]:
-    """Generates an inclusive sequence of ISO date strings for every consecutive day between start_date and end_date."""
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
-
+def generate_date_sequence(start_date: str, end_date: str, max_days: Optional[int] = MAX_RANGE_DAYS) -> list[str]:
+    """Every day from start_date to end_date inclusive, capped at max_days."""
+    current = date.fromisoformat(start_date)
+    last = date.fromisoformat(end_date)
     dates = []
-    curr = start_dt
-    while curr <= end_dt:
-        dates.append(curr.strftime("%Y-%m-%d"))
-        curr += timedelta(days=1)
-        if max_days and len(dates) >= max_days:
-            break
+    while current <= last and (not max_days or len(dates) < max_days):
+        dates.append(current.isoformat())
+        current += timedelta(days=1)
     return dates
 
-def get_preset_range(preset_key: str) -> Tuple[str, str]:
-    """Calculates ISO start and end dates for preset options."""
-    today = datetime.now(timezone.utc).date()
+
+def days_ahead_window(days: int, today: Optional[date] = None) -> tuple[str, str]:
+    """Tomorrow through `days` days from today."""
+    today = today or today_utc()
+    return (today + timedelta(days=1)).isoformat(), (today + timedelta(days=days)).isoformat()
+
+
+def get_preset_range(preset_key: str, today: Optional[date] = None) -> tuple[str, str]:
+    today = today or today_utc()
     if preset_key == "this_weekend":
-        # Find next Saturday (5)
-        days_until_sat = (5 - today.weekday()) % 7
-        if days_until_sat == 0:
-            days_until_sat = 7
-        sat = today + timedelta(days=days_until_sat)
-        sun = sat + timedelta(days=1)
-        return sat.strftime("%Y-%m-%d"), sun.strftime("%Y-%m-%d")
-    elif preset_key == "next_7_days":
-        start = today + timedelta(days=1)
-        end = today + timedelta(days=7)
-        return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
-    elif preset_key == "next_14_days":
-        start = today + timedelta(days=1)
-        end = today + timedelta(days=14)
-        return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
-    else:
-        raise ValueError(f"Unknown preset_key: {preset_key}")
+        days_until_saturday = (5 - today.weekday()) % 7 or 7
+        saturday = today + timedelta(days=days_until_saturday)
+        return saturday.isoformat(), (saturday + timedelta(days=1)).isoformat()
+    if preset_key == "next_7_days":
+        return days_ahead_window(7, today)
+    if preset_key == "next_14_days":
+        return days_ahead_window(14, today)
+    raise ValueError(f"Unknown preset_key: {preset_key}")
+
+
+def is_past(iso_date: str, today: Optional[date] = None) -> bool:
+    return iso_date < (today or today_utc()).isoformat()
+
+
+def describe_window(start: str, end: Optional[str]) -> str:
+    return f"{start} ➔ {end}" if end else start

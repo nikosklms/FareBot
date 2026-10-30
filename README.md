@@ -13,7 +13,7 @@ Searching flight prices manually across multiple dates requires checking Google 
 - **Regional Deal Exploration (`/explore`)**: Discover top flight deals across 8 global regions with customizable sorting (`Highest Discount %`, `Cheapest Price`, or `Both`).
 - **Automated Weekly Digests (`/digest`)**: Schedule recurring weekly deal reports delivered directly via Telegram on your chosen day and time.
 - **Background Price Tracking (`/track` & `/mytracks`)**: Monitor routes in the background with instant push notifications when prices drop below your budget.
-- **Live ETAs & Search Cancellation**: Real-time progress updates with wall-clock completion times (`around HH:MM`) and 1-tap cancellation.
+- **Live ETAs & Search Cancellation**: Long searches run in the background with real-time progress (`around HH:MM`) and a Stop button, so the bot keeps responding meanwhile.
 - **Self-Hosted Infrastructure**: Whitelisted user access control, SQLite storage, automated daily database cleanup, and embedded HTTP health checks for Render/Railway.
 
 ## Requirements
@@ -47,8 +47,6 @@ Edit `.env` to supply your bot token and numeric Telegram user ID:
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 ALLOWED_USERS=123456789
-FAREST_DB_PATH=farebot.db
-PORT=10000
 ```
 
 Start the bot:
@@ -68,15 +66,17 @@ FareBot reads configuration from environment variables loaded via `.env` at star
 | TELEGRAM_BOT_TOKEN | Telegram bot token obtained from BotFather | Empty string |
 | ALLOWED_USERS | Comma-separated list of numeric Telegram User IDs allowed to use the bot | Empty string |
 | FAREST_DB_PATH | File path for SQLite database storage | `farebot.db` inside root directory |
+| TIMEZONE | Timezone for weekly digest delivery times, e.g. `Europe/Athens` | The server's timezone |
 | PORT | Port number for the HTTP health check web server | `10000` |
+
+`ALLOWED_USERS` is re-read on every message, so adding a user takes effect without a restart. The database schema is upgraded automatically on startup.
 
 Internal operational limits configured in `config.py`:
 
 | Parameter | Value | Description |
 | --- | --- | --- |
 | MIN_POLL_INTERVAL_HOURS | 6 | Minimum allowed background polling interval in hours |
-| DEFAULT_POLL_INTERVAL_HOURS | 6 | Default polling frequency for new price trackers |
-| MAX_TRACKERS_PER_USER | 20 | Maximum active trackers permitted per user |
+| MAX_TRACKERS_PER_USER | 20 | Maximum active trackers and digests per user |
 | MAX_CONSECUTIVE_FAILURES | 3 | Failed search attempts before a tracker is paused |
 
 ## Usage
@@ -93,12 +93,35 @@ Interact with FareBot using standard Telegram chat commands and interactive inli
 | `/track` | Create a recurring background price tracker for a specific route and date |
 | `/explore` | Interactively search top flight deals by region (Europe, Islands, Asia, Middle East, Americas, etc.) |
 | `/digest` | Schedule a recurring weekly flight deal digest with custom day, time, sorting, and deal limits |
-| `/mytracks` | Manage active price trackers and weekly digests (edit budget, pause, or delete) |
-| `/cancel` | Cancel an ongoing wizard session |
+| `/mytracks` | Manage trackers and weekly digests (edit budget, pause, resume, or delete) |
+| `/cancel` | Cancel the current wizard or stop a running search |
+
+Every command also accepts its answers as arguments to skip the wizard:
+
+```text
+/search ATH LON 2026-09-01..2026-09-15 direct
+/track ATH LON 2026-09-01 150 direct
+/explore ATH europe 30 100 10          # origin, region, days ahead, budget (0 = any), results
+/digest ATH europe 30 80 Sunday@15:00 10
+```
+
+## Project Layout
+
+| Path | Contents |
+| --- | --- |
+| `main.py` | Startup: single-instance lock, health check server, application wiring |
+| `bot/handlers/` | One module per command; wizards are built from the shared steps in `bot/wizard.py` |
+| `bot/formatting.py` | All HTML message rendering |
+| `daemon/scheduler.py` | Background jobs: tracker checks, weekly digests, nightly cleanup |
+| `database/` | SQLite access, typed `Tracker` / `Digest` models and schema migrations |
+| `providers/fast_flights.py` | Google Flights fetching and parsing |
+| `services/` | Deal discovery engine, airport data and fuzzy airport search |
 
 ## Testing
 
-Run unit and integration tests located in `tests/` using `pytest -v`.
+Run the test suite with `pytest`. The tests drive the real bot through a fake Telegram API, so no network access or bot token is needed.
+
+Tests that query the real Google Flights site are skipped by default. Run them with `pytest -m live`.
 
 ## Limitations and Known Gaps
 

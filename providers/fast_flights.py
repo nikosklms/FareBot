@@ -1,43 +1,31 @@
-import logging
 import asyncio
-import urllib.request
-import urllib.parse
-import urllib.error
-import time
 import json
-from typing import List, Optional, Any, Callable, Awaitable
-from selectolax.lexbor import LexborHTMLParser
-from fast_flights import create_query, FlightQuery, Passengers
+import logging
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import deque
+from datetime import date
+from typing import Any, List, Optional
+
+from fast_flights import FlightQuery, Passengers, create_query
 from fast_flights.integrations.base import FetchIntegration
+from selectolax.lexbor import LexborHTMLParser
+
 from providers.base import AbstractFlightProvider, FlightOffer
 from services.airports_data import MULTI_AIRPORT_CITIES
+from utils.date_parser import generate_date_sequence
 
 logger = logging.getLogger(__name__)
 
+# Concurrent Google Flights requests; higher values trigger rate limiting quickly.
+CONCURRENT_REQUESTS = 3
+
+
 class GoogleRateLimitException(Exception):
     """Raised when Google Flights returns a CAPTCHA challenge or HTTP 429/403 rate limit response."""
-    pass
 
-# Class-level shared semaphore to limit concurrent Google Flights HTTP requests across all callers
-_GLOBAL_SEMAPHORE: Optional[asyncio.Semaphore] = None
-_LATENCY_HISTORY: List[float] = []
-
-def record_query_latency(elapsed_seconds: float) -> None:
-    global _LATENCY_HISTORY
-    _LATENCY_HISTORY.append(elapsed_seconds)
-    if len(_LATENCY_HISTORY) > 100:
-        _LATENCY_HISTORY.pop(0)
-
-def get_average_query_latency() -> float:
-    if not _LATENCY_HISTORY:
-        return 0.5
-    return sum(_LATENCY_HISTORY) / len(_LATENCY_HISTORY)
-
-def get_shared_semaphore(limit: int = 3) -> asyncio.Semaphore:
-    global _GLOBAL_SEMAPHORE
-    if _GLOBAL_SEMAPHORE is None:
-        _GLOBAL_SEMAPHORE = asyncio.Semaphore(limit)
-    return _GLOBAL_SEMAPHORE
 
 class UrllibFetchIntegration(FetchIntegration):
     """Custom reliable HTTP fetcher for Google Flights to prevent TLS fingerprinting hangs."""
@@ -62,7 +50,7 @@ class UrllibFetchIntegration(FetchIntegration):
                 raw_bytes = response.read()
                 elapsed_ms = (time.perf_counter() - t0) * 1000.0
                 content_len = len(raw_bytes)
-                logger.info(f"[HTTP] Google Flights response: status={status_code}, size={content_len} bytes, latency={elapsed_ms:.1f}ms")
+                logger.debug(f"[HTTP] Google Flights response: status={status_code}, size={content_len} bytes, latency={elapsed_ms:.1f}ms")
 
                 html = raw_bytes.decode("utf-8", errors="ignore")
 
@@ -78,7 +66,7 @@ class UrllibFetchIntegration(FetchIntegration):
             logger.error(f"[HTTP_ERROR] HTTP {e.code} error fetching Google Flights ({e.reason}) after {elapsed_ms:.1f}ms for {url[:80]}")
             if e.code in (429, 403, 503):
                 logger.warning(f"[RATE_LIMIT] Received HTTP {e.code} status from Google Flights! Possible rate limiting.")
-                raise GoogleRateLimitException(f"HTTP {e.code}: {e.reason}")
+                raise GoogleRateLimitException(f"HTTP {e.code}: {e.reason}") from e
             raise
         except Exception as e:
             if isinstance(e, GoogleRateLimitException):
@@ -96,7 +84,6 @@ def build_google_flights_url(
 ) -> str:
     """Construct a valid Google Flights search URL with protobuf tfs parameter."""
     try:
-        from fast_flights import create_query, FlightQuery, Passengers
         q = create_query(
             flights=[FlightQuery(date=departure_date, from_airport=origin, to_airport=destination)],
             passengers=Passengers(adults=1),
@@ -108,7 +95,8 @@ def build_google_flights_url(
         return f"https://www.google.com/travel/flights/search?{urllib.parse.urlencode(params)}"
     except Exception as e:
         logger.warning(f"Failed to generate Google Flights tfs URL: {e}")
-        return f"https://www.google.com/travel/flights/search?tfs=GhoSC{departure_date}jBRID{origin}rUSA{destination}&curr={currency}"
+        text_query = f"Flights from {origin} to {destination} on {departure_date}"
+        return f"https://www.google.com/travel/flights?q={urllib.parse.quote(text_query)}&curr={currency}"
 
 def _extract_typical_price_range(payload: Any) -> tuple[Optional[float], Optional[float]]:
     """Extract typical min and max price baseline range from Google Flights JSON payload."""
@@ -226,7 +214,6 @@ def parse_google_flights_payload_generic(
             def _calc_day_offset(dep_d_list, arr_d_list):
                 try:
                     if isinstance(dep_d_list, list) and len(dep_d_list) >= 3 and isinstance(arr_d_list, list) and len(arr_d_list) >= 3:
-                        from datetime import date
                         d1 = date(dep_d_list[0], dep_d_list[1], dep_d_list[2])
                         d2 = date(arr_d_list[0], arr_d_list[1], arr_d_list[2])
                         return max(0, (d2 - d1).days)
@@ -286,6 +273,20 @@ def parse_google_flights_payload_generic(
     return unique_offers
 
 class FastFlightsProvider(AbstractFlightProvider):
+    """Google Flights scraper built on fast-flights query encoding."""
+
+    concurrency = CONCURRENT_REQUESTS
+
+    def __init__(self) -> None:
+        self._fetcher = UrllibFetchIntegration()
+        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._latencies: deque[float] = deque(maxlen=100)
+
+    def average_latency(self) -> float:
+        if not self._latencies:
+            return 0.5
+        return sum(self._latencies) / len(self._latencies)
+
     async def search_flights(
         self,
         origin: str,
@@ -295,98 +296,80 @@ class FastFlightsProvider(AbstractFlightProvider):
         currency: str = "EUR",
         direct_only: bool = False
     ) -> List[FlightOffer]:
-        loop = asyncio.get_running_loop()
-        fetcher = UrllibFetchIntegration()
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.concurrency)
 
         target_destinations = MULTI_AIRPORT_CITIES.get(destination.upper(), [destination])
-        sem = get_shared_semaphore(3)
-
         t_start = time.perf_counter()
-        logger.info(f"[PROVIDER] Starting flight search: {origin} -> {destination} ({target_destinations}) on {departure_date} (direct_only={direct_only})")
 
-        async def _fetch_for_dest(dest_code: str) -> List[FlightOffer]:
-            sem_t0 = time.perf_counter()
-            async with sem:
-                sem_wait = (time.perf_counter() - sem_t0) * 1000.0
-                if sem_wait > 50.0:
-                    logger.debug(f"[CONCURRENCY] Waited {sem_wait:.1f}ms to acquire HTTP semaphore for {origin} -> {dest_code}")
+        results = await asyncio.gather(*(
+            self._fetch(origin, dest, departure_date, return_date, currency, direct_only)
+            for dest in target_destinations
+        ))
+        all_offers = [offer for batch in results for offer in batch]
 
-                flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
-                if return_date:
-                    flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
-
-                query_kwargs = {
-                    "flights": flight_queries,
-                    "trip": "round-trip" if return_date else "one-way",
-                    "passengers": Passengers(adults=1),
-                    "currency": currency
-                }
-                if direct_only:
-                    query_kwargs["max_stops"] = 0
-
-                q = create_query(**query_kwargs)
-
-                max_retries = 2
-                t0_q = time.perf_counter()
-                for attempt in range(max_retries + 1):
-                    try:
-                        html = await loop.run_in_executor(None, lambda: fetcher.fetch_html(q))
-                        res_offers = parse_google_flights_payload_generic(html, origin, dest_code, departure_date, return_date, currency)
-                        record_query_latency(time.perf_counter() - t0_q)
-                        return res_offers
-                    except GoogleRateLimitException as e:
-                        if attempt < max_retries:
-                            backoff_sec = 0.5 * (2 ** attempt)
-                            logger.warning(f"[RATE_LIMIT_RETRY] {e}. Retrying {origin} -> {dest_code} in {backoff_sec}s (attempt {attempt+1}/{max_retries})...")
-                            await asyncio.sleep(backoff_sec)
-                        else:
-                            logger.error(f"[PROVIDER_ERR] Max retries reached for {origin} -> {dest_code}: {e}")
-                            return []
-                    except Exception as e:
-                        logger.error(f"[PROVIDER_ERR] Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
-                        return []
-
-        tasks = [_fetch_for_dest(d) for d in target_destinations]
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
-
-        all_offers: List[FlightOffer] = []
-        for res in results_list:
-            if isinstance(res, list):
-                all_offers.extend(res)
-            elif isinstance(res, Exception):
-                logger.error(f"[PROVIDER_ERR] Task exception during gather for {origin} -> {destination}: {res}")
-
-        if not all_offers:
-            elapsed_ms = (time.perf_counter() - t_start) * 1000.0
-            logger.info(f"[PROVIDER] Finished search {origin} -> {destination} in {elapsed_ms:.1f}ms: 0 offers found.")
-            return []
-
-        # Deduplicate offers by (price, departure_date, origin, destination)
-        # Prefer specific airline details and departure_time over generic summary cards ("Various Airlines")
-        unique_dict: Dict[Tuple[float, str, str, str], FlightOffer] = {}
+        # The same fare often appears twice: as a summary card ("Various Airlines")
+        # and as a detailed card. Keep the detailed one.
+        unique: dict[tuple[float, str, str, str], FlightOffer] = {}
         for offer in all_offers:
             key = (offer.price, offer.departure_date, offer.origin, offer.destination)
-            if key not in unique_dict:
-                unique_dict[key] = offer
-            else:
-                existing = unique_dict[key]
-                if existing.airline == "Various Airlines" and offer.airline != "Various Airlines":
-                    unique_dict[key] = offer
-                elif existing.departure_time is None and offer.departure_time is not None:
-                    unique_dict[key] = offer
+            existing = unique.get(key)
+            if (existing is None
+                    or (existing.airline == "Various Airlines" and offer.airline != "Various Airlines")
+                    or (existing.departure_time is None and offer.departure_time is not None)):
+                unique[key] = offer
 
-        unique_offers: List[FlightOffer] = list(unique_dict.values())
+        offers = [o for o in unique.values() if o.is_direct or not direct_only]
+        offers.sort(key=lambda o: o.price)
+        logger.debug(
+            f"[PROVIDER] {origin} -> {destination} on {departure_date}: {len(offers)} offers "
+            f"in {(time.perf_counter() - t_start) * 1000.0:.0f}ms"
+        )
+        return offers
 
+    async def _fetch(
+        self,
+        origin: str,
+        dest_code: str,
+        departure_date: str,
+        return_date: Optional[str],
+        currency: str,
+        direct_only: bool,
+    ) -> List[FlightOffer]:
+        flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
+        if return_date:
+            flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
+        query_kwargs: dict[str, Any] = {
+            "flights": flight_queries,
+            "trip": "round-trip" if return_date else "one-way",
+            "passengers": Passengers(adults=1),
+            "currency": currency,
+        }
         if direct_only:
-            unique_offers = [o for o in unique_offers if o.is_direct]
+            query_kwargs["max_stops"] = 0
+        q = create_query(**query_kwargs)
 
-        unique_offers.sort(key=lambda x: x.price)
-        elapsed_ms = (time.perf_counter() - t_start) * 1000.0
-        if unique_offers:
-            logger.info(f"[PROVIDER] Finished search {origin} -> {destination} in {elapsed_ms:.1f}ms: {len(unique_offers)} unique offers found (lowest €{unique_offers[0].price:.2f}).")
-        else:
-            logger.info(f"[PROVIDER] Finished search {origin} -> {destination} in {elapsed_ms:.1f}ms: 0 unique offers found.")
-        return unique_offers
+        loop = asyncio.get_running_loop()
+        max_retries = 2
+        async with self._semaphore:
+            t0 = time.perf_counter()
+            for attempt in range(max_retries + 1):
+                try:
+                    html = await loop.run_in_executor(None, self._fetcher.fetch_html, q)
+                    offers = parse_google_flights_payload_generic(html, origin, dest_code, departure_date, return_date, currency)
+                    self._latencies.append(time.perf_counter() - t0)
+                    return offers
+                except GoogleRateLimitException as e:
+                    if attempt == max_retries:
+                        logger.error(f"[PROVIDER_ERR] Max retries reached for {origin} -> {dest_code}: {e}")
+                        return []
+                    backoff_sec = 0.5 * (2 ** attempt)
+                    logger.warning(f"[RATE_LIMIT_RETRY] {e}. Retrying {origin} -> {dest_code} in {backoff_sec}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(backoff_sec)
+                except Exception as e:
+                    logger.error(f"[PROVIDER_ERR] Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
+                    return []
+        return []
 
     async def search_flights_range(
         self,
@@ -396,45 +379,14 @@ class FastFlightsProvider(AbstractFlightProvider):
         end_date: str,
         currency: str = "EUR",
         direct_only: bool = False,
-        max_days: Optional[int] = 330,
-        on_query_complete: Optional[Callable[[], Awaitable[None]]] = None
     ) -> List[FlightOffer]:
-        from utils.date_parser import generate_date_sequence
-        dates = generate_date_sequence(start_date, end_date, max_days=max_days)
-        logger.info(f"[PROVIDER] Starting range search: {origin} -> {destination} across {len(dates)} dates ({start_date} to {end_date})")
-
-        t_start = time.perf_counter()
-
-        async def _fetch_single_date(d: str) -> List[FlightOffer]:
-            try:
-                res = await self.search_flights(
-                    origin=origin,
-                    destination=destination,
-                    departure_date=d,
-                    currency=currency,
-                    direct_only=direct_only
-                )
-                return res
-            finally:
-                if on_query_complete:
-                    try:
-                        await on_query_complete()
-                    except Exception:
-                        pass
-
-        tasks = [_fetch_single_date(d) for d in dates]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        all_offers: List[FlightOffer] = []
-        for res in results:
-            if isinstance(res, list):
-                all_offers.extend(res)
-            elif isinstance(res, Exception):
-                logger.error(f"[PROVIDER_ERR] Error fetching flight range date: {res}")
-
-        all_offers.sort(key=lambda x: x.price)
-        elapsed_ms = (time.perf_counter() - t_start) * 1000.0
-        logger.info(f"[PROVIDER] Finished range search {origin} -> {destination} in {elapsed_ms:.1f}ms: {len(all_offers)} offers found total.")
-        return all_offers
-
-
+        dates = generate_date_sequence(start_date, end_date)
+        results = await asyncio.gather(*(
+            self.search_flights(origin=origin, destination=destination, departure_date=d,
+                                currency=currency, direct_only=direct_only)
+            for d in dates
+        ))
+        offers = [offer for batch in results for offer in batch]
+        offers.sort(key=lambda o: o.price)
+        logger.info(f"[PROVIDER] Range search {origin} -> {destination} across {len(dates)} dates: {len(offers)} offers")
+        return offers

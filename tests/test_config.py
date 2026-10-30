@@ -1,24 +1,26 @@
-import os
-import pytest
 import config
 
-def test_get_allowed_users_dynamic_reload(tmp_path, monkeypatch):
-    """get_allowed_users should re-read .env dynamically when edited."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("ALLOWED_USERS=111,222")
-    monkeypatch.setattr(config, "BASE_DIR", tmp_path)
 
-    users = config._real_get_allowed_users()
-    assert users == [111, 222]
-
-    # Dynamically edit .env file
-    env_file.write_text("ALLOWED_USERS=111,222,333")
-    users_updated = config._real_get_allowed_users()
-    assert users_updated == [111, 222, 333]
-
-def test_get_allowed_users_default_empty(tmp_path, monkeypatch):
-    """get_allowed_users should default to an empty list when ALLOWED_USERS is unset."""
+def test_allowed_users_reloads_env_file(tmp_path, monkeypatch):
     monkeypatch.delenv("ALLOWED_USERS", raising=False)
     monkeypatch.setattr(config, "BASE_DIR", tmp_path)
-    assert config._real_get_allowed_users() == []
+    env_file = tmp_path / ".env"
+    env_file.write_text("ALLOWED_USERS=111, 222")
+    assert config.get_allowed_users() == [111, 222]
 
+    env_file.write_text("ALLOWED_USERS=111,222,333,not-a-number")
+    assert config.get_allowed_users() == [111, 222, 333]
+
+
+def test_allowed_users_falls_back_to_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BASE_DIR", tmp_path)
+    monkeypatch.setenv("ALLOWED_USERS", "42")
+    assert config.get_allowed_users() == [42]
+
+    monkeypatch.delenv("ALLOWED_USERS")
+    assert config.get_allowed_users() == []
+
+
+def test_timezone_from_environment(monkeypatch):
+    monkeypatch.setenv("TIMEZONE", "Europe/Athens")
+    assert str(config.get_timezone()) == "Europe/Athens"

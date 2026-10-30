@@ -1,295 +1,165 @@
 import asyncio
 import logging
 import time
-from typing import List, Dict, Any, Optional
-from providers.fast_flights import FastFlightsProvider
-from services.airports_data import get_region_airports, get_airport_country
+from dataclasses import dataclass
+from typing import Awaitable, Callable, Optional
+
+from providers.base import AbstractFlightProvider
+from services.airports_data import get_airport_country, get_region_airports
+from services.progress import Progress
+from utils.date_parser import generate_date_sequence
 
 logger = logging.getLogger(__name__)
+
+MAX_PER_COUNTRY = 2
+
+# (queries done, total queries, estimated seconds left, airports, days)
+ProgressCallback = Callable[[int, int, float, int, int], Awaitable[None]]
+
+
+@dataclass
+class Deal:
+    origin: str
+    destination: str
+    destination_name: str
+    country: str
+    departure_date: str
+    price: float
+    airline: str
+    is_direct: bool
+    baseline_price: Optional[float]
+    discount_pct: float
+
+
+@dataclass
+class DealSection:
+    """One ranked list of deals; sort_mode is 'discount' or 'price'."""
+    sort_mode: str
+    deals: list[Deal]
+
+
+def baseline_price(typical_min: Optional[float], typical_max: Optional[float]) -> Optional[float]:
+    """Google's typical price: the middle of its range, or whichever end is known."""
+    if typical_min and typical_max:
+        return (typical_min + typical_max) / 2.0
+    return typical_min or typical_max or None
+
 
 def calculate_discount_score(
     current_price: float,
     baseline_min: Optional[float] = None,
-    baseline_max: Optional[float] = None
+    baseline_max: Optional[float] = None,
 ) -> float:
-    """Calculate discount percentage relative to Google Flights typical price baseline.
-    Positive values indicate discounts (+28.0 = 28% below average / 28% OFF).
-    Negative values indicate expensive flights (-49.0 = 49% above average).
-    """
-    if baseline_min is not None and baseline_max is not None and (baseline_min + baseline_max) > 0:
-        baseline = (baseline_min + baseline_max) / 2.0
-    elif baseline_min is not None and baseline_min > 0:
-        baseline = baseline_min
-    elif baseline_max is not None and baseline_max > 0:
-        baseline = baseline_max
-    else:
+    """Percent below Google's typical price (positive = cheaper than usual)."""
+    baseline = baseline_price(baseline_min, baseline_max)
+    if not baseline:
         return 0.0
+    return round((baseline - current_price) / baseline * 100.0, 1)
 
-    discount = ((baseline - current_price) / baseline) * 100.0
-    return round(discount, 1)
 
-def _filter_and_cap_deals(all_deals: List[Dict[str, Any]], max_results: int, allow_same_country: bool = False) -> List[Dict[str, Any]]:
-    seen_destinations = set()
-    unique_deals = []
-    for deal in all_deals:
-        dst = deal["destination_code"]
-        if dst in seen_destinations:
-            continue
-        seen_destinations.add(dst)
-        unique_deals.append(deal)
+def _skip_destination(origin: str, origin_country: Optional[str], airport: dict, region: str) -> bool:
+    if airport["code"] == origin:
+        return True
+    if region == "islands" or not origin_country:
+        return False
+    origin_c = origin_country.lower()
+    dest_c = airport.get("country", "").lower()
+    return origin_c == dest_c or (origin_c == "greece" and dest_c == "cyprus")
 
-    if allow_same_country:
-        return unique_deals[:max_results]
 
-    country_counts: Dict[str, int] = {}
-    capped_deals: List[Dict[str, Any]] = []
-    for deal in unique_deals:
-        c = deal["country"]
-        if c:
-            current_count = country_counts.get(c, 0)
-            if current_count >= 2:
-                continue
-            country_counts[c] = current_count + 1
-        capped_deals.append(deal)
-
-    return capped_deals[:max_results]
-
-async def run_explore_query(
+async def find_deals(
+    provider: AbstractFlightProvider,
     origin: str,
     region: str,
-    departure_date: str,
+    start_date: str,
+    end_date: Optional[str] = None,
     max_budget: Optional[float] = None,
-    sort_by: str = "discount",
-    max_results: int = 10,
-    status_callback: Optional[Any] = None
-) -> Dict[str, Any] | List[Dict[str, Any]]:
-    """Query primary country airports in a region and score deal opportunities."""
-    airports = get_region_airports(region)
+    on_progress: Optional[ProgressCallback] = None,
+) -> list[Deal]:
+    """Query every airport in a region for every date in the window."""
+    origin = origin.upper()
+    region = region.lower().strip()
+    origin_country = get_airport_country(origin)
+    airports = [a for a in get_region_airports(region) if not _skip_destination(origin, origin_country, a, region)]
     if not airports:
-        logger.warning(f"[EXPLORE] No airports registered for region: '{region}'")
-        return {} if sort_by == "both" else []
+        logger.warning("[EXPLORE] No airports to query for region '%s'", region)
+        return []
+
+    dates = generate_date_sequence(start_date, end_date) if end_date else [start_date]
+    total = len(airports) * len(dates)
+    logger.info("[EXPLORE] %s -> %s: %d airports x %d days = %d queries", origin, region, len(airports), len(dates), total)
 
     t_start = time.perf_counter()
-    logger.info(f"[EXPLORE] 🔍 Starting /explore query: origin={origin}, region={region}, date={departure_date}, max_budget={max_budget}, sort_by={sort_by}, max_results={max_results} ({len(airports)} airports registered)")
 
-    origin_country = get_airport_country(origin)
-    normalized_region = region.lower().strip()
-    provider = FastFlightsProvider()
+    async def report(done: int, total_queries: int, seconds_left: float) -> None:
+        if on_progress:
+            await on_progress(done, total_queries, seconds_left, len(airports), len(dates))
 
-    from utils.date_parser import parse_date_or_range, generate_date_sequence
-    import math
-    start_date, end_date = parse_date_or_range(departure_date)
-    dates = generate_date_sequence(start_date, end_date) if end_date else [departure_date]
-    num_days = len(dates)
-    num_airports = len(airports)
-    total_queries = num_airports * num_days
-    from providers.fast_flights import get_average_query_latency
-    initial_sec_per_query = get_average_query_latency()
-    est_seconds = (total_queries / 3) * initial_sec_per_query
+    progress = Progress(total, report, provider.average_latency() / provider.concurrency)
+    await progress.start()
 
-    completed_queries = 0
-    last_callback_time = 0.0
-
-    async def on_single_query_done() -> None:
-        nonlocal completed_queries, last_callback_time
-        completed_queries += 1
-        now = time.perf_counter()
-
-        if status_callback and (now - last_callback_time >= 3.0 or completed_queries == total_queries):
-            last_callback_time = now
-            elapsed = max(0.1, now - t_start)
-            measured_sec_per_query = elapsed / completed_queries
-            remaining_queries = max(0, total_queries - completed_queries)
-            dynamic_est_seconds = remaining_queries * measured_sec_per_query
-
-            try:
-                await status_callback(dynamic_est_seconds, total_queries, num_airports, num_days)
-            except Exception as e:
-                logger.warning(f"[EXPLORE] Dynamic status_callback error: {e}")
-
-    if status_callback:
+    async def fetch(code: str, departure_date: str) -> list:
         try:
-            await status_callback(est_seconds, total_queries, num_airports, num_days)
-        except Exception as e:
-            logger.warning(f"[EXPLORE] Initial status_callback error: {e}")
-
-    async def fetch_airport_deals(target_airport: Dict[str, str]) -> List[Dict[str, Any]]:
-        dst_code = target_airport["code"]
-        dst_name = target_airport.get("name", dst_code)
-        country = target_airport.get("country", "")
-
-        if dst_code.upper() == origin.upper():
+            return await provider.search_flights(origin, code, departure_date)
+        except Exception:
+            logger.exception("[EXPLORE] Query failed: %s -> %s on %s", origin, code, departure_date)
             return []
 
-        if normalized_region != "islands" and origin_country:
-            o_c = origin_country.strip().lower()
-            d_c = country.strip().lower()
-            if o_c == d_c:
-                return []
-            if o_c == "greece" and d_c == "cyprus":
-                return []
+    async def query(airport: dict, departure_date: str) -> list[Deal]:
+        offers = await progress.track(fetch(airport["code"], departure_date))
+        deals = []
+        for offer in offers:
+            if max_budget and offer.price > max_budget:
+                continue
+            deals.append(Deal(
+                origin=origin,
+                destination=airport["code"],
+                destination_name=airport.get("name", airport["code"]),
+                country=airport.get("country", ""),
+                departure_date=offer.departure_date,
+                price=offer.price,
+                airline=offer.airline or "Various",
+                is_direct=offer.is_direct,
+                baseline_price=baseline_price(offer.typical_min, offer.typical_max),
+                discount_pct=calculate_discount_score(offer.price, offer.typical_min, offer.typical_max),
+            ))
+        return deals
 
-        try:
-            if end_date:
-                offers = await provider.search_flights_range(
-                    origin, dst_code, start_date, end_date, currency="EUR", on_query_complete=on_single_query_done
-                )
-            else:
-                try:
-                    offers = await provider.search_flights(origin, dst_code, departure_date, currency="EUR")
-                finally:
-                    await on_single_query_done()
-
-            if not offers:
-                logger.debug(f"[EXPLORE] {origin} -> {dst_code}: 0 flight offers returned")
-                return []
-
-            results = []
-            for offer in offers:
-                price = getattr(offer, "price", None)
-                if price is None or (max_budget is not None and max_budget > 0 and price > max_budget):
-                    continue
-
-                airline = getattr(offer, "airline", "Unknown")
-                typ_min = getattr(offer, "typical_min", None)
-                typ_max = getattr(offer, "typical_max", None)
-                discount_pct = calculate_discount_score(price, typ_min, typ_max)
-
-                baseline_price = ((typ_min + typ_max) / 2.0) if (typ_min and typ_max) else None
-                offer_dep_date = getattr(offer, "departure_date", departure_date)
-
-                results.append({
-                    "origin_code": origin,
-                    "destination_code": dst_code,
-                    "destination_name": dst_name,
-                    "country": country,
-                    "departure_date": offer_dep_date,
-                    "price": price,
-                    "airline": airline,
-                    "baseline_price": baseline_price,
-                    "discount_pct": discount_pct,
-                    "is_direct": getattr(offer, "is_direct", True)
-                })
-            if results:
-                logger.info(f"[EXPLORE] ✅ {origin} -> {dst_code} ({country}): found {len(results)} flight offers within criteria (lowest €{results[0]['price']:.2f}).")
-            else:
-                logger.info(f"[EXPLORE] ℹ️ {origin} -> {dst_code} ({country}): 0 flight offers matching criteria.")
-            return results
-        except Exception as e:
-            logger.error(f"[EXPLORE_ERR] Failed to query {origin} -> {dst_code}: {e}")
-            return []
-
-    # Parallel query execution across airports
-    raw_results_nested = await asyncio.gather(*[fetch_airport_deals(a) for a in airports])
-    all_deals = [deal for sublist in raw_results_nested for deal in sublist]
-
-    elapsed_s = time.perf_counter() - t_start
-
-    if not all_deals:
-        logger.warning(f"[EXPLORE] Completed explore query in {elapsed_s:.2f}s: 0 matching deals found across {len(airports)} airports.")
-        return {} if sort_by == "both" else []
-
-    logger.info(f"[EXPLORE] Completed query in {elapsed_s:.2f}s: Found {len(all_deals)} total candidate deals across {len(airports)} airports.")
-
-    allow_same_country = (normalized_region == "islands")
-
-    # Sorting and capping
-    if sort_by == "both":
-        deals_discount = list(all_deals)
-        deals_discount.sort(key=lambda x: (-x["discount_pct"], x["price"]))
-        capped_discount = _filter_and_cap_deals(deals_discount, max_results, allow_same_country=allow_same_country)
-
-        deals_price = list(all_deals)
-        deals_price.sort(key=lambda x: x["price"])
-        capped_price = _filter_and_cap_deals(deals_price, max_results, allow_same_country=allow_same_country)
-
-        logger.info(f"[EXPLORE] Capped deals: {len(capped_discount)} discount deals, {len(capped_price)} cheapest deals.")
-        return {
-            "discount_deals": capped_discount,
-            "cheapest_deals": capped_price
-        }
-
-    if sort_by == "price":
-        all_deals.sort(key=lambda x: x["price"])
-    else:
-        all_deals.sort(key=lambda x: (-x["discount_pct"], x["price"]))
-
-    final_deals = _filter_and_cap_deals(all_deals, max_results, allow_same_country=allow_same_country)
-    logger.info(f"[EXPLORE] Final output: {len(final_deals)} deals selected for user display.")
-    return final_deals
-
-def build_timeframe_date_range(timeframe_days: int) -> str:
-    """Calculates ISO date range string start_date..end_date from tomorrow to timeframe_days ahead."""
-    from datetime import datetime, timedelta, timezone
-    today = datetime.now(timezone.utc).date()
-    start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
-    end_date = (today + timedelta(days=timeframe_days)).strftime("%Y-%m-%d")
-    return f"{start_date}..{end_date}"
-
-def format_explore_deal_item(d: Dict[str, Any], idx: int, show_percentage: bool = True) -> str:
-    """Formats a single explore/digest deal entry with Markdown hyperlink to Google Flights."""
-    from providers.fast_flights import build_google_flights_url
-
-    disc_pct = d.get("discount_pct", 0.0)
-    base_price = d.get("baseline_price")
-    if show_percentage and base_price and disc_pct > 15:
-        disc_text = f" (💥 **{disc_pct:.0f}% OFF!** | Avg: ~€{base_price:.2f})"
-    elif base_price:
-        disc_text = f" (Avg: ~€{base_price:.2f})"
-    elif show_percentage and disc_pct > 15:
-        disc_text = f" (💥 **{disc_pct:.0f}% OFF!**)"
-    else:
-        disc_text = ""
-
-    flights_url = build_google_flights_url(d["origin_code"], d["destination_code"], d["departure_date"])
-    price_str = f"[€{d['price']:.2f}]({flights_url})"
-    stops_text = "🟢 Direct" if d.get("is_direct", True) else "🟡 Connecting"
-    return (
-        f"{idx}. **{d['origin_code']} ✈️ {d['destination_code']} ({d['destination_name']})**\n"
-        f"💶 **{price_str}**{disc_text} | {stops_text} | 📅 {d['departure_date']} ({d['airline']})\n"
-    )
-
-def render_explore_report_text(
-    origin: str,
-    region: str,
-    deals: Dict[str, Any] | List[Dict[str, Any]],
-    title_prefix: Optional[str] = None
-) -> str:
-    """Renders the full Markdown text report for an explore or digest result."""
-    reg_disp = region.upper().replace("_", " ")
-    title = title_prefix or f"🌟 **Top Flight Deals for {origin} → {reg_disp}**"
-
-    has_deals = False
-    if isinstance(deals, dict):
-        has_deals = bool(deals.get("discount_deals") or deals.get("cheapest_deals"))
-    elif isinstance(deals, list):
-        has_deals = bool(deals)
-
-    if not has_deals:
-        return f"ℹ️ **No flight deals found for {origin} → {reg_disp}** matching criteria."
-
-    msg_lines = [f"{title}\n"]
-
-    if isinstance(deals, dict):
-        discount_deals = deals.get("discount_deals", [])
-        cheapest_deals = deals.get("cheapest_deals", [])
-
-        idx_cnt = 1
-        if discount_deals:
-            msg_lines.append("💥 **TOP DISCOUNTED DEALS (% OFF)**")
-            for d in discount_deals:
-                msg_lines.append(format_explore_deal_item(d, idx_cnt, show_percentage=True))
-                idx_cnt += 1
-
-        if cheapest_deals:
-            msg_lines.append("\n💶 **CHEAPEST OVERALL FLIGHTS (€)**")
-            for d in cheapest_deals:
-                msg_lines.append(format_explore_deal_item(d, idx_cnt, show_percentage=False))
-                idx_cnt += 1
-    else:
-        for idx, d in enumerate(deals, start=1):
-            msg_lines.append(format_explore_deal_item(d, idx, show_percentage=False))
-
-    return "\n".join(msg_lines)
+    results = await asyncio.gather(*(query(a, d) for a in airports for d in dates))
+    deals = [deal for batch in results for deal in batch]
+    logger.info("[EXPLORE] %s -> %s finished in %.1fs: %d candidate deals",
+                origin, region, time.perf_counter() - t_start, len(deals))
+    return deals
 
 
+def _one_per_destination(deals: list[Deal], limit: int, cap_per_country: bool) -> list[Deal]:
+    seen: set[str] = set()
+    per_country: dict[str, int] = {}
+    picked = []
+    for deal in deals:
+        if deal.destination in seen:
+            continue
+        if cap_per_country and deal.country and per_country.get(deal.country, 0) >= MAX_PER_COUNTRY:
+            continue
+        seen.add(deal.destination)
+        per_country[deal.country] = per_country.get(deal.country, 0) + 1
+        picked.append(deal)
+        if len(picked) == limit:
+            break
+    return picked
+
+
+def rank_deals(deals: list[Deal], sort_mode: str, limit: int, region: str) -> list[DealSection]:
+    """Best deal per destination, at most two per country (except Greek islands)."""
+    cap_per_country = region.lower() != "islands"
+    modes = ["discount", "price"] if sort_mode == "both" else [sort_mode]
+    sections = []
+    for mode in modes:
+        if mode == "price":
+            ordered = sorted(deals, key=lambda d: d.price)
+        else:
+            ordered = sorted(deals, key=lambda d: (-d.discount_pct, d.price))
+        picked = _one_per_destination(ordered, limit, cap_per_country)
+        if picked:
+            sections.append(DealSection(mode, picked))
+    return sections

@@ -162,18 +162,6 @@ def get_region_airports(region_name: str) -> list[dict[str, str]]:
     normalized = region_name.lower().strip()
     return GLOBAL_REGIONS_AIRPORTS.get(normalized, [])
 
-def get_airport_country(airport_code: str) -> Optional[str]:
-    """Return the country name for a given airport IATA code."""
-    code_upper = airport_code.strip().upper()
-    for item in AIRPORT_DATA:
-        if item[0] == code_upper:
-            return item[2]
-    for region_airports in GLOBAL_REGIONS_AIRPORTS.values():
-        for airport in region_airports:
-            if airport["code"] == code_upper:
-                return airport.get("country")
-    return None
-
 # Mapping multi-airport city codes to constituent airport codes for complete LCC coverage
 MULTI_AIRPORT_CITIES = {
     # EUROPE
@@ -328,3 +316,63 @@ AIRPORT_DATA = [
     ("CPT", "Cape Town International", "South Africa"),
     ("TUN", "Tunis Carthage", "Tunisia")
 ]
+
+REGION_LABELS = {
+    "europe": "🇪🇺 Europe",
+    "islands": "🏝️ Greek Islands",
+    "middle_east": "🕌 Middle East",
+    "asia": "⛩️ Asia",
+    "africa": "🌍 Africa",
+    "oceania": "🦘 Oceania",
+    "latin_america": "💃 Latin America",
+    "north_america": "🗽 North America",
+}
+
+
+def region_display_name(region: str) -> str:
+    return region.replace("_", " ").title()
+
+# City codes that search every airport in the city (see MULTI_AIRPORT_CITIES).
+CITY_AIRPORTS = [
+    ("NYC", "New York All Airports", "United States"),
+    ("PAR", "Paris All Airports", "France"),
+    ("ROM", "Rome All Airports", "Italy"),
+    ("MIL", "Milan All Airports", "Italy"),
+    ("STO", "Stockholm All Airports", "Sweden"),
+    ("WAS", "Washington All Airports", "United States"),
+    ("CHI", "Chicago All Airports", "United States"),
+    ("YTO", "Toronto All Airports", "Canada"),
+    ("SAO", "Sao Paulo All Airports", "Brazil"),
+    ("RIO", "Rio de Janeiro All Airports", "Brazil"),
+    ("BUE", "Buenos Aires All Airports", "Argentina"),
+    ("TYO", "Tokyo All Airports", "Japan"),
+    ("OSA", "Osaka All Airports", "Japan"),
+    ("SEL", "Seoul All Airports", "South Korea"),
+    ("BJS", "Beijing All Airports", "China"),
+]
+
+
+def _all_airports() -> list[tuple[str, str, str]]:
+    """Every known airport once: the main list, city codes, then airports only listed in regions."""
+    airports = AIRPORT_DATA + CITY_AIRPORTS
+    seen = {code for code, _, _ in airports}
+    for region_airports in GLOBAL_REGIONS_AIRPORTS.values():
+        for airport in region_airports:
+            if airport["code"] not in seen:
+                seen.add(airport["code"])
+                airports.append((airport["code"], airport["name"], airport["country"]))
+    return airports
+
+
+ALL_AIRPORTS = _all_airports()
+_BY_CODE = {code: (name, country) for code, name, country in ALL_AIRPORTS}
+
+
+def get_airport_country(airport_code: str) -> Optional[str]:
+    entry = _BY_CODE.get(airport_code.strip().upper())
+    return entry[1] if entry else None
+
+
+def airport_name(code: str) -> Optional[str]:
+    entry = _BY_CODE.get(code.strip().upper())
+    return entry[0] if entry else None

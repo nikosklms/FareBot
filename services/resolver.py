@@ -1,52 +1,82 @@
-from typing import List, Tuple, Optional
-from rapidfuzz import process, fuzz
-from services.airports_data import AIRPORT_DATA
+"""Turns what a user types ('athens', 'la', 'lossangeles', 'ATH') into likely airports."""
+import unicodedata
+from typing import Optional
+
+from rapidfuzz import fuzz, process
+
+from services.airports_data import ALL_AIRPORTS, MULTI_AIRPORT_CITIES
+
+# Common short names that no airport name starts with.
+ALIASES = {
+    "la": "LAX", "ny": "NYC", "nyc": "NYC", "sf": "SFO", "dc": "WAS", "hk": "HKG",
+    "athina": "ATH", "saloniki": "SKG", "salonica": "SKG", "kriti": "HER", "crete": "HER",
+}
+
+# Scores by how the text matched; fuzzy guesses are scaled below every direct match.
+EXACT_CODE, ALIAS, NAME_START, WORD_START, UNLISTED_CODE, COUNTRY = 100, 99, 96, 92, 90, 85
+FUZZY_WEIGHT = 0.9
+CITY_BONUS = 1  # 'London All Airports' before 'London Heathrow'
+
+Match = tuple[str, str, str, float]
+
+
+def normalize(text: str) -> str:
+    """Lowercase, no accents or punctuation: 'Václav-Havel  Prague' -> 'vaclav havel prague'."""
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return " ".join("".join(c if c.isalnum() else " " for c in ascii_text.lower()).split())
+
 
 class LocationResolver:
-    def __init__(self, data: Optional[List[Tuple[str, str, str]]] = None):
-        self.data = data or AIRPORT_DATA
-        self.search_strings = [
-            f"{iata} {name} {country}" for iata, name, country in self.data
-        ]
+    def __init__(self, data: Optional[list[tuple[str, str, str]]] = None):
+        self.data = data or ALL_AIRPORTS
+        self._codes = {code for code, _, _ in self.data}
+        self._names = [normalize(name) for _, name, _ in self.data]
+        self._countries = [normalize(country) for _, _, country in self.data]
+        self._search_text = [f"{name} {country}" for name, country in zip(self._names, self._countries)]
 
-    def resolve(self, query: str, limit: int = 5) -> List[Tuple[str, str, str, float]]:
+    def resolve(self, query: str, limit: int = 5) -> list[Match]:
+        """Best guesses for a typed place, best first. Always returns guesses for non-empty input.
+
+        An exact airport code returns only that airport. A 3-letter code that isn't in the
+        list is offered after name matches, since Google Flights knows far more airports than we do.
         """
-        Fuzzy search for airport or city name.
-        Returns a list of tuples: (IATA, Name, Country, Score)
-        """
-        query_clean = query.strip().upper()
-        query_lower = query.strip().lower()
+        text = normalize(query)
+        if not text:
+            return []
+        code = text.replace(" ", "").upper()
+        if code in self._codes:
+            index = next(i for i, (c, _, _) in enumerate(self.data) if c == code)
+            return [self._match(index, EXACT_CODE)]
 
-        # 1. Direct exact match on IATA code first
-        for iata, name, country in self.data:
-            if iata == query_clean:
-                return [(iata, name, country, 100.0)]
+        scores: dict[int, float] = {}
+        for index, (airport_code, _, _) in enumerate(self.data):
+            score = self._direct_score(text, index, airport_code)
+            if score:
+                scores[index] = score
+        for _, fuzzy_score, index in process.extract(text, self._search_text, scorer=fuzz.WRatio, limit=limit * 2):
+            scores[index] = max(scores.get(index, 0), fuzzy_score * FUZZY_WEIGHT)
 
-        # 2. Substring match on airport/city name or country
-        direct_matches = []
-        for iata, name, country in self.data:
-            name_lower = name.lower()
-            if query_lower in name_lower or name_lower in query_lower:
-                direct_matches.append((iata, name, country, 95.0))
+        ranked = sorted(scores, key=lambda i: (-scores[i], i))
+        matches = [self._match(i, scores[i]) for i in ranked]
+        if len(code) == 3 and code.isalpha():
+            unlisted = (code, f"Airport {code}", "code not in my list", float(UNLISTED_CODE))
+            position = sum(1 for m in matches if m[3] > UNLISTED_CODE)
+            matches.insert(position, unlisted)
+        return matches[:limit]
 
-        if direct_matches:
-            return direct_matches[:limit]
+    def _direct_score(self, text: str, index: int, airport_code: str) -> float:
+        bonus = CITY_BONUS if airport_code in MULTI_AIRPORT_CITIES else 0
+        name = self._names[index]
+        if ALIASES.get(text) == airport_code:
+            return ALIAS
+        if name.startswith(text) or name.replace(" ", "").startswith(text.replace(" ", "")):
+            return NAME_START + bonus
+        if any(word.startswith(text) for word in name.split()):
+            return WORD_START + bonus
+        if any(word.startswith(text) for word in self._countries[index].split()):
+            return COUNTRY + bonus
+        return 0
 
-        # 3. Fuzzy matching against database for typos/misspellings
-        results = process.extract(
-            query,
-            self.search_strings,
-            scorer=fuzz.WRatio,
-            limit=limit
-        )
-
-        matches = []
-        for match_str, score, index in results:
-            iata, name, country = self.data[index]
-            matches.append((iata, name, country, float(score)))
-
-        # 4. Fallback: If user entered an exact 3-letter IATA code not in static list
-        if not matches and len(query_clean) == 3 and query_clean.isalpha():
-            matches.append((query_clean, f"Airport ({query_clean})", "International", 100.0))
-
-        return matches
+    def _match(self, index: int, score: float) -> Match:
+        code, name, country = self.data[index]
+        return code, name, country, round(score, 1)

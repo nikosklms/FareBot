@@ -1,151 +1,141 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-from config import DB_PATH
-from database.db import DatabaseManager
-from daemon import schedule_tracker_job, unschedule_tracker_job
-from bot.handlers.auth import restricted
+"""/mytracks: list, pause, resume, delete and edit the budget of trackers and digests.
 
-db_manager = DatabaseManager(DB_PATH)
+Callback data: 'dash:<action>:<kind>:<id>' with kind 't' (tracker) or 'd' (digest).
+"""
+from typing import Optional, Union
 
-@restricted
+from telegram import InlineKeyboardMarkup, Update
+from telegram.ext import CallbackQueryHandler, ContextTypes
+
+from bot.formatting import budget_text, digest_card, eur, tracker_card
+from bot.keyboards import button
+from bot.services import Services, get_services
+from bot.wizard import PENDING_BUDGET_KEY
+from daemon.scheduler import schedule_digest, schedule_tracker, unschedule_digest, unschedule_tracker
+from database.models import ACTIVE, PAUSED, Digest, Tracker
+
+TRACKER, DIGEST = "t", "d"
+Item = Union[Tracker, Digest]
+
+
+def item_buttons(kind: str, item: Item) -> InlineKeyboardMarkup:
+    row = []
+    if item.status == ACTIVE:
+        row.append(button("⏸ Pause", f"dash:pause:{kind}:{item.id}"))
+    elif item.status == PAUSED:
+        row.append(button("▶️ Resume", f"dash:resume:{kind}:{item.id}"))
+    row.append(button("✏️ Budget", f"dash:budget:{kind}:{item.id}"))
+    row.append(button("🗑️ Delete", f"dash:del:{kind}:{item.id}"))
+    return InlineKeyboardMarkup([row])
+
+
 async def mytracks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db = get_services(context).db
     user_id = update.effective_user.id
-    trackers = await db_manager.get_user_trackers(user_id)
-
-    if not trackers:
-        await update.message.reply_text("📋 You have no active or saved flight trackers. Create one using `/newtrack`!", parse_mode="Markdown")
+    trackers = await db.list_trackers(user_id)
+    digests = await db.list_digests(user_id)
+    if not trackers and not digests:
+        await update.message.reply_text("📋 You have no trackers or digests yet. Start one with /track or /digest.")
         return
+    for tracker in trackers:
+        await update.message.reply_text(tracker_card(tracker), reply_markup=item_buttons(TRACKER, tracker))
+    for digest in digests:
+        await update.message.reply_text(digest_card(digest), reply_markup=item_buttons(DIGEST, digest))
 
-    for t in trackers:
-        status_icon = "🟢" if t["status"] == "ACTIVE" else "⏸️" if t["status"] == "PAUSED" else "🔴"
-        price_text = f"€{t['last_price_found']:.2f}" if t.get("last_price_found") else "Not checked yet"
-        flight_type_text = "Direct Flights Only ✈️" if t.get("direct_only") else "Any Flights 🔄"
 
-        is_digest = t.get("destination_code", "").startswith("REGION:")
-        region_name = t["destination_code"].replace("REGION:", "").replace("_", " ") if is_digest else ""
-        header_text = f"🗞️ **Weekly Digest #{t['id']}**" if is_digest else f"{status_icon} **Tracker #{t['id']}**"
-        route_text = f"{t['origin_code']} ✈️ {region_name}" if is_digest else f"{t['origin_code']} ✈️ {t['destination_code']}"
-        budget_disp = f"€{t['max_budget']:.2f}" if t.get("max_budget", 0) > 0 else "Any Budget"
+async def _load_owned(services: Services, kind: str, item_id: int, user_id: int) -> Optional[Item]:
+    item = await (services.db.get_tracker(item_id) if kind == TRACKER else services.db.get_digest(item_id))
+    return item if item and item.user_id == user_id else None
 
-        if is_digest:
-            sched_raw = t.get("departure_date", "")
-            if "|" in sched_raw:
-                parts = sched_raw.split("|")
-                tf_part = parts[0]
-                day_part = parts[-1]
-                days_ahead = tf_part.replace("d", "") if tf_part.endswith("d") else tf_part
-                freq_text = f"Every Week ({day_part}) — Horizon: {days_ahead} Days Ahead"
-            elif "@" in sched_raw:
-                freq_text = f"Every Week ({sched_raw})"
-            elif sched_raw and not sched_raw.startswith("202"):
-                freq_text = f"Every Week ({sched_raw})"
-            else:
-                freq_text = "Every Week (Sunday)"
 
-            text = (
-                f"{header_text}\n"
-                f"📍 **Route**: {route_text}\n"
-                f"📅 **Frequency**: {freq_text}\n"
-                f"🎯 **Target Budget**: {budget_disp}\n"
-                f"📊 **Status**: {t['status']}"
-            )
+def _label(kind: str, item_id: int) -> str:
+    return f"Tracker #{item_id}" if kind == TRACKER else f"Digest #{item_id}"
+
+
+async def _set_active(services: Services, context: ContextTypes.DEFAULT_TYPE, kind: str, item: Item, active: bool) -> None:
+    item.status = ACTIVE if active else PAUSED
+    if kind == TRACKER:
+        await services.db.set_tracker_status(item.id, item.status)
+        if active:
+            schedule_tracker(context.job_queue, item)
         else:
-            date_disp = f"{t['departure_date']} ➔ {t['departure_date_end']}" if t.get("departure_date_end") else t['departure_date']
-            text = (
-                f"{header_text}\n"
-                f"📍 **Route**: {route_text}\n"
-                f"📅 **Date**: {date_disp}\n"
-                f"⚙️ **Flight Type**: {flight_type_text}\n"
-                f"🎯 **Target Budget**: {budget_disp}\n"
-                f"📊 **Status**: {t['status']}\n"
-                f"💶 **Last Price**: {price_text}"
-            )
+            unschedule_tracker(context.job_queue, item.id)
+    else:
+        await services.db.set_digest_status(item.id, item.status)
+        if active:
+            schedule_digest(context.job_queue, item, services.timezone)
+        else:
+            unschedule_digest(context.job_queue, item.id)
 
-        buttons = []
-        if t["status"] == "ACTIVE":
-            buttons.append(InlineKeyboardButton("⏸ Pause", callback_data=f"dash_pause_{t['id']}"))
-        elif t["status"] == "PAUSED":
-            buttons.append(InlineKeyboardButton("▶️ Resume", callback_data=f"dash_resume_{t['id']}"))
 
-        buttons.append(InlineKeyboardButton("✏️ Edit Budget", callback_data=f"dash_editbudget_{t['id']}"))
-        buttons.append(InlineKeyboardButton("🗑️ Delete", callback_data=f"dash_del_{t['id']}"))
-
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([buttons]))
-
-@restricted
-async def dashboard_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def dashboard_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    _, action, kind, raw_id = query.data.split(":")
+    services = get_services(context)
+    item = await _load_owned(services, kind, int(raw_id), query.from_user.id)
+    if not item:
+        await query.answer("This item no longer exists.", show_alert=True)
+        return
     await query.answer()
-    data = query.data
-    user_id = update.effective_user.id
+    label = _label(kind, item.id)
 
-    if data.startswith("dash_pause_"):
-        tracker_id = int(data.split("_")[2])
-        t = await db_manager.get_tracker_by_id(tracker_id)
-        if not t or t.get("user_id") != user_id:
-            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
-            return
-        await db_manager.update_tracker_status(tracker_id, "PAUSED")
-        if context.job_queue:
-            unschedule_tracker_job(context.job_queue, tracker_id)
-        await query.message.edit_text(f"⏸ Tracker #{tracker_id} paused.")
-    elif data.startswith("dash_resume_"):
-        tracker_id = int(data.split("_")[2])
-        t = await db_manager.get_tracker_by_id(tracker_id)
-        if not t or t.get("user_id") != user_id:
-            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
-            return
-        await db_manager.update_tracker_status(tracker_id, "ACTIVE")
-        if context.job_queue:
-            if t.get("destination_code", "").startswith("REGION:"):
-                reg = t["destination_code"].replace("REGION:", "").lower()
-                sched_str = t.get("departure_date", "Sunday@15:00")
-                from daemon.scheduler import schedule_digest_job
-                schedule_digest_job(context.job_queue, tracker_id, user_id, t["origin_code"], reg, t.get("max_budget", 0.0), sched_str)
-            else:
-                freq = t.get("frequency_hours", 6) if t else 6
-                schedule_tracker_job(context.job_queue, tracker_id, freq)
-        await query.message.edit_text(f"▶️ Tracker #{tracker_id} resumed.")
-    elif data.startswith("dash_editbudget_"):
-        tracker_id = int(data.split("_")[2])
-        t = await db_manager.get_tracker_by_id(tracker_id)
-        if not t or t.get("user_id") != user_id:
-            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
-            return
-        context.user_data["edit_tracker_id"] = tracker_id
-        await query.message.reply_text(f"✏️ **Edit Target Budget for Tracker #{tracker_id}**\n\nSend new target budget in EUR (e.g., `45`):", parse_mode="Markdown")
-    elif data.startswith("dash_del_"):
-        tracker_id = int(data.split("_")[2])
-        t = await db_manager.get_tracker_by_id(tracker_id)
-        if not t or t.get("user_id") != user_id:
-            await query.message.reply_text("⛔ Unauthorized or tracker not found.")
-            return
-        await db_manager.delete_tracker(tracker_id)
-        if context.job_queue:
-            unschedule_tracker_job(context.job_queue, tracker_id)
-        await query.message.edit_text(f"🗑️ Tracker #{tracker_id} deleted.")
+    if action == "pause":
+        await _set_active(services, context, kind, item, active=False)
+        await query.edit_message_text(f"⏸ {label} paused.", reply_markup=item_buttons(kind, item))
+    elif action == "resume":
+        await _set_active(services, context, kind, item, active=True)
+        await query.edit_message_text(f"▶️ {label} resumed.", reply_markup=item_buttons(kind, item))
+    elif action == "del":
+        if kind == TRACKER:
+            await services.db.delete_tracker(item.id)
+            unschedule_tracker(context.job_queue, item.id)
+        else:
+            await services.db.delete_digest(item.id)
+            unschedule_digest(context.job_queue, item.id)
+        await query.edit_message_text(f"🗑️ {label} deleted.")
+    elif action == "budget":
+        context.user_data[PENDING_BUDGET_KEY] = (kind, item.id)
+        hint = " Send <code>0</code> for any budget." if kind == DIGEST else ""
+        await query.message.reply_text(
+            f"✏️ <b>New budget for {label}</b> (now {budget_text(item.max_budget)})\n\n"
+            f"Send the new maximum price in EUR, e.g. <code>45</code>.{hint}"
+        )
 
-@restricted
-async def handle_edit_budget_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if "edit_tracker_id" not in context.user_data:
+
+async def budget_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Text after tapping 'Budget'. Ignored when no budget edit is pending."""
+    pending = context.user_data.get(PENDING_BUDGET_KEY)
+    if not pending:
         return
-
-    tracker_id = context.user_data.pop("edit_tracker_id")
-    text = update.message.text.strip() if update.message and update.message.text else ""
-
+    kind, item_id = pending
     try:
-        new_budget = float(text)
-        if new_budget <= 0:
-            await update.message.reply_text("❌ Budget must be a positive number greater than 0.")
-            return
+        budget = float(update.message.text.strip().replace("€", ""))
     except ValueError:
-        await update.message.reply_text("❌ Invalid budget amount. Please send a valid number (e.g. `45`).", parse_mode="Markdown")
+        budget = -1
+    if budget < 0 or (budget == 0 and kind == TRACKER):
+        await update.message.reply_text("❌ That's not a valid budget. Send a number like <code>45</code>, or /cancel.")
+        return
+    context.user_data.pop(PENDING_BUDGET_KEY)
+
+    services = get_services(context)
+    item = await _load_owned(services, kind, item_id, update.effective_user.id)
+    if not item:
+        await update.message.reply_text("This item no longer exists.")
         return
 
-    await db_manager.update_budget(tracker_id, new_budget)
-    await update.message.reply_text(
-        f"✅ **Target Budget Updated!**\n\n"
-        f"Tracker #{tracker_id} target budget updated to **€{new_budget:.2f}**.",
-        parse_mode="Markdown"
-    )
+    label = _label(kind, item_id)
+    if kind == DIGEST:
+        await services.db.set_digest_budget(item_id, budget or None)
+        await update.message.reply_text(f"✅ {label} budget set to <b>{budget_text(budget)}</b>.")
+        return
 
+    await services.db.set_tracker_budget(item_id, budget)
+    item.max_budget = budget
+    note = ""
+    if item.status == PAUSED:
+        await _set_active(services, context, kind, item, active=True)
+        note = " It was paused, so I've resumed it."
+    await update.message.reply_text(f"✅ {label} budget set to <b>{eur(budget)}</b>.{note}")
+
+
+dashboard_handler = CallbackQueryHandler(dashboard_pressed, pattern=r"^dash:(pause|resume|del|budget):[td]:\d+$")
