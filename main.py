@@ -1,8 +1,6 @@
 import fcntl
 import logging
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import IO, Optional
 
 from telegram import LinkPreviewOptions
@@ -13,7 +11,7 @@ from telegram.request import BaseRequest
 from bot.handlers import BOT_COMMANDS, register_handlers
 from bot.lifecycle import install_stop_signals
 from bot.services import SERVICES_KEY, Services
-from config import BASE_DIR, DB_PATH, HEALTH_CHECK_PORT, TELEGRAM_BOT_TOKEN, check_config, get_timezone
+from config import BASE_DIR, DB_PATH, TELEGRAM_BOT_TOKEN, check_config, get_timezone
 from daemon.scheduler import register_jobs
 from database.db import Database
 from providers.fast_flights import FastFlightsProvider
@@ -23,27 +21,6 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-
-
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-    def log_message(self, format: str, *args: object) -> None:
-        pass
-
-
-def start_health_check_server(port: int) -> None:
-    """Plain HTTP 200 endpoint for hosts like Render that need an open port."""
-    try:
-        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    except OSError as e:
-        logger.warning("Could not start health check server on port %d: %s", port, e)
-        return
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    logger.info("Health check server listening on port %d", port)
 
 
 def acquire_instance_lock() -> IO[str]:
@@ -84,7 +61,6 @@ def build_application(services: Services, token: str = TELEGRAM_BOT_TOKEN,
 def main() -> None:
     lock = acquire_instance_lock()  # noqa: F841 - held open for the life of the process
     check_config()
-    start_health_check_server(HEALTH_CHECK_PORT)
     services = Services(
         db=Database(DB_PATH),
         provider=FastFlightsProvider(),

@@ -13,8 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-DB_PATH = os.getenv("FAREST_DB_PATH", str(BASE_DIR / "farebot.db"))
-HEALTH_CHECK_PORT = int(os.getenv("PORT", "10000"))
+DB_PATH = os.getenv("FAREBOT_DB_PATH", str(BASE_DIR / "farebot.db"))
 LOGS_DIR = BASE_DIR / "logs"
 
 MIN_POLL_INTERVAL_HOURS = 6
