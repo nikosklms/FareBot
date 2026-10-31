@@ -197,16 +197,17 @@ class Database:
 
     async def find_tracker(
         self, user_id: int, origin_code: str, destination_code: str, departure_date: str,
-        departure_date_end: Optional[str] = None, direct_only: bool = False,
+        departure_date_end: Optional[str] = None, direct_only: bool = False, other_than: Optional[int] = None,
     ) -> Optional[Tracker]:
-        """An existing active or paused tracker for the same route, dates and flight type."""
+        """An existing active or paused tracker for the same route, dates and flight type
+        (other than tracker other_than, when checking an edit)."""
         async with self._connect() as db:
             async with db.execute(
                 "SELECT * FROM trackers WHERE user_id = ? AND origin_code = ? AND destination_code = ?"
                 " AND departure_date = ? AND departure_date_end IS ? AND direct_only = ?"
-                " AND status IN (?, ?) LIMIT 1",
+                " AND status IN (?, ?) AND id IS NOT ? LIMIT 1",
                 (user_id, origin_code, destination_code, departure_date, departure_date_end, int(direct_only),
-                 ACTIVE, PAUSED),
+                 ACTIVE, PAUSED, other_than),
             ) as cur:
                 row = await cur.fetchone()
         return _tracker(row) if row else None

@@ -162,7 +162,9 @@ class BotHarness:
         kind = "edited_message" if edited else "message"
         await self.app.process_update(Update.de_json({"update_id": next(self._ids), kind: message}, self.app.bot))
 
-    async def press(self, data: str, user_id: int = USER_ID, message_id: int = 1) -> None:
+    async def press(self, data: str, user_id: int = USER_ID, message_id: Optional[int] = None) -> None:
+        """Press a button; by default on the bot's latest message, as a user would."""
+        message_id = message_id or self.telegram.last_message_id or 1
         query = {
             "id": str(next(self._ids)),
             "chat_instance": "chat",

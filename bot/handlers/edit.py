@@ -5,10 +5,11 @@ several things can be changed in one go. 'dash:budget:<kind>:<id>' (the price al
 'Set Lower Budget' button) goes straight to the budget. Route and region are not
 editable: a different route is a different tracker.
 """
+from functools import wraps
 from typing import Any, Optional
 
-from telegram import Update
-from telegram.ext import CallbackQueryHandler, ConversationHandler, MessageHandler
+from telegram import Message, Update
+from telegram.ext import BaseHandler, CallbackQueryHandler, ConversationHandler, MessageHandler
 
 from bot.formatting import budget_text, digest_card, digest_window_text, eur, flight_type_label, tracker_card
 from bot.handlers.dashboard import (
@@ -38,9 +39,39 @@ FIELDS = {
 }
 
 
+OUT_OF_DATE = "This editor is out of date. Open it again from /mytracks."
+
+
 async def _item(update: Update, context: Context) -> Optional[Item]:
     d = draft(context, DRAFT)
     return await load_owned(get_services(context), d["kind"], d["id"], update.effective_user.id)
+
+
+async def _show(update: Update, context: Context, text: str, reply_markup=None) -> None:
+    """Show an editor message and remember it: only its buttons act on the item being edited."""
+    _remember(context, await respond(update, text, reply_markup))
+
+
+def _remember(context: Context, message: Message) -> None:
+    draft(context, DRAFT)["message_id"] = message.message_id
+
+
+def _current_message_only(handler: BaseHandler) -> BaseHandler:
+    """Buttons on an older editor message (or another item's) would act on whatever is being
+    edited now, so they're refused."""
+    if isinstance(handler, CallbackQueryHandler):
+        inner = handler.callback
+
+        @wraps(inner)
+        async def guarded(update: Update, context: Context) -> Optional[int]:
+            query = update.callback_query
+            if query.message.message_id != draft(context, DRAFT).get("message_id"):
+                await query.answer(OUT_OF_DATE, show_alert=True)
+                return None
+            return await inner(update, context)
+
+        handler.callback = guarded
+    return handler
 
 
 def _card(kind: str, item: Item) -> str:
@@ -60,7 +91,7 @@ async def _open(update: Update, context: Context) -> Optional[Item]:
         return None
     await query.answer()
     d = start_draft(context, DRAFT)
-    d["kind"], d["id"] = kind, item.id
+    d["kind"], d["id"], d["message_id"] = kind, item.id, query.message.message_id
     return item
 
 
@@ -75,8 +106,9 @@ async def open_budget(update: Update, context: Context) -> int:
     item = await _open(update, context)
     if not item:
         return ConversationHandler.END
-    await update.callback_query.message.reply_text(_budget_prompt(draft(context, DRAFT)["kind"], item),
-                                                   reply_markup=_budget_markup(draft(context, DRAFT)["kind"]))
+    kind = draft(context, DRAFT)["kind"]
+    _remember(context, await update.callback_query.message.reply_text(_budget_prompt(kind, item),
+                                                                      reply_markup=_budget_markup(kind)))
     return BUDGET
 
 
@@ -87,8 +119,8 @@ async def show_menu(update: Update, context: Context, note: str = "") -> int:
         return ConversationHandler.END
     kind = draft(context, DRAFT)["kind"]
     fields = [button(label, f"edit:field:{key}") for key, label in FIELDS[kind]]
-    await respond(update, f"{note}✏️ <b>Editing</b>\n\n{_card(kind, item)}\n\nWhat do you want to change?",
-                  markup(*pairs(fields), [button("✅ Done", "edit:done")], cancel=False))
+    await _show(update, context, f"{note}✏️ <b>Editing</b>\n\n{_card(kind, item)}\n\nWhat do you want to change?",
+                markup(*pairs(fields), [button("✅ Done", "edit:done")], cancel=False))
     return MENU
 
 
@@ -108,6 +140,11 @@ async def done(update: Update, context: Context) -> int:
 
 
 async def field_picked(update: Update, context: Context, field: str) -> int:
+    if not await _item(update, context):
+        await respond(update, "This item no longer exists.")
+        return ConversationHandler.END
+    if field not in dict(FIELDS[draft(context, DRAFT)["kind"]]):
+        return MENU  # a digest field on a tracker, or the other way round
     return await ASKS[field](update, context)
 
 
@@ -121,6 +158,14 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
     kind = draft(context, DRAFT)["kind"]
     notes = []
 
+    if kind == TRACKER and {"departure_date", "direct_only"} & set(changes):
+        new = {**vars(item), **changes}
+        twin = await services.db.find_tracker(item.user_id, item.origin_code, item.destination_code,
+                                              new["departure_date"], new["departure_date_end"], new["direct_only"],
+                                              other_than=item.id)
+        if twin:
+            return await show_menu(update, context, note=f"ℹ️ Tracker #{twin.id} already watches exactly that, "
+                                                         "so I haven't changed this one.\n\n")
     if kind == TRACKER:
         item = await services.db.update_tracker(item.id, **changes)
         if "max_budget" in changes and item.last_price_found and item.last_price_found < item.max_budget:
@@ -165,7 +210,7 @@ def _budget_markup(kind: str):
 
 async def ask_budget(update: Update, context: Context) -> int:
     kind = draft(context, DRAFT)["kind"]
-    await respond(update, _budget_prompt(kind, await _item(update, context)), _budget_markup(kind))
+    await _show(update, context, _budget_prompt(kind, await _item(update, context)), _budget_markup(kind))
     return BUDGET
 
 
@@ -188,7 +233,7 @@ async def budget_picked(update: Update, context: Context, value: str) -> int:
 
 async def ask_dates(update: Update, context: Context) -> int:
     item = await _item(update, context)
-    await respond(update, f"📅 Now: {describe_window(item.departure_date, item.departure_date_end)}\n\n"
+    await _show(update, context, f"📅 Now: {describe_window(item.departure_date, item.departure_date_end)}\n\n"
                           f"New dates? {DATES_PROMPT}", dates_keyboard("edit:date"))
     return DATES
 
@@ -199,7 +244,7 @@ async def dates_picked(update: Update, context: Context, start: str, end: Option
 
 async def ask_flights(update: Update, context: Context) -> int:
     item = await _item(update, context)
-    await respond(update, f"⚙️ Now: {flight_type_label(item.direct_only)}\n\nWhich flights should I watch?",
+    await _show(update, context, f"⚙️ Now: {flight_type_label(item.direct_only)}\n\nWhich flights should I watch?",
                   flight_types("edit:direct"))
     return FLIGHTS
 
@@ -211,7 +256,7 @@ async def flights_picked(update: Update, context: Context, value: str) -> int:
 async def ask_frequency(update: Update, context: Context) -> int:
     item = await _item(update, context)
     hours = [[button(f"Every {h} hours", f"edit:freq:{h}")] for h in FREQUENCIES]
-    await respond(update, f"🔄 Now: every {item.frequency_hours} hours\n\nHow often should I check?",
+    await _show(update, context, f"🔄 Now: every {item.frequency_hours} hours\n\nHow often should I check?",
                   markup(*hours, back=True))
     return FREQUENCY
 
@@ -222,7 +267,7 @@ async def frequency_picked(update: Update, context: Context, value: str) -> int:
 
 async def ask_window(update: Update, context: Context) -> int:
     item = await _item(update, context)
-    await respond(update, f"📅 Now: {digest_window_text(item)}\n\nWhich departures should each digest cover? "
+    await _show(update, context, f"📅 Now: {digest_window_text(item)}\n\nWhich departures should each digest cover? "
                           "Tap or type a number of days ahead, or pick fixed dates:",
                   timeframe_keyboard("edit:when", DAY_OPTIONS, DEFAULT_DAYS))
     return WINDOW
@@ -238,7 +283,7 @@ async def window_dates_picked(update: Update, context: Context, start: str, end:
 
 async def ask_sort(update: Update, context: Context) -> int:
     item = await _item(update, context)
-    await respond(update, f"📊 Now: {item.sort_mode}\n\nHow should deals be ranked?",
+    await _show(update, context, f"📊 Now: {item.sort_mode}\n\nHow should deals be ranked?",
                   sort_modes("edit:sort", default=item.sort_mode))
     return SORT
 
@@ -249,7 +294,7 @@ async def sort_picked(update: Update, context: Context, value: str) -> int:
 
 async def ask_limit(update: Update, context: Context) -> int:
     item = await _item(update, context)
-    await respond(update, f"🔢 Now: up to {item.max_results} deals\n\nHow many deals per digest? (1–{MAX_RESULTS})",
+    await _show(update, context, f"🔢 Now: up to {item.max_results} deals\n\nHow many deals per digest? (1–{MAX_RESULTS})",
                   result_limits("edit:lim"))
     return LIMIT
 
@@ -270,7 +315,7 @@ async def limit_typed(update: Update, context: Context) -> int:
 async def ask_day(update: Update, context: Context) -> int:
     item = await _item(update, context)
     days = [button(day, f"edit:day:{day}") for day in WEEKDAYS]
-    await respond(update, f"⏰ Now: {item.delivery_day}\n\nWhich day should it arrive?", markup(*pairs(days), back=True))
+    await _show(update, context, f"⏰ Now: {item.delivery_day}\n\nWhich day should it arrive?", markup(*pairs(days), back=True))
     return DAY
 
 
@@ -281,7 +326,7 @@ async def day_picked(update: Update, context: Context, day: str) -> int:
 async def ask_time(update: Update, context: Context) -> int:
     item = await _item(update, context)
     times = [button(t, f"edit:time:{t}") for t in TIME_OPTIONS]
-    await respond(update, f"🕒 Now: {item.delivery_time}\n\nWhat time? Tap or type <code>HH:MM</code>:",
+    await _show(update, context, f"🕒 Now: {item.delivery_time}\n\nWhat time? Tap or type <code>HH:MM</code>:",
                   markup(*pairs(times), back=True))
     return TIME
 
@@ -306,10 +351,7 @@ ASKS = {
 
 
 def conversation() -> ConversationHandler:
-    return wizard_conversation("edit", [
-        CallbackQueryHandler(open_editor, pattern=r"^dash:edit:[td]:\d+$"),
-        CallbackQueryHandler(open_budget, pattern=r"^dash:budget:[td]:\d+$"),
-    ], {
+    states = {
         MENU: [choice_step("edit:field", field_picked, "|".join(ASKS)), CallbackQueryHandler(done, pattern="^edit:done$")],
         BUDGET: [MessageHandler(TEXT, budget_typed), choice_step("edit:bud", budget_picked, r"\d+")],
         DATES: dates_step("edit:date", DATES, dates_picked, ask_dates),
@@ -320,4 +362,9 @@ def conversation() -> ConversationHandler:
         LIMIT: [choice_step("edit:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
         DAY: [choice_step("edit:day", day_picked, "|".join(WEEKDAYS))],
         TIME: [choice_step("edit:time", time_picked, r"\d{2}:\d{2}"), MessageHandler(TEXT, time_typed)],
-    }, back_to_menu)
+    }
+    states = {state: [_current_message_only(h) for h in handlers] for state, handlers in states.items()}
+    return wizard_conversation("edit", [
+        CallbackQueryHandler(open_editor, pattern=r"^dash:edit:[td]:\d+$"),
+        CallbackQueryHandler(open_budget, pattern=r"^dash:budget:[td]:\d+$"),
+    ], states, back_to_menu)

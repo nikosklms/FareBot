@@ -174,3 +174,48 @@ async def test_warns_when_new_budget_is_above_last_price(bot):
     await bot.press("edit:field:budget")
     await bot.send("450")
     assert "already below" not in bot.telegram.last_text
+
+
+async def test_buttons_on_an_older_editor_message_are_refused(bot):
+    from bot.handlers.edit import OUT_OF_DATE
+    db = bot.services.db
+    digest = await db.create_digest(USER_ID, "ATH", "europe", days_ahead=30)
+    tracker = await db.create_tracker(USER_ID, "ATH", "LON", future(10), 100.0)
+    await bot.press(f"dash:edit:d:{digest.id}", message_id=501)
+    await bot.press("edit:field:budget", message_id=501)
+    await bot.press(f"dash:budget:t:{tracker.id}", message_id=777)  # the price alert's Set Lower Budget
+
+    await bot.press("edit:bud:50", message_id=501)  # the digest's old budget buttons
+    assert bot.telegram.alerts[-1] == OUT_OF_DATE
+    await bot.press("edit:bud:0", message_id=501)
+    assert (await db.get_tracker(tracker.id)).max_budget == 100.0
+    assert (await db.get_digest(digest.id)).max_budget is None
+
+
+async def test_editing_a_deleted_item_says_so(bot):
+    db = bot.services.db
+    tracker = await db.create_tracker(USER_ID, "ATH", "LON", future(10), 100.0)
+    await bot.press(f"dash:edit:t:{tracker.id}")
+    await db.delete_tracker(tracker.id)
+    await bot.press("edit:field:budget")
+    assert "no longer exists" in bot.telegram.last_text
+
+
+async def test_a_digest_field_on_a_tracker_does_nothing(bot):
+    tracker = await bot.services.db.create_tracker(USER_ID, "ATH", "LON", future(10), 100.0)
+    await bot.press(f"dash:edit:t:{tracker.id}")
+    await bot.press("edit:field:sort")
+    assert "Something went wrong" not in bot.telegram.last_text
+    await bot.press("edit:field:budget")  # the editor still works
+    assert "budget is now" in bot.telegram.last_text
+
+
+async def test_editing_dates_cant_create_a_duplicate(bot):
+    db = bot.services.db
+    first = await db.create_tracker(USER_ID, "ATH", "LON", future(5), 100.0)
+    second = await db.create_tracker(USER_ID, "ATH", "LON", future(9), 100.0)
+    await bot.press(f"dash:edit:t:{second.id}")
+    await bot.press("edit:field:dates")
+    await bot.send(future(5))
+    assert f"Tracker #{first.id} already watches exactly that" in bot.telegram.last_text
+    assert (await db.get_tracker(second.id)).departure_date == future(9)
