@@ -90,12 +90,8 @@ class GoogleFlightsClient:
                            "Possible rate limiting.")
             raise GoogleRateLimitException(f"HTTP {response.status_code}")
         response.raise_for_status()
-
-        html = response.text
-        if any(marker in html.lower() for marker in CAPTCHA_MARKERS):
-            logger.error(f"[RATE_LIMIT] CAPTCHA / Rate limit page detected from Google Flights! ({url[:80]})")
-            raise GoogleRateLimitException(f"Google Rate Limit / CAPTCHA detected for {url[:80]}")
-        return html
+        # CAPTCHA pages arrive as 200s; the parser spots them off the event loop (pages are ~2 MB).
+        return response.text
 
     async def close(self) -> None:
         if self._client is not None:
@@ -171,8 +167,8 @@ def parse_google_flights_payload_generic(
 ) -> List[FlightOffer]:
     """Parse Google Flights html JSON payload and extract matching flight offers."""
     html_lower = html.lower()
-    if "unusual traffic" in html_lower or "sorry/index" in html_lower:
-        raise GoogleRateLimitException("Google Rate Limit / CAPTCHA detected in HTML payload")
+    if any(marker in html_lower for marker in CAPTCHA_MARKERS):
+        raise GoogleRateLimitException("Google served a CAPTCHA / rate-limit page")
 
     offers: List[FlightOffer] = []
     parser = LexborHTMLParser(html)
@@ -225,16 +221,7 @@ def parse_google_flights_payload_generic(
             orig_val = first_leg[3] if len(first_leg) > 3 else None
             dest_val = valid_legs[-1][6] if valid_legs and len(valid_legs[-1]) > 6 else None
 
-            sub_segments = first_leg[22] if (len(first_leg) > 22 and isinstance(first_leg[22], list)) else []
-            valid_sub_segs = [s for s in sub_segments if isinstance(s, list) and len(s) > 5] if sub_segments else []
-            if len(valid_legs) > 1:
-                is_direct_flight = False
-            elif valid_sub_segs:
-                is_direct_flight = (len(valid_sub_segs) == 1)
-            elif valid_legs:
-                is_direct_flight = (len(valid_legs) == 1)
-            else:
-                is_direct_flight = False
+            is_direct_flight = len(valid_legs) == 1  # one leg per flight, so more legs mean connections
 
             def _fmt_t(t_list):
                 # Google drops zero parts: [8] is 08:00 and [None, 31] is 00:31.
@@ -503,6 +490,8 @@ class FastFlightsProvider(AbstractFlightProvider):
         direct_only: bool = False,
     ) -> List[FlightOffer]:
         dates = generate_date_sequence(start_date, end_date)
+        if not dates:
+            return []  # the range ends before it starts: nothing to search, not a failure
         results = await asyncio.gather(*(
             self.search_flights(origin=origin, destination=destination, departure_date=d,
                                 currency=currency, direct_only=direct_only)

@@ -345,16 +345,25 @@ async def test_client_follows_consent_redirect_and_decompresses():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("response", [
-    httpx.Response(503),
-    httpx.Response(200, text="<html>Our systems have detected unusual traffic</html>"),
-])
-async def test_client_detects_rate_limiting(response):
+async def test_client_detects_rate_limiting_statuses():
     from providers.fast_flights import GoogleRateLimitException
-    client = mock_client(lambda request: response)
+    client = mock_client(lambda request: httpx.Response(503))
     with pytest.raises(GoogleRateLimitException):
         await client.fetch_html(MagicMock(params=lambda: {"tfs": "x"}))
     await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page", ["<html>Our systems have detected unusual traffic</html>",
+                                  '<html><div id="recaptcha"></div></html>', "<html><title>429</title></html>"])
+async def test_a_captcha_page_pauses_requests(page):
+    from providers.base import FlightSearchError
+    provider, calls, time_ = paced_provider()
+    provider._fetcher = mock_client(lambda request: httpx.Response(200, text=page))
+    with pytest.raises(FlightSearchError):
+        await provider.search_flights("SKG", "VIE", "2026-10-31")
+    assert provider.stats().rate_limit_pauses == 2  # blocked, paused, retried, blocked again
+    await provider.close()
 
 
 @pytest.mark.asyncio
@@ -470,3 +479,10 @@ def test_typical_prices_of_cheap_routes_are_kept():
     assert _extract_typical_price_range([None, None, None, None, None, insight]) == (12.0, 35.0)
     broken = [None, None, None, None, [None, 40], [None, 30]]  # max below min: not a range
     assert _extract_typical_price_range([None, None, None, None, None, broken]) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_an_empty_range_is_empty_not_a_failure():
+    provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(500)))
+    assert await provider.search_flights_range("SKG", "VIE", "2026-12-05", "2026-12-01") == []
+    await provider.close()

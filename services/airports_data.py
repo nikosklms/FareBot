@@ -169,12 +169,10 @@ MULTI_AIRPORT_CITIES = {
     "MIL": ["MIL", "MXP", "LIN", "BGY"],                      # Milan, Italy
     "VCE": ["VCE", "TSF"],                                      # Venice, Italy
     "BCN": ["BCN", "GRO", "REU"],                              # Barcelona, Spain
-    "MAD": ["MAD"],                                            # Madrid, Spain
     "STO": ["STO", "ARN", "NYO", "BMA"],                      # Stockholm, Sweden
     "MOW": ["MOW", "SVO", "DME", "VKO"],                      # Moscow, Russia
     "IST": ["IST", "SAW"],                                     # Istanbul, Turkey
     "BFS": ["BFS", "BHD"],                                     # Belfast, UK
-    "BER": ["BER"],                                            # Berlin, Germany
 
     # NORTH AMERICA
     "NYC": ["NYC", "JFK", "EWR", "LGA"],                      # New York City, USA

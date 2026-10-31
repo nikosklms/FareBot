@@ -65,6 +65,9 @@ async def decision_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     target = await db.get_user(user_id)
     if not target:
         await query.answer("This person isn't on the list anymore.", show_alert=True)
+        if where == "r":  # keep the old request as it was, minus buttons that no longer do anything
+            await query.edit_message_reply_markup(None)
+            return
     else:
         await query.answer()
         new_status = {"ok": APPROVED, "no": DENIED, "rm": None}[action]

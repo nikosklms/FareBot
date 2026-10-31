@@ -101,3 +101,14 @@ async def test_approved_users_trackers_run_and_removed_ones_pause(bot, provider)
     await bot.press(f"acc:rm:{MARIA}:l")
     assert await check_tracker(bot.services, bot.app.bot, tracker.id) is False
     assert (await bot.services.db.get_tracker(tracker.id)).status == PAUSED
+
+
+async def test_an_old_request_stays_put_after_the_user_was_removed(bot):
+    await request(bot)
+    await bot.press(f"acc:ok:{MARIA}:r", message_id=700)
+    await bot.press(f"acc:rm:{MARIA}:l")  # removed from /users
+    edits = len(bot.telegram.calls_to("editMessageText"))
+    await bot.press(f"acc:no:{MARIA}:r", message_id=700)  # the old request message
+    assert "isn't on the list anymore" in bot.telegram.alerts[-1]
+    assert len(bot.telegram.calls_to("editMessageText")) == edits  # not replaced by the /users list
+    assert bot.telegram.calls[-1][0] == "editMessageReplyMarkup"
