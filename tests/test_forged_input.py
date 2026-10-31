@@ -105,3 +105,12 @@ async def test_budgets_are_capped(bot):
     assert "at most €100,000" in bot.telegram.last_text
     await bot.send("/digest ATH europe 30 999999")
     assert "at most €100,000" in bot.telegram.last_text
+
+
+async def test_digest_budget_buttons_do_nothing_for_a_tracker(bot):
+    tracker = await bot.services.db.create_tracker(USER_ID, "ATH", "LON", future(10), 100.0)
+    await bot.press(f"dash:budget:t:{tracker.id}")
+    for value in ("50", "0"):
+        await bot.press(f"edit:bud:{value}")
+    assert (await bot.services.db.get_tracker(tracker.id)).max_budget == 100.0
+    assert "Something went wrong" not in " ".join(bot.telegram.texts)

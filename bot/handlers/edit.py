@@ -228,6 +228,8 @@ async def budget_typed(update: Update, context: Context) -> int:
 
 
 async def budget_picked(update: Update, context: Context, value: str) -> int:
+    if draft(context, DRAFT)["kind"] == TRACKER:
+        return BUDGET  # only digests get budget buttons; a tracker's budget is typed
     return await save(update, context, max_budget=float(value) or None)
 
 
