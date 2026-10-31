@@ -6,10 +6,11 @@ from typing import Awaitable, Callable, Hashable, List, Optional
 
 from providers.base import FlightOffer
 
-# Prices on Google Flights move slowly; half an hour old is still the price a user would see.
-CACHE_SECONDS = 30 * 60
-# About 13 KB per search, so at most ~50 MB. A 90-day /explore of Europe is ~3,400 searches.
-MAX_ENTRIES = 4000
+# Prices on Google Flights change a few times a day at most; 15 minutes old is still the price a user would see.
+CACHE_SECONDS = 15 * 60
+# At ~430 searches a minute the bot can't store more than ~6,500 within 15 minutes, so this limit
+# rarely applies; it only bounds memory (about 13 KB per search, so at most ~100 MB).
+MAX_ENTRIES = 8000
 
 
 @dataclass

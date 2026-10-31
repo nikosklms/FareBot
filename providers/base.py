@@ -27,7 +27,7 @@ class FlightOffer:
 class ProviderStats:
     """Counts since the bot started, for /stats."""
     searches: int = 0
-    from_cache: int = 0          # answered from a result less than 30 minutes old
+    from_cache: int = 0          # answered from a result less than 15 minutes old
     shared: int = 0              # joined an identical search that was already running
     google_requests: int = 0
     rate_limit_pauses: int = 0

@@ -55,7 +55,7 @@ Every command walks you through its options with buttons, or takes them in one l
 
 ## How it works
 
-Each search is one request to Google Flights for one route and one day, so a single `/explore` can send hundreds. The bot runs 5 at a time, which comes to about 430 searches a minute without being rate-limited (measured with `tools/benchmark.py`). Long searches run in the background with a progress bar and a Stop button, so the bot keeps answering meanwhile. Results are cached for 30 minutes and shared between users, and identical searches running at the same time share one request, so repeated or overlapping searches don't go to Google again. If Google rate-limits the bot, every request pauses for a minute instead of retrying straight away, and the pause doubles (up to 15 minutes) while the blocks continue.
+Each search is one request to Google Flights for one route and one day, so a single `/explore` can send hundreds. The bot runs 5 at a time, which comes to about 430 searches a minute without being rate-limited (measured with `tools/benchmark.py`). Long searches run in the background with a progress bar and a Stop button, so the bot keeps answering meanwhile. Results are cached for 15 minutes and shared between users, and identical searches running at the same time share one request, so repeated or overlapping searches don't go to Google again. If Google rate-limits the bot, every request pauses for a minute instead of retrying straight away, and the pause doubles (up to 15 minutes) while the blocks continue.
 
 Trackers and digests are scheduled jobs that are reloaded from SQLite on startup.
 
