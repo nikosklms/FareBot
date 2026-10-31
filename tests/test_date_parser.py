@@ -50,7 +50,19 @@ def test_parse_reversed_and_same_day_ranges():
     assert parse_date_or_range("2026-09-01..2026-09-01") == ("2026-09-01", None)
 
 
-@pytest.mark.parametrize("bad", ["", "tomorrow", "2026-13-01", "2026-09-01..soon"])
+@pytest.mark.parametrize("typed, expected", [
+    ("2026-11-7", ("2026-11-07", None)),
+    ("2026-1-5", ("2026-01-05", None)),
+    ("2026-11-7..2026-11-21", ("2026-11-07", "2026-11-21")),
+    ("2026-11-7 to 2026-12-1", ("2026-11-07", "2026-12-01")),
+    (" 2026-11-07 ", ("2026-11-07", None)),
+])
+def test_leading_zeros_are_optional(typed, expected):
+    assert parse_date_or_range(typed) == expected
+
+
+@pytest.mark.parametrize("bad", ["", "tomorrow", "2026-13-01", "2026-09-01..soon", "2026-11-31", "26-11-07",
+                                 "2026-11-07[..2026-11-21]", "2026-011-07"])
 def test_parse_rejects_garbage(bad):
     with pytest.raises(ValueError):
         parse_date_or_range(bad)

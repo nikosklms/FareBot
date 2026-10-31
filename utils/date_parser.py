@@ -1,9 +1,11 @@
+import re
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 from typing import Optional
 
 MAX_RANGE_DAYS = 330
 RANGE_SEPARATORS = ["..", ":", " to ", " - "]
+TYPED_DATE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
 PRESETS = {
     "next_7_days": "🗓️ Next 7 Days",
     "next_14_days": "✈️ Next 14 Days",
@@ -22,21 +24,29 @@ def today_local() -> date:
     return datetime.now(_bot_timezone()).date()
 
 
+def parse_typed_date(text: str) -> date:
+    """'YYYY-MM-DD', also without leading zeros ('2026-11-7'). Raises ValueError otherwise."""
+    match = TYPED_DATE.fullmatch(text.strip())
+    if not match:
+        raise ValueError(f"Not a date: {text!r}")
+    return date(*(int(part) for part in match.groups()))
+
+
 def parse_date_or_range(raw_input: str) -> tuple[str, Optional[str]]:
     """Parse 'YYYY-MM-DD' or a range like 'YYYY-MM-DD..YYYY-MM-DD' into (start, end).
 
-    Ranges also accept ':', ' to ' and ' - ' as separators. Reversed ranges
-    are swapped. Raises ValueError on anything else.
+    Leading zeros are optional. Ranges also accept ':', ' to ' and ' - ' as separators.
+    Reversed ranges are swapped. Raises ValueError on anything else.
     """
     clean = raw_input.strip()
     for sep in RANGE_SEPARATORS:
-        parts = [p.strip() for p in clean.split(sep)]
+        parts = clean.split(sep)
         if len(parts) == 2:
-            start, end = sorted(date.fromisoformat(p) for p in parts)
+            start, end = sorted(parse_typed_date(p) for p in parts)
             if start == end:
                 return start.isoformat(), None
             return start.isoformat(), end.isoformat()
-    return date.fromisoformat(clean).isoformat(), None
+    return parse_typed_date(clean).isoformat(), None
 
 
 def generate_date_sequence(start_date: str, end_date: str, max_days: Optional[int] = MAX_RANGE_DAYS) -> list[str]:
