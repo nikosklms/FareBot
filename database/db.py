@@ -11,7 +11,7 @@ from database.models import ACTIVE, APPROVED, EXPIRED, PAUSED, PENDING, WEEKDAYS
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 TRACKERS_DDL = """
 CREATE TABLE {name} (
@@ -58,17 +58,6 @@ CREATE TABLE {name} (
     price REAL NOT NULL,
     airline TEXT,
     checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-"""
-
-UNAUTHORIZED_DDL = """
-CREATE TABLE IF NOT EXISTS unauthorized_attempts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    username TEXT,
-    full_name TEXT,
-    input_text TEXT,
-    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """
 
@@ -152,6 +141,9 @@ class Database:
                 await _migrate_to_v1(conn)
             if version < 2:
                 await conn.execute(USERS_DDL)
+            if version < 3:
+                # Access requests in the users table replaced the log of unauthorized attempts.
+                await conn.execute("DROP TABLE IF EXISTS unauthorized_attempts")
             await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             await conn.commit()
             logger.info("Database migrated to schema version %d", SCHEMA_VERSION)
@@ -371,14 +363,6 @@ class Database:
             ) as cur:
                 return (await cur.fetchone())[0]
 
-    async def log_unauthorized_attempt(
-        self, user_id: Optional[int], username: str, full_name: str, input_text: str
-    ) -> None:
-        await self._execute(
-            "INSERT INTO unauthorized_attempts (user_id, username, full_name, input_text) VALUES (?, ?, ?, ?)",
-            (user_id or 0, username, full_name, input_text),
-        )
-
     # ------------------------------------------------------------------
     # Users (access requests)
     # ------------------------------------------------------------------
@@ -480,7 +464,6 @@ async def _migrate_to_v1(conn: aiosqlite.Connection) -> None:
     their ids preserved; plain trackers are copied as-is.
     """
     await conn.execute("PRAGMA foreign_keys = OFF")
-    await conn.execute(UNAUTHORIZED_DDL)
 
     if not await _table_exists(conn, "trackers"):
         await conn.execute(TRACKERS_DDL.format(name="trackers"))

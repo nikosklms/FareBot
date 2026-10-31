@@ -1,9 +1,3 @@
-import json
-
-import aiosqlite
-
-from bot import auth
-
 INTRUDER = 77777
 
 
@@ -12,7 +6,7 @@ async def test_allowed_user_reaches_handlers(bot):
     assert "Welcome to Fare Bot" in bot.telegram.last_text
 
 
-async def test_unknown_user_is_blocked_logged_and_asks_for_access(bot):
+async def test_unknown_user_is_blocked_and_asks_for_access(bot):
     await bot.send("/search ATH PAR", user_id=INTRUDER)
 
     sent = bot.telegram.calls_to("sendMessage")
@@ -20,12 +14,6 @@ async def test_unknown_user_is_blocked_logged_and_asks_for_access(bot):
     assert admin_alert["chat_id"] == 123 and "Access request" in admin_alert["text"]
     assert "/search ATH PAR" in admin_alert["text"]
     assert reply["chat_id"] == INTRUDER and "Access requested" in reply["text"]
-
-    entry = json.loads(auth.UNAUTHORIZED_LOG.read_text())
-    assert entry["user_id"] == INTRUDER and entry["input"] == "/search ATH PAR"
-    async with aiosqlite.connect(bot.services.db.path) as conn:
-        async with conn.execute("SELECT user_id, input_text FROM unauthorized_attempts") as cur:
-            assert await cur.fetchall() == [(INTRUDER, "/search ATH PAR")]
 
 
 async def test_unauthorized_button_press_gets_alert(bot):

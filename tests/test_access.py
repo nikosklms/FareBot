@@ -1,4 +1,3 @@
-from bot import auth
 from daemon.scheduler import check_tracker
 from database.models import APPROVED, DENIED, PAUSED, PENDING
 from tests.fakes import USER_ID, future
@@ -44,13 +43,11 @@ async def test_denied_users_stay_out_quietly(bot):
     assert "❌ Denied" in bot.telegram.last_text
     assert "wasn't approved" in sent_to(bot, MARIA)[-1]
     calls = len(bot.telegram.calls)
-    attempts = auth.UNAUTHORIZED_LOG.read_text()
 
     for _ in range(5):
         await bot.send("/start", user_id=MARIA)
     await bot.press("dash:del:t:1", user_id=MARIA)
     assert [endpoint for endpoint, _ in bot.telegram.calls[calls:]] == ["answerCallbackQuery"]
-    assert auth.UNAUTHORIZED_LOG.read_text() == attempts
 
 
 async def test_only_the_admin_can_decide(bot):

@@ -1,8 +1,5 @@
-import json
 import logging
-from datetime import datetime, timezone
 from html import escape
-from pathlib import Path
 from typing import Optional
 
 from telegram import InlineKeyboardMarkup, Update, User
@@ -10,13 +7,11 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from bot.keyboards import button
 from bot.services import get_services
-from config import LOGS_DIR, get_allowed_users
+from config import get_allowed_users
 from database.db import Database
 from database.models import DENIED, PENDING
 
 logger = logging.getLogger(__name__)
-
-UNAUTHORIZED_LOG = LOGS_DIR / "unauthorized_access.log"
 
 REQUESTED = "📨 <b>Access requested.</b> You'll get a message here as soon as you're approved."
 WAITING = "⏳ Your access request is still waiting for approval."
@@ -61,13 +56,10 @@ async def _handle_outsider(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user = update.effective_user
     known = await get_services(context).db.get_user(user.id) if user else None
     if known and known.status == DENIED:
-        # They were told when denied; stay silent and log nothing, so spamming the bot does nothing.
+        # They were told when denied; stay silent, so spamming the bot does nothing.
         if update.callback_query:
             await update.callback_query.answer()
         return
-
-    attempted = (update.message.text if update.message else update.callback_query.data) or ""
-    await _record_attempt(context, user, attempted)
 
     if update.callback_query:
         await update.callback_query.answer("⛔ Access denied", show_alert=True)
@@ -76,7 +68,7 @@ async def _handle_outsider(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     db = get_services(context).db
     admin = admin_id()
     if user and admin and await db.request_access(user.id, _handle(user), user.full_name):
-        await _send_request(context, admin, user, attempted)
+        await _send_request(context, admin, user, update.message.text or "")
         await update.message.reply_text(REQUESTED)
         return
     await update.message.reply_text(WAITING if known and known.status == PENDING else DENIED_TEXT)
@@ -95,28 +87,3 @@ async def _send_request(context: ContextTypes.DEFAULT_TYPE, admin: int, user: Us
 def _handle(user: Optional[User]) -> Optional[str]:
     return f"@{user.username}" if user and user.username else None
 
-
-async def _record_attempt(context: ContextTypes.DEFAULT_TYPE, user: Optional[User], attempted: str) -> None:
-    username = _handle(user) or "No username"
-    full_name = user.full_name if user else "Unknown"
-    _write_log(UNAUTHORIZED_LOG, {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": user.id if user else None,
-        "username": username,
-        "full_name": full_name,
-        "input": attempted,
-    })
-    try:
-        await get_services(context).db.log_unauthorized_attempt(user.id if user else None, username, full_name,
-                                                                attempted)
-    except Exception:
-        logger.exception("Failed to record unauthorized attempt in the database")
-
-
-def _write_log(path: Path, payload: dict) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n\n")
-    except OSError:
-        logger.exception("Failed to write unauthorized access log")

@@ -130,13 +130,6 @@ async def test_purge_stale_expires_by_travel_date_and_keeps_paused_future_items(
     assert result.purged == 2  # long_expired and past_digest (expired now, dates 45 days ago)
 
 
-async def test_log_unauthorized_attempt(db):
-    await db.log_unauthorized_attempt(77, "@intruder", "Joe", "/search")
-    async with aiosqlite.connect(db.path) as conn:
-        async with conn.execute("SELECT user_id, username, input_text FROM unauthorized_attempts") as cur:
-            assert await cur.fetchall() == [(77, "@intruder", "/search")]
-
-
 async def test_update_tracker_fields_and_rejects_unknown_ones(db):
     import pytest
     tracker = await make_tracker(db)

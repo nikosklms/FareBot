@@ -73,7 +73,8 @@ async def test_fresh_database_gets_current_schema(tmp_path):
     conn = sqlite3.connect(db.path)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"trackers", "digests", "price_history", "unauthorized_attempts", "users"} <= tables
+    assert {"trackers", "digests", "price_history", "users"} <= tables
+    assert "unauthorized_attempts" not in tables
 
 
 async def test_legacy_database_is_converted(tmp_path):
@@ -111,7 +112,7 @@ async def test_legacy_database_is_converted(tmp_path):
 
     conn = sqlite3.connect(path)
     assert conn.execute("SELECT tracker_id, price FROM price_history").fetchall() == [(1, 99.0)]
-    assert conn.execute("SELECT COUNT(*) FROM unauthorized_attempts").fetchone()[0] == 1
+    assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'unauthorized_attempts'").fetchall()
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 

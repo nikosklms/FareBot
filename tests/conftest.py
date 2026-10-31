@@ -10,9 +10,8 @@ from tests.fakes import USER_ID, BotHarness, FakeProvider, FakeTelegram
 
 
 @pytest.fixture(autouse=True)
-def allowed_users(monkeypatch, tmp_path):
+def allowed_users(monkeypatch):
     monkeypatch.setattr("bot.auth.get_allowed_users", lambda: [USER_ID])
-    monkeypatch.setattr("bot.auth.UNAUTHORIZED_LOG", tmp_path / "unauthorized_access.log")
 
 
 @pytest.fixture
