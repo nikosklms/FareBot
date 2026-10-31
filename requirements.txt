@@ -5,3 +5,4 @@ selectolax>=0.3
 rapidfuzz>=3.0.0
 aiosqlite>=0.19.0
 python-dotenv>=1.0.0
+tzdata>=2024.1  # timezone data where the system has none (slim Docker images)

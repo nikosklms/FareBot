@@ -1,0 +1,18 @@
+# Only what the bot needs to run goes into the image.
+.git
+.env
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+*.db
+*.db.*
+*.lock
+*.log
+data/
+docs/
+assets/
+tests/
+.worktrees/
+.superpowers/

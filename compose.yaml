@@ -1,0 +1,12 @@
+services:
+  farebot:
+    build: .
+    image: farebot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # A container has no local timezone, so digests would follow UTC without this.
+      TIMEZONE: ${TIMEZONE:?Set TIMEZONE in .env, e.g. TIMEZONE=Europe/Athens}
+    volumes:
+      - ./data:/data
+    stop_grace_period: 30s

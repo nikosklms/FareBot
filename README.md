@@ -35,11 +35,28 @@ Put your token and your Telegram user ID in `.env` ([@userinfobot](https://t.me/
 python main.py
 ```
 
+### With Docker
+
+Set `TIMEZONE` in `.env` too, to your timezone's name from the [tz database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) (e.g. `Europe/Athens`, `Africa/Lagos`, `America/New_York`): a container has no local timezone, so digests would otherwise follow UTC. Then:
+
+```bash
+docker compose up -d --build
+```
+
+The database lives in `./data`, and the bot restarts on its own after a crash or reboot. `docker compose logs -f` shows the log. To move an existing database in, stop the bot and copy `farebot.db` into `./data` first.
+
+Without Compose:
+
+```bash
+docker build -t farebot .
+docker run -d --name farebot --restart unless-stopped --env-file .env -v "$PWD/data:/data" farebot
+```
+
 | Variable | Meaning |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather. |
 | `ALLOWED_USERS` | Comma-separated Telegram user IDs that always have access. The first one is the admin: it gets access requests with Approve and Deny buttons, `/users` lists everyone and lets you remove people, and `/stats` shows searches, cache savings and users. Everyone else can have 3 active trackers and digests and search up to 180 days at a time (the admin: 20 and 330). Changes apply without a restart. |
-| `TIMEZONE` | Timezone for digest delivery times, e.g. `Europe/Athens`. Defaults to the server's. |
+| `TIMEZONE` | Timezone for digest delivery times, e.g. `Europe/Athens`. Defaults to the server's; required with Docker. |
 | `FAREBOT_DB_PATH` | SQLite file. Defaults to `farebot.db` in the project folder. Before an update changes its layout, it's copied to `farebot.db.v<old version>.bak`. |
 
 ## Shortcuts

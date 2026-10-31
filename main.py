@@ -1,6 +1,7 @@
 import fcntl
 import logging
 import sys
+from pathlib import Path
 from typing import IO, Optional
 
 from telegram import BotCommandScopeChat, LinkPreviewOptions
@@ -13,7 +14,7 @@ from bot.auth import admin_id
 from bot.handlers import ADMIN_COMMANDS, BOT_COMMANDS, register_handlers
 from bot.lifecycle import install_stop_signals
 from bot.services import SERVICES_KEY, Services
-from config import BASE_DIR, DB_PATH, TELEGRAM_BOT_TOKEN, check_config, get_timezone
+from config import DB_PATH, TELEGRAM_BOT_TOKEN, check_config, get_timezone
 from daemon.scheduler import register_jobs
 from database.db import Database
 from providers.fast_flights import FastFlightsProvider
@@ -27,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 def acquire_instance_lock() -> IO[str]:
     """Exit if another FareBot process already holds the lock: two pollers would fight over updates."""
-    lock_file = open(BASE_DIR / "farebot.lock", "w")
+    # Next to the database, the one folder the bot must be able to write (in Docker, the code is read-only).
+    lock_file = open(Path(DB_PATH).parent / "farebot.lock", "w")
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:

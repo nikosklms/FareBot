@@ -10,3 +10,4 @@ farebot.lock
 *.log
 *.bak
 *.bak.partial
+data/
