@@ -1,4 +1,7 @@
 """/track wizard, plus the 'Track' buttons on search and explore results."""
+import re
+from datetime import date
+from html import escape
 from typing import Optional
 
 from telegram import InlineKeyboardMarkup, Update
@@ -19,6 +22,9 @@ from utils.date_parser import describe_window, parse_date_or_range, window_probl
 
 ORIGIN, DESTINATION, DATES, FLIGHT_TYPE, BUDGET, FREQUENCY = range(6)
 DRAFT = "track"
+# What a Track button on search or explore results carries (see keyboards.track_button_data).
+TRACK_BUTTON = re.compile(rf"^{TRACK_ADD}:([A-Z]{{3}}):([A-Z]{{3}}):(\d{{4}}-\d{{2}}-\d{{2}}):(\d{{4}}-\d{{2}}-\d{{2}})?:"
+                          r"(\d+(?:\.\d{1,2})?):([01])$")
 FREQUENCIES = [h for h in (6, 12, 24) if h >= MIN_POLL_INTERVAL_HOURS]
 USAGE = ("Usage: <code>/track ATH LON 2026-09-01 150</code> (150 is your budget in €)\n"
          "or a range, direct flights only: <code>/track ATH LON 2026-09-01..2026-09-15 150 direct</code>")
@@ -81,7 +87,21 @@ def tracker_created_text(tracker: Tracker, note: str = "") -> str:
 async def track_button_pressed(update: Update, context: Context) -> None:
     """'Track' button on search or explore results."""
     query = update.callback_query
-    _, _, origin, destination, start, end, budget, direct = query.data.split(":")
+    # Button data comes from the user's Telegram app, so check it like typed input.
+    match = TRACK_BUTTON.match(query.data)
+    origin, destination, start, end, budget, direct = match.groups() if match else (None,) * 6
+    problem = "This button doesn't work."
+    if match and float(budget) > 0:
+        try:
+            for day in (start, end):
+                if day:
+                    date.fromisoformat(day)  # rejects impossible dates like 2026-02-31
+            problem = window_problem(start, end, max_days=max_range_days(query.from_user.id))
+        except ValueError:
+            pass
+    if problem:
+        await query.answer(problem, show_alert=True)
+        return
     try:
         tracker = await create_tracker_for_user(
             context, query.from_user.id, origin, destination, start, end or None,
@@ -115,7 +135,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     origin, destination = resolver.best_guess(args[0]), resolver.best_guess(args[1])
     if not origin or not destination:
         unknown = args[0] if not origin else args[1]
-        await update.message.reply_text(f"❌ I don't know '{unknown}'.")
+        await update.message.reply_text(f"❌ I don't know '{escape(unknown)}'.")
         return
     budget = parse_price(args[3])
     try:

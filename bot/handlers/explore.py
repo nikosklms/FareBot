@@ -1,6 +1,7 @@
 """/explore wizard and shortcut: best deals from one airport to a whole region."""
 import asyncio
 import logging
+from html import escape
 from typing import Optional
 
 from telegram import Message, Update
@@ -57,7 +58,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         return
     origin = get_services(context).resolver.best_guess(args[0])
     if not origin:
-        await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
+        await update.message.reply_text(f"❌ I don't know '{escape(args[0])}'.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
     limit = max_range_days(update.effective_user.id)

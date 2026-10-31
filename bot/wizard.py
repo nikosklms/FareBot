@@ -308,7 +308,12 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask)
 
     async def navigate(update: Update, context: Context) -> int:
         await update.callback_query.answer()
-        picker(context)["month"] = update.callback_query.data.rsplit(":", 1)[1]
+        month = update.callback_query.data.rsplit(":", 1)[1]
+        try:
+            date.fromisoformat(f"{month}-01")
+        except ValueError:
+            return state  # not a real month; the buttons we send never do this
+        picker(context)["month"] = month
         await update.callback_query.edit_message_reply_markup(render(context))
         return state
 
