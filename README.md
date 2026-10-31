@@ -3,7 +3,7 @@
 A Telegram bot that watches Google Flights for you. Search a route, track it until it drops under your budget, or scan a whole region for the best deals from your airport.
 
 <p align="center">
-  <img src="assets/demo.gif" width="320" alt="Running /explore from Athens to Europe: the wizard, a live progress bar, the biggest discounts, then the top deal opened on Google Flights at the same price">
+  <img src="assets/demo.gif" width="320" alt="Running /explore from Budapest to Europe: the wizard, a live progress bar, the biggest discounts (€17 to Venice, 83% off), then that flight opened on Google Flights at the same price">
 </p>
 
 ## What it does
