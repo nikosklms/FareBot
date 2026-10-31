@@ -1,6 +1,7 @@
 import fcntl
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import IO, Optional
 
@@ -21,6 +22,9 @@ from providers.fast_flights import FastFlightsProvider
 from services.resolver import LocationResolver
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+# Log times in the bot's TIMEZONE, like digest times, not the machine's clock (UTC in a container).
+_LOG_TIMEZONE = get_timezone()
+logging.Formatter.converter = staticmethod(lambda seconds: datetime.fromtimestamp(seconds, _LOG_TIMEZONE).timetuple())
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
