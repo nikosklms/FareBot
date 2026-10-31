@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 from providers.base import AbstractFlightProvider
-from services.airports_data import get_airport_country, get_region_airports
+from services.airports_data import MULTI_AIRPORT_CITIES, get_airport_country, get_region_airports
 from services.progress import Progress
 from utils.date_parser import generate_date_sequence
 
@@ -96,6 +96,9 @@ async def find_deals(
     region = region.lower().strip()
     origin_country = get_airport_country(origin)
     airports = [a for a in get_region_airports(region) if not _skip_destination(origin, origin_country, a, region)]
+    # A search for IST already covers SAW, so a separate SAW search would repeat the same flights.
+    covered = {code for a in airports for code in MULTI_AIRPORT_CITIES.get(a["code"], [])[1:]}
+    airports = [a for a in airports if a["code"] not in covered]
     if not airports:
         logger.warning("[EXPLORE] No airports to query for region '%s'", region)
         return DealSearch([], 0, 0)

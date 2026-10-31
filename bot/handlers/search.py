@@ -54,7 +54,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     origin, destination = resolver.best_guess(args[0]), resolver.best_guess(args[1])
     if not origin or not destination:
         unknown = args[0] if not origin else args[1]
-        await update.message.reply_text(f"❌ I don't know '{escape(unknown)}'.")
+        await update.message.reply_text(f"❌ I don't know '{escape(unknown)}'. Type a city or airport name, or a code like ATH.")
         return
     try:
         start_date, end_date = parse_date_or_range(args[2])

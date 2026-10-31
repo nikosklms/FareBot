@@ -60,7 +60,7 @@ def test_city_codes_come_before_single_airports():
 
 def test_short_text_matches_word_starts_not_middles():
     codes = [m[0] for m in LocationResolver().resolve("la")]
-    assert "KTT" not in codes and "JMK" not in codes  # 'Kalamata', 'Island'
+    assert "KLX" not in codes and "JMK" not in codes  # 'Kalamata', 'Island'
 
 
 def test_always_guesses_and_offers_unlisted_codes():
@@ -80,3 +80,21 @@ def test_shortcut_names_use_the_best_match():
     resolver = LocationResolver()
     assert resolver.best_guess("thessaloniki") == "SKG"
     assert resolver.best_guess("Los Angeles") == "LAX"
+
+
+@pytest.mark.parametrize("typed, code", [
+    ("kos", "KGS"),        # the island, not the code KOS (Sihanoukville)
+    ("san", "SAN"),        # first word of several names, so still a code
+    ("bod", "BOD"),        # not a whole word of any name, so a code
+    ("kalamata", "KLX"),
+    ("lemnos", "LXS"),
+    ("londn", "LON"),      # typos still work
+    ("salonika", "SKG"),
+])
+def test_shortcut_guesses(typed, code):
+    assert LocationResolver().best_guess(typed) == code
+
+
+@pytest.mark.parametrize("typed", ["bari", "<b>", "x", "qqqq", "geneva"])
+def test_shortcuts_dont_guess_weak_matches(typed):
+    assert LocationResolver().best_guess(typed) is None

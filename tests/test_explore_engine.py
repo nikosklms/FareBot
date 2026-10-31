@@ -111,3 +111,12 @@ def test_islands_have_no_country_cap():
     deals = [deal(code, 30 + i, 10, "Greece") for i, code in enumerate(["JTR", "JMK", "RHO"])]
     [section] = rank_deals(deals, "price", 10, "islands")
     assert len(section.deals) == 3
+
+
+async def test_airports_covered_by_another_are_searched_once():
+    from services.explore_engine import find_deals
+    from tests.fakes import FakeProvider, future
+    provider = FakeProvider()
+    await find_deals(provider, "ATH", "middle_east", future(1))
+    destinations = [destination for _, destination, _, _ in provider.queries]
+    assert "IST" in destinations and "SAW" not in destinations  # IST already searches SAW

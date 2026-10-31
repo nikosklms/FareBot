@@ -45,7 +45,7 @@ def test_new_airport_hubs_exist():
 
 def test_greek_islands_are_islands():
     codes = {a["code"] for a in get_region_airports("islands")}
-    assert "SKG" not in codes and "KTT" not in codes
+    assert "SKG" not in codes and "KLX" not in codes
     assert {"JTR", "JMK", "HER", "RHO"} <= codes
 
 
@@ -53,3 +53,9 @@ def test_city_airport_lists_have_no_repeats():
     from services.airports_data import MULTI_AIRPORT_CITIES
     for city, codes in MULTI_AIRPORT_CITIES.items():
         assert len(codes) == len(set(codes)), city
+
+
+def test_greek_airport_codes_are_right():
+    from services.airports_data import airport_name
+    assert "Kalamata" in airport_name("KLX") and airport_name("KTT") is None  # KTT is Kittilä, Finland
+    assert "Lemnos" in airport_name("LXS") and airport_name("LXG") is None    # LXG is in Laos

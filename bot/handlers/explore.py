@@ -58,7 +58,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         return
     origin = get_services(context).resolver.best_guess(args[0])
     if not origin:
-        await update.message.reply_text(f"❌ I don't know '{escape(args[0])}'.")
+        await update.message.reply_text(f"❌ I don't know '{escape(args[0])}'. Type a city or airport name, or a code like ATH.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
     limit = max_range_days(update.effective_user.id)
