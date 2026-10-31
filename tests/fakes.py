@@ -28,6 +28,7 @@ class FakeTelegram(BaseRequest):
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.blocked_chats: set[int] = set()
         self.sending_fails = False  # simulate Telegram being unreachable for sendMessage
+        self.failing: set[str] = set()  # endpoints that answer 400, e.g. {"setMyCommands"}
         self.last_message_id: Optional[int] = None
         self._message_ids = itertools.count(1000)
 
@@ -46,6 +47,8 @@ class FakeTelegram(BaseRequest):
         endpoint = url.rsplit("/", 1)[1]
         params = request_data.parameters if request_data else {}
         self.calls.append((endpoint, params))
+        if endpoint in self.failing:
+            return 400, json.dumps({"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}).encode()
         if self.sending_fails and endpoint == "sendMessage":
             return 502, json.dumps({"ok": False, "error_code": 502, "description": "Bad Gateway"}).encode()
         if params.get("chat_id") in self.blocked_chats:

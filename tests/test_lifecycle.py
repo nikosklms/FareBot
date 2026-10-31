@@ -52,3 +52,10 @@ async def test_stop_is_idempotent_and_safe_when_idle(bot):
     request_stop(bot.app)
     request_stop(bot.app)
     assert bot.services.shutting_down
+
+
+async def test_startup_continues_when_the_command_menus_fail(bot):
+    from main import on_startup
+    bot.telegram.failing.add("setMyCommands")
+    await on_startup(bot.app)  # used to stop the bot with "chat not found"
+    assert bot.telegram.calls_to("setMyCommands")

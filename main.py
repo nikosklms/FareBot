@@ -5,6 +5,7 @@ from typing import IO, Optional
 
 from telegram import BotCommandScopeChat, LinkPreviewOptions
 from telegram.constants import ParseMode
+from telegram.error import TelegramError
 from telegram.ext import Application, ApplicationBuilder, Defaults
 from telegram.request import BaseRequest
 
@@ -38,9 +39,14 @@ def acquire_instance_lock() -> IO[str]:
 async def on_startup(app: Application) -> None:
     services: Services = app.bot_data[SERVICES_KEY]
     await services.db.migrate()
-    await app.bot.set_my_commands(BOT_COMMANDS)
-    if admin_id():  # the admin's command menu also lists /users
-        await app.bot.set_my_commands(BOT_COMMANDS + ADMIN_COMMANDS, scope=BotCommandScopeChat(admin_id()))
+    # The command menus are a convenience: if Telegram refuses (e.g. the admin never opened the
+    # bot, so their chat doesn't exist yet), keep going rather than stop the bot.
+    try:
+        await app.bot.set_my_commands(BOT_COMMANDS)
+        if admin_id():  # the admin's menu also lists /users and /stats
+            await app.bot.set_my_commands(BOT_COMMANDS + ADMIN_COMMANDS, scope=BotCommandScopeChat(admin_id()))
+    except TelegramError:
+        logger.warning("Couldn't set the command menus; commands still work when typed", exc_info=True)
     await register_jobs(app)
     install_stop_signals(app)
 
