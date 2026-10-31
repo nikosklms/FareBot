@@ -18,12 +18,13 @@ from telegram.ext import CallbackQueryHandler, ContextTypes
 from bot.formatting import budget_text, eur, flight_type_label
 from bot.handlers.dashboard import DIGEST, TRACKER, label_for, load_owned
 from bot.handlers.digest import MAX_RESULTS, create_digest
+from bot.auth import max_range_days
 from bot.handlers.track import FREQUENCIES, TrackerRejected, create_tracker_for_user, tracker_created_text
 from bot.keyboards import button
 from bot.services import get_services
 from database.models import WEEKDAYS, Digest, Tracker
 from services.airports_data import REGION_LABELS, region_display_name
-from utils.date_parser import describe_window, window_problem
+from utils.date_parser import describe_window, is_past, window_problem
 
 ADD, DISMISS = "sh:add:", "sh:no"
 SORTS = {"discount": "d", "price": "p", "both": "b"}
@@ -124,10 +125,16 @@ def preview(kind: str, s: dict) -> str:
     ])
 
 
-def _dates_problem(kind: str, s: dict) -> Optional[str]:
+def _dates_problem(kind: str, s: dict, user_id: int) -> Optional[str]:
+    """Why this user can't add it: its dates have passed, or it's longer than they may search."""
+    limit = max_range_days(user_id)
     if kind == "g" and s["days"]:
-        return None
-    return window_problem(s["start"], s["end"])
+        too_long = s["days"] > limit
+    elif is_past(s["start"]):
+        return "Its dates have passed, so it can't be added."
+    else:
+        too_long = window_problem(s["start"], s["end"], max_days=limit) is not None
+    return f"It covers more than {limit} days, the most you can search, so it can't be added." if too_long else None
 
 
 async def open_shared(update: Update, context: ContextTypes.DEFAULT_TYPE, payload: str) -> None:
@@ -137,9 +144,9 @@ async def open_shared(update: Update, context: ContextTypes.DEFAULT_TYPE, payloa
         await update.message.reply_text("🔗 That share link is broken or incomplete. Ask for a new one.")
         return
     kind, settings = parsed
-    problem = _dates_problem(kind, settings)
+    problem = _dates_problem(kind, settings, update.effective_user.id)
     if problem:
-        await update.message.reply_text(f"{preview(kind, settings)}\n\n⚠️ Its dates have passed, so it can't be added.")
+        await update.message.reply_text(f"{preview(kind, settings)}\n\n⚠️ {problem}")
         return
     label = "✅ Add This Tracker" if kind == "t" else "✅ Add This Digest"
     buttons = InlineKeyboardMarkup([[button(label, ADD + payload), button("❌ No Thanks", DISMISS)]])
@@ -153,7 +160,7 @@ async def add_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.edit_message_text("👌 Not added.")
         return
     parsed = parse_payload(query.data.removeprefix(ADD))
-    problem = parsed and _dates_problem(*parsed)
+    problem = parsed and _dates_problem(*parsed, query.from_user.id)
     if not parsed or problem:
         await query.answer("This link can't be used anymore.", show_alert=True)
         return

@@ -7,6 +7,7 @@ from telegram.ext import CommandHandler, ConversationHandler, MessageHandler
 
 from bot.formatting import budget_text, digest_card
 from bot.keyboards import DEFAULT_RESULT_LIMIT, button, markup, pairs, quick_origins, regions, result_limits, sort_modes
+from bot.auth import limit_reached, max_active, max_range_days
 from bot.services import get_services
 from bot.wizard import (
     parse_price,
@@ -14,11 +15,10 @@ from bot.wizard import (
     timeframe_step,
     wizard_conversation,
 )
-from config import MAX_TRACKERS_PER_USER
 from daemon.scheduler import schedule_digest
 from database.models import WEEKDAYS, Digest
 from services.airports_data import REGION_LABELS, region_display_name
-from utils.date_parser import MAX_RANGE_DAYS, describe_window
+from utils.date_parser import describe_window
 
 ORIGIN, REGION, SORT, BUDGET, WINDOW, DAY, TIME, LIMIT = range(8)
 DRAFT = "digest"
@@ -66,8 +66,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
-    if not 1 <= days <= MAX_RANGE_DAYS:
-        await update.message.reply_text(f"❌ Days ahead must be between 1 and {MAX_RANGE_DAYS}.")
+    limit = max_range_days(update.effective_user.id)
+    if not 1 <= days <= limit:
+        await update.message.reply_text(f"❌ Days ahead must be between 1 and {limit}.")
         return
     budget = float(numbers[1]) if len(numbers) > 1 else 0
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
@@ -221,9 +222,8 @@ async def create_digest(update: Update, context: Context, d: dict) -> Optional[D
     if existing:
         await respond(update, f"ℹ️ You already have this digest (#{existing.id}). Manage it in /mytracks.")
         return None
-    if await services.db.count_active(user_id) >= MAX_TRACKERS_PER_USER:
-        await respond(update, f"⚠️ You already have {MAX_TRACKERS_PER_USER} active trackers and digests. "
-                              "Delete or pause one in /mytracks first.")
+    if await services.db.count_active(user_id) >= max_active(user_id):
+        await respond(update, limit_reached(user_id))
         return None
     digest = await services.db.create_digest(
         user_id=user_id, origin_code=d["origin"], region=d["region"], max_budget=d["budget"],

@@ -16,6 +16,7 @@ from bot.keyboards import (
     EXPLORE_FROM_SEARCH, button, explore_from_search_prefix, flight_types, markup, regions, stop_markup,
     track_button_data,
 )
+from bot.auth import max_range_days
 from bot.services import Services, get_services
 from bot.wizard import (
     DATES_PROMPT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
@@ -58,7 +59,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     except ValueError:
         await update.message.reply_text(f"❌ I couldn't read that date.\n{USAGE}")
         return
-    problem = window_problem(start_date, end_date)
+    problem = window_problem(start_date, end_date, max_days=max_range_days(update.effective_user.id))
     if problem:
         await update.message.reply_text(f"❌ {problem}")
         return

@@ -19,12 +19,13 @@ from telegram.ext import (
 )
 
 from bot import keyboards
+from bot.auth import max_range_days
 from bot.date_picker import RANGE, SINGLE, calendar_markup
 from bot.keyboards import BACK, CANCEL, button, markup, pairs
 from bot.lifecycle import track_task
 from bot.services import get_services
 from services.airports_data import find_region
-from utils.date_parser import MAX_RANGE_DAYS, PRESETS, get_preset_range, parse_date_or_range, today_local, window_problem
+from utils.date_parser import PRESETS, get_preset_range, parse_date_or_range, today_local, window_problem
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,7 @@ def dates_step(prefix: str, state: int, on_dates: OnDates, on_back: Ask) -> list
                 reply_markup=markup(back=True),
             )
             return state
-        problem = window_problem(start, end)
+        problem = window_problem(start, end, max_days=max_range_days(update.effective_user.id))
         if problem:
             await update.message.reply_text(f"❌ {problem}", reply_markup=markup(back=True))
             return state
@@ -265,9 +266,10 @@ def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates, 
 
     async def typed(update: Update, context: Context) -> int:
         text = update.message.text.strip()
-        if not text.isdigit() or not 1 <= int(text) <= MAX_RANGE_DAYS:
+        limit = max_range_days(update.effective_user.id)
+        if not text.isdigit() or not 1 <= int(text) <= limit:
             await update.message.reply_text(
-                f"❌ Type a number of days between 1 and {MAX_RANGE_DAYS}, or tap a button.",
+                f"❌ Type a number of days between 1 and {limit}, or tap a button.",
                 reply_markup=markup(back=True),
             )
             return state
@@ -331,7 +333,7 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask)
             return state
         start, end = sorted([cal["start"] or day, day])
         end = end if end != start else None
-        problem = window_problem(start, end)
+        problem = window_problem(start, end, max_days=max_range_days(update.effective_user.id))
         if problem:
             cal["start"] = None
             await respond(update, f"❌ {problem} Pick the first day again:", render(context))

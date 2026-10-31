@@ -17,6 +17,9 @@ DB_PATH = os.getenv("FAREBOT_DB_PATH", str(BASE_DIR / "farebot.db"))
 
 MIN_POLL_INTERVAL_HOURS = 6
 MAX_TRACKERS_PER_USER = 20
+# Everyone except the admin (the first ALLOWED_USERS ID) gets lower limits.
+MEMBER_MAX_ACTIVE = 3        # active trackers plus digests
+MEMBER_MAX_RANGE_DAYS = 180  # longest date range or days ahead (the admin can use MAX_RANGE_DAYS)
 MAX_CONSECUTIVE_FAILURES = 3
 
 

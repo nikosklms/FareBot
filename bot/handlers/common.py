@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 
 from bot.handlers.share import open_shared
 from bot.wizard import CALENDAR_KEY, cancel_running_task
-from config import MAX_TRACKERS_PER_USER
+from bot.auth import max_active
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ I search Google Flights and watch prices for you in the background.
 ❓ /help - Shortcuts and examples
 ❌ /cancel - Stop the current wizard or search"""
 
-HELP_TEXT = f"""📖 <b>Fare Bot Guide</b>
+HELP_TEXT = """📖 <b>Fare Bot Guide</b>
 
 Every command starts a step-by-step wizard. Add arguments to skip it:
 
@@ -47,7 +47,7 @@ Tracking a deal sets the target budget 10% below its price.
 
 📅 <b>Dates</b>: <code>2026-09-01</code> or a range <code>2026-09-01..2026-09-15</code>
 
-📊 /mytracks lets you pause, resume, edit (dates, budget, schedule and more), share or delete your trackers and digests (up to {MAX_TRACKERS_PER_USER} active).
+📊 /mytracks lets you pause, resume, edit (dates, budget, schedule and more), share or delete your trackers and digests (up to {active} active).
 
 ⬅️ Every wizard step has a Back button."""
 
@@ -60,7 +60,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(HELP_TEXT)
+    await update.message.reply_text(HELP_TEXT.format(active=max_active(update.effective_user.id)))
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

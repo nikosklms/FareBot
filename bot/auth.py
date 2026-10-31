@@ -7,9 +7,10 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from bot.keyboards import button
 from bot.services import get_services
-from config import get_allowed_users
+from config import MAX_TRACKERS_PER_USER, MEMBER_MAX_ACTIVE, MEMBER_MAX_RANGE_DAYS, get_allowed_users
 from database.db import Database
 from database.models import DENIED, PENDING
+from utils.date_parser import MAX_RANGE_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,21 @@ def admin_id() -> Optional[int]:
     """The first ALLOWED_USERS entry approves access requests."""
     allowed = get_allowed_users()
     return allowed[0] if allowed else None
+
+
+def max_active(user_id: int) -> int:
+    """How many trackers and digests a user may have active at once."""
+    return MAX_TRACKERS_PER_USER if user_id == admin_id() else MEMBER_MAX_ACTIVE
+
+
+def max_range_days(user_id: int) -> int:
+    """The longest date range (or days ahead) a user may search."""
+    return MAX_RANGE_DAYS if user_id == admin_id() else MEMBER_MAX_RANGE_DAYS
+
+
+def limit_reached(user_id: int) -> str:
+    return (f"⚠️ You already have {max_active(user_id)} active trackers and digests, the most you can have. "
+            "Pause or delete one in /mytracks first.")
 
 
 async def is_allowed(db: Database, user_id: int) -> bool:

@@ -73,12 +73,13 @@ def is_past(iso_date: str, today: Optional[date] = None) -> bool:
     return iso_date < (today or today_local()).isoformat()
 
 
-def window_problem(start: str, end: Optional[str], today: Optional[date] = None) -> Optional[str]:
+def window_problem(start: str, end: Optional[str], today: Optional[date] = None,
+                   max_days: int = MAX_RANGE_DAYS) -> Optional[str]:
     """Why a departure date or range can't be used, or None if it's fine."""
     if is_past(start, today):
         return "That date is in the past. Pick a future date."
-    if end and (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 > MAX_RANGE_DAYS:
-        return f"That range is too long: the most I can search is {MAX_RANGE_DAYS} days."
+    if end and (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 > max_days:
+        return f"That range is too long: the most you can search is {max_days} days."
     return None
 
 

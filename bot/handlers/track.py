@@ -6,12 +6,13 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandl
 
 from bot.formatting import eur, flight_type_label
 from bot.keyboards import TRACK_ADD, button, flight_types, markup
+from bot.auth import limit_reached, max_active, max_range_days
 from bot.services import get_services
 from bot.wizard import (
     DATES_PROMPT, TEXT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
     Steps, parse_price, start_draft, wizard_conversation,
 )
-from config import MAX_TRACKERS_PER_USER, MIN_POLL_INTERVAL_HOURS
+from config import MIN_POLL_INTERVAL_HOURS
 from daemon.scheduler import schedule_tracker
 from database.models import Tracker
 from utils.date_parser import describe_window, parse_date_or_range, window_problem
@@ -44,11 +45,8 @@ async def create_tracker_for_user(
 ) -> Tracker:
     """The one place trackers are created: enforces the limit and refuses duplicates."""
     services = get_services(context)
-    if await services.db.count_active(user_id) >= MAX_TRACKERS_PER_USER:
-        raise TrackerRejected(
-            f"⚠️ You already have {MAX_TRACKERS_PER_USER} active trackers and digests. "
-            "Delete or pause one in /mytracks first."
-        )
+    if await services.db.count_active(user_id) >= max_active(user_id):
+        raise TrackerRejected(limit_reached(user_id))
     existing = await services.db.find_tracker(user_id, origin, destination, start, end, direct_only)
     if existing:
         raise TrackerRejected(
@@ -126,7 +124,8 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     if budget is None:
         await update.message.reply_text(f"❌ I couldn't read the date or budget.\n{USAGE}")
         return
-    problem = window_problem(start_date, end_date) or (None if budget > 0 else "The budget must be above 0.")
+    problem = (window_problem(start_date, end_date, max_days=max_range_days(update.effective_user.id))
+               or (None if budget > 0 else "The budget must be above 0."))
     if problem:
         await update.message.reply_text(f"❌ {problem}")
         return

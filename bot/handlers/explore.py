@@ -17,6 +17,7 @@ from bot.keyboards import (
     DEFAULT_RESULT_LIMIT, EXPLORE_FROM_SEARCH, markup, quick_origins, regions, result_limits, sort_modes,
     stop_markup,
 )
+from bot.auth import max_range_days
 from bot.services import Services, get_services
 from bot.wizard import (
     TEXT, Context, Steps, airport_step, choice_step, draft, respond, run_in_background, start_draft,
@@ -24,7 +25,7 @@ from bot.wizard import (
 )
 from services.airports_data import REGION_LABELS, region_display_name
 from services.explore_engine import find_deals, rank_deals
-from utils.date_parser import MAX_RANGE_DAYS, days_ahead_window, describe_window
+from utils.date_parser import days_ahead_window, describe_window
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ I don't know '{args[0]}'.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
-    if not 1 <= days <= MAX_RANGE_DAYS:
-        await update.message.reply_text(f"❌ Days ahead must be between 1 and {MAX_RANGE_DAYS}.")
+    limit = max_range_days(update.effective_user.id)
+    if not 1 <= days <= limit:
+        await update.message.reply_text(f"❌ Days ahead must be between 1 and {limit}.")
         return
     budget = float(numbers[1]) if len(numbers) > 1 else 0
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
