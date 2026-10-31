@@ -1,3 +1,4 @@
+import asyncio
 import gzip
 import json
 
@@ -218,22 +219,97 @@ def mock_client(handler):
     return GoogleFlightsClient(transport=httpx.MockTransport(handler))
 
 
-@pytest.mark.asyncio
-async def test_fast_flights_exponential_backoff_retry_on_429():
-    """A 429 is retried with backoff, and the retry's results are returned."""
-    attempts = 0
+class FakeTime:
+    """A clock that only moves when the provider sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.sleeps = []
+
+    def clock(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        wake_at = self.now + seconds
+        await asyncio.sleep(0)  # let other searches start sleeping at the same moment
+        self.now = max(self.now, wake_at)
+
+
+def google(*statuses):
+    """A fake Google answering with these statuses in turn (200 = a results page), counting requests."""
+    replies = list(statuses)
+    calls = []
 
     def handler(request):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
+        calls.append(request)
+        status = replies.pop(0)
+        return httpx.Response(200, text=results_page()) if status == 200 else httpx.Response(status)
+
+    return mock_client(handler), calls
+
+
+def paced_provider(*statuses):
+    client, calls = google(*statuses)
+    time_ = FakeTime()
+    return FastFlightsProvider(client=client, clock=time_.clock, sleep=time_.sleep), calls, time_
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limit_pauses_then_retries_once():
+    provider, calls, time_ = paced_provider(429, 200)
+    offers = await provider.search_flights("SKG", "VIE", "2026-10-31")
+    assert [o.price for o in offers] == [45.0]
+    assert len(calls) == 2 and time_.sleeps == [60]
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_continued_blocks_double_the_pause_and_skip_google_meanwhile():
+    from providers.base import FlightSearchError
+    provider, calls, time_ = paced_provider(429, 429, 200)
+    with pytest.raises(FlightSearchError):
+        await provider.search_flights("SKG", "VIE", "2026-10-31")
+    assert len(calls) == 2  # the first request and one retry after 60 s; now paused for 120 s
+
+    with pytest.raises(FlightSearchError):
+        await provider.search_flights("SKG", "VIE", "2026-11-01")
+    assert len(calls) == 2  # a long pause fails at once, without contacting Google
+
+    time_.now += 120
+    assert [o.price for o in await provider.search_flights("SKG", "VIE", "2026-11-02")] == [45.0]
+    assert len(calls) == 3
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_a_successful_search_resets_the_pause():
+    provider, calls, time_ = paced_provider(429, 200, 429, 200)
+    await provider.search_flights("SKG", "VIE", "2026-10-31")
+    await provider.search_flights("SKG", "VIE", "2026-11-01")
+    assert time_.sleeps == [60, 60]
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_blocks_start_one_pause():
+    all_sent = asyncio.Event()
+    calls = []
+
+    async def handler(request):
+        calls.append(request)
+        if len(calls) <= 3:  # the first three are in flight together, then all get blocked
+            if len(calls) == 3:
+                all_sent.set()
+            await all_sent.wait()
             return httpx.Response(429)
         return httpx.Response(200, text=results_page())
 
-    provider = FastFlightsProvider(client=mock_client(handler))
-    offers = await provider.search_flights("SKG", "VIE", "2026-10-31")
-    assert [o.price for o in offers] == [45.0]
-    assert attempts == 2
+    time_ = FakeTime()
+    provider = FastFlightsProvider(client=mock_client(handler), clock=time_.clock, sleep=time_.sleep)
+    results = await asyncio.gather(*(provider.search_flights("SKG", "VIE", f"2026-11-0{d}") for d in (1, 2, 3)))
+    assert all(r[0].price == 45.0 for r in results)
+    assert time_.sleeps == [60, 60, 60]  # all three waited out the same 60 s pause, not 60 + 120 + 240
     await provider.close()
 
 

@@ -6,7 +6,7 @@ import urllib.parse
 from collections import deque
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from datetime import date
-from typing import Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 import httpx
 from fast_flights import FlightQuery, Passengers, create_query
@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # 434 queries/min sustained over 300 queries with no rate limiting; 8 was faster but each
 # request slowed down and CPU and memory climbed. Rerun the benchmark before raising it.
 CONCURRENT_REQUESTS = 5
+
+# When Google rate-limits us, every request pauses: 60 s at first, doubling while blocks continue.
+# Retrying straight away only prolongs a block. Searches wait out a short pause and fail at once
+# during a longer one, without contacting Google.
+FIRST_PAUSE_SECONDS = 60
+MAX_PAUSE_SECONDS = 15 * 60
+MAX_WAIT_SECONDS = 60
 
 
 class GoogleRateLimitException(Exception):
@@ -332,9 +339,16 @@ class FastFlightsProvider(AbstractFlightProvider):
 
     concurrency = CONCURRENT_REQUESTS
 
-    def __init__(self, client: Optional[GoogleFlightsClient] = None, cache: Optional[ResultCache] = None) -> None:
+    def __init__(self, client: Optional[GoogleFlightsClient] = None, cache: Optional[ResultCache] = None,
+                 clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
         self._fetcher = client or GoogleFlightsClient()
         self.cache = cache or ResultCache()
+        self._clock = clock
+        self._sleep = sleep
+        self._paused_at = float("-inf")
+        self._paused_until = float("-inf")
+        self._next_pause = FIRST_PAUSE_SECONDS
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._latencies: deque[float] = deque(maxlen=100)
 
@@ -417,28 +431,46 @@ class FastFlightsProvider(AbstractFlightProvider):
             query_kwargs["max_stops"] = 0
         q = create_query(**query_kwargs)
 
-        max_retries = 2
         async with self._semaphore:
-            t0 = time.perf_counter()
-            for attempt in range(max_retries + 1):
+            for _ in range(2):  # one retry, after the pause a rate limit starts
+                if not await self._wait_out_pause():
+                    return None
+                t0 = time.perf_counter()
+                started = self._clock()
                 try:
                     html = await self._fetcher.fetch_html(q)
                     # Parsing a results page takes tens of milliseconds; keep it off the event loop.
                     offers = await asyncio.to_thread(parse_google_flights_payload_generic, html, origin, dest_code,
                                                      departure_date, return_date, currency, direct_only)
                     self._latencies.append(time.perf_counter() - t0)
+                    self._next_pause = FIRST_PAUSE_SECONDS
                     return offers
                 except GoogleRateLimitException as e:
-                    if attempt == max_retries:
-                        logger.error(f"[PROVIDER_ERR] Max retries reached for {origin} -> {dest_code}: {e}")
-                        return None
-                    backoff_sec = 0.5 * (2 ** attempt)
-                    logger.warning(f"[RATE_LIMIT_RETRY] {e}. Retrying {origin} -> {dest_code} in {backoff_sec}s (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(backoff_sec)
+                    self._pause_after_block(e, started)
                 except Exception as e:
                     logger.error(f"[PROVIDER_ERR] Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
                     return None
+        logger.error(f"[PROVIDER_ERR] Still rate-limited after the pause: {origin} -> {dest_code} on {departure_date}")
         return None
+
+    async def _wait_out_pause(self) -> bool:
+        """Wait for a short rate-limit pause to end. False during a long one: don't contact Google."""
+        remaining = self._paused_until - self._clock()
+        if remaining <= 0:
+            return True
+        if remaining > MAX_WAIT_SECONDS:
+            return False
+        await self._sleep(remaining)
+        return True
+
+    def _pause_after_block(self, error: Exception, started: float) -> None:
+        if started <= self._paused_at:
+            return  # sent before the latest pause began; that pause already covers it
+        now = self._clock()
+        self._paused_at = now
+        self._paused_until = now + self._next_pause
+        logger.warning(f"[RATE_LIMIT] {error}. Pausing Google requests for {self._next_pause:.0f}s")
+        self._next_pause = min(self._next_pause * 2, MAX_PAUSE_SECONDS)
 
     async def search_flights_range(
         self,
