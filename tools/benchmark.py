@@ -31,24 +31,14 @@ class BatchResult:
     seconds: float
     request_latencies: list[float]
     empty_results: int
+    failed: int
     rate_limit_events: int
+    google_requests: int
     cpu_seconds: float
 
     @property
     def per_minute(self) -> float:
         return self.queries / self.seconds * 60
-
-
-class RateLimitCounter(logging.Handler):
-    """Counts the provider's rate-limit warnings (CAPTCHA pages, HTTP 429/403, retries)."""
-
-    def __init__(self) -> None:
-        super().__init__(logging.WARNING)
-        self.count = 0
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if "RATE_LIMIT" in record.getMessage():
-            self.count += 1
 
 
 def routes(count: int, batch: int = 0, first_day_offset: int = 21) -> list[tuple[str, str]]:
@@ -63,21 +53,23 @@ def routes(count: int, batch: int = 0, first_day_offset: int = 21) -> list[tuple
 async def run_batch(concurrency: int, queries: int, batch: int = 0, first_day: int = 21) -> BatchResult:
     provider = FastFlightsProvider()
     provider.concurrency = concurrency
-    counter = RateLimitCounter()
-    logging.getLogger("providers.fast_flights").addHandler(counter)
-
-    cpu_start, wall_start = time.process_time(), time.perf_counter()
-    results = await asyncio.gather(*(provider.search_flights(ORIGIN, dest, day) for dest, day in routes(queries, batch, first_day)))
-    seconds = time.perf_counter() - wall_start
-
-    logging.getLogger("providers.fast_flights").removeHandler(counter)
+    try:
+        cpu_start, wall_start = time.process_time(), time.perf_counter()
+        results = await asyncio.gather(*(provider.search_flights(ORIGIN, dest, day)
+                                         for dest, day in routes(queries, batch, first_day)), return_exceptions=True)
+        seconds = time.perf_counter() - wall_start
+    finally:
+        await provider.close()
+    stats = provider.stats()
     return BatchResult(
         concurrency=concurrency,
         queries=queries,
         seconds=seconds,
         request_latencies=provider.latency_samples(),
-        empty_results=sum(1 for offers in results if not offers),
-        rate_limit_events=counter.count,
+        empty_results=sum(1 for offers in results if offers == []),
+        failed=sum(1 for offers in results if isinstance(offers, Exception)),
+        rate_limit_events=stats.rate_limit_pauses,
+        google_requests=stats.google_requests,
         cpu_seconds=time.process_time() - cpu_start,
     )
 
@@ -87,13 +79,17 @@ def report(result: BatchResult) -> str:
     p95 = latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
     return "\n".join([
         f"Concurrency {result.concurrency}: {result.queries} queries in {result.seconds:.1f}s "
-        f"= {result.per_minute:.0f} queries/min",
+        f"= {result.per_minute:.0f} queries/min ({result.google_requests} Google requests, "
+        f"{result.google_requests / result.seconds * 60:.0f}/min; cities search every airport)",
         f"  per request: median {statistics.median(latencies):.2f}s, p95 {p95:.2f}s, "
         f"min {latencies[0]:.2f}s, max {latencies[-1]:.2f}s",
-        f"  no offers: {result.empty_results}/{result.queries}   rate-limit events: {result.rate_limit_events}",
+        f"  no offers: {result.empty_results}/{result.queries}   failed: {result.failed}   "
+        f"rate-limit pauses: {result.rate_limit_events}",
         f"  CPU: {result.cpu_seconds:.1f}s ({result.cpu_seconds / result.seconds * 100:.0f}% of one core)",
         *(["  ⚠️  Most queries returned no offers: Google may be serving a consent or error page, "
            "so these numbers are not valid."] if result.empty_results > result.queries / 2 else []),
+        *(["  ⚠️  Most queries failed: Google is rate-limiting this IP, so these numbers are not valid."]
+          if result.failed > result.queries / 2 else []),
     ])
 
 
