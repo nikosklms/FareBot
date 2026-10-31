@@ -109,3 +109,12 @@ def test_deal_landing_elsewhere_is_named_and_linked():
     assert "<b>ATH ✈️ IST</b>" in entry and "→ lands at" in entry and "(SAW)" in entry
     same = Deal("ATH", "FCO", "Rome", "Italy", "2027-01-05", 40.0, "ITA", True, None, 0.0, arrival="FCO")
     assert "lands at" not in deal_entry(same, 1, show_discount=True)
+
+
+def test_progress_finish_time_uses_the_bot_timezone(monkeypatch):
+    from datetime import datetime, timezone
+    import utils.date_parser as dates
+    from bot.formatting import progress_text
+    monkeypatch.setattr(dates, "_bot_timezone", lambda: timezone.utc)
+    monkeypatch.setattr("bot.formatting.now_local", lambda: datetime(2026, 11, 1, 22, 50, tzinfo=timezone.utc))
+    assert "done around <b>23:00</b>" in progress_text("t", "d", 0, 10, 600)

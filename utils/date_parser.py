@@ -19,6 +19,11 @@ def _bot_timezone():
     return get_timezone()
 
 
+def now_local() -> datetime:
+    """Now in the bot's timezone (TIMEZONE, else the server's)."""
+    return datetime.now(_bot_timezone())
+
+
 def today_local() -> date:
     """Today in the bot's timezone (TIMEZONE, else the server's), the same one digest times use."""
     return datetime.now(_bot_timezone()).date()

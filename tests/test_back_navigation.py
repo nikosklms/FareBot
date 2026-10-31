@@ -108,3 +108,36 @@ async def test_back_after_the_wizard_ended_does_nothing(bot):
     calls = len(bot.telegram.calls)
     await bot.press("back")
     assert len(bot.telegram.calls) == calls
+
+
+async def test_a_wizard_replaced_by_the_editor_says_so_instead_of_going_silent(bot):
+    from tests.test_search import start_to_dates
+    tracker = await bot.services.db.create_tracker(USER_ID, "ATH", "LON", future(5), 100.0)
+    await start_to_dates(bot)
+    search_message = bot.telegram.last_message_id
+    await bot.press(f"dash:edit:t:{tracker.id}", message_id=900)
+    await bot.press("edit:done", message_id=900)
+
+    await bot.press("src:date:preset:next_7_days", message_id=search_message)
+    assert "replaced by a newer one. Start again with /search" in bot.telegram.alerts[-1]
+
+
+async def test_typing_into_a_replaced_wizard_gets_an_answer(bot):
+    from tests.test_search import start_to_dates
+    tracker = await bot.services.db.create_tracker(USER_ID, "ATH", "LON", future(5), 100.0)
+    await start_to_dates(bot)
+    await bot.press(f"dash:edit:t:{tracker.id}", message_id=900)
+    await bot.press("edit:done", message_id=900)
+    await bot.send(future(3))  # the search wizard's date step was left open behind the editor
+    assert bot.telegram.last_text == "That wizard was closed. Start again with /search."
+
+
+async def test_an_old_calendars_buttons_dont_crash(bot):
+    from tests.test_search import start_to_dates
+    await start_to_dates(bot)
+    await bot.press("src:date:cal:open")
+    old_calendar = bot.telegram.last_message_id
+    await start_to_dates(bot)  # a new /search clears the calendar state
+    await bot.press("src:date:cal:mode:single", message_id=old_calendar)
+    assert "Something went wrong" not in bot.telegram.last_text
+    assert "Pick the departure date" in bot.telegram.last_text

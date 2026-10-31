@@ -1,6 +1,6 @@
 """HTML message rendering. Every line is self-contained so messages can be split on newlines."""
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from html import escape
 from typing import Optional
 
@@ -9,7 +9,7 @@ from providers.base import FlightOffer
 from providers.fast_flights import build_google_flights_url
 from services.airports_data import airport_name, region_display_name
 from services.explore_engine import Deal, DealSection, baseline_price
-from utils.date_parser import describe_window
+from utils.date_parser import describe_window, now_local, today_local
 
 MAX_MESSAGE_LENGTH = 4000
 NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
@@ -122,7 +122,7 @@ def deal_report(title: str, sections: list[DealSection]) -> str:
 def short_date(iso_date: str) -> str:
     """'2026-10-31' -> '31 Oct'; the year is added when it isn't the current one."""
     day = date.fromisoformat(iso_date)
-    return f"{day.day} {day:%b}" + (f" {day.year}" if day.year != date.today().year else "")
+    return f"{day.day} {day:%b}" + (f" {day.year}" if day.year != today_local().year else "")
 
 
 def short_window(start: str, end: Optional[str]) -> str:
@@ -143,7 +143,7 @@ def progress_bar(done: int, total: int, width: int = 10) -> str:
 
 def progress_text(title: str, details: str, done: int, total: int, seconds_left: float) -> str:
     """Short lines that fit a phone screen; only the bar and the times change between updates."""
-    finish = (datetime.now().astimezone() + timedelta(seconds=seconds_left)).strftime("%H:%M")
+    finish = (now_local() + timedelta(seconds=seconds_left)).strftime("%H:%M")
     percent = done * 100 // total if total else 0
     return (f"{title}\n📅 {details}\n\n"
             f"{progress_bar(done, total)} {percent}%\n"

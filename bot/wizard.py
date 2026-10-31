@@ -41,6 +41,7 @@ Ask = Callable[[Update, Context], Awaitable[int]]
 TEXT = filters.TEXT & ~filters.COMMAND
 TASK_KEY = "running_task"
 ACTIVE_WIZARD_KEY = "active_wizard"
+RESTART_COMMAND = {"edit": "mytracks"}  # the editor is opened from /mytracks, the others by their own command
 CALENDAR_KEY = "calendar"
 
 
@@ -113,13 +114,26 @@ class Steps:
 
 
 def _only_while_active(name: str, callback: Ask) -> Ask:
-    """Ignore input meant for a newer wizard (the editor can start while another wizard is open)."""
+    """Only the newest wizard answers (the editor can start while another wizard is open).
+
+    A wizard that was replaced closes itself and says so on its buttons. For typed text it
+    stays quiet while another wizard is answering, so the user never gets two replies.
+    """
 
     @wraps(callback)
     async def guarded(update: Update, context: Context) -> Optional[int]:
-        if context.user_data.get(ACTIVE_WIZARD_KEY) != name:
-            return None  # keep this wizard where it is
-        return await callback(update, context)
+        active = context.user_data.get(ACTIVE_WIZARD_KEY)
+        if active != name:
+            restart = f"Start again with /{RESTART_COMMAND.get(name, name)}."
+            if update.callback_query:
+                await update.callback_query.answer(f"That step was replaced by a newer one. {restart}", show_alert=True)
+            elif active is None and update.message:
+                await update.message.reply_text(f"That wizard was closed. {restart}")
+            return ConversationHandler.END
+        state = await callback(update, context)
+        if state == ConversationHandler.END and context.user_data.get(ACTIVE_WIZARD_KEY) == name:
+            context.user_data.pop(ACTIVE_WIZARD_KEY, None)  # finished: nothing is answering typed text now
+        return state
 
     return guarded
 
@@ -290,7 +304,8 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask)
     """Open, navigate, switch single/range mode, pick days, or close (Back) the date picker."""
 
     def picker(context: Context) -> dict[str, Any]:
-        return context.user_data.setdefault(CALENDAR_KEY, {"mode": RANGE, "start": None, "month": None})
+        # Buttons on an older calendar can arrive after its state was cleared; start from this month.
+        return context.user_data.setdefault(CALENDAR_KEY, {"mode": RANGE, "start": None, "month": f"{today_local():%Y-%m}"})
 
     def render(context: Context) -> InlineKeyboardMarkup:
         cal = picker(context)
