@@ -42,6 +42,16 @@ class FlightSearchError(Exception):
     """
 
 
+class PartialSearchError(FlightSearchError):
+    """Some days of a date range couldn't be searched. offers holds what the other days found,
+    sorted by price, so a price under budget is still real, but the lowest price may not be.
+    """
+
+    def __init__(self, offers: list, failed_days: int, total_days: int) -> None:
+        super().__init__(f"{failed_days} of {total_days} days couldn't be searched")
+        self.offers = offers
+
+
 class AbstractFlightProvider(ABC):
     # Requests the provider runs in parallel, used for time estimates.
     concurrency: int = 1

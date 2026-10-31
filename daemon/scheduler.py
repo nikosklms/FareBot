@@ -20,7 +20,7 @@ from bot.lifecycle import track_task
 from bot.services import Services, get_services
 from config import MAX_CONSECUTIVE_FAILURES
 from database.models import ACTIVE, EXPIRED, PAUSED, Digest, Tracker
-from providers.base import FlightSearchError
+from providers.base import FlightSearchError, PartialSearchError
 from providers.fast_flights import build_google_flights_url
 from services.airports_data import region_display_name
 from services.explore_engine import find_deals, rank_deals
@@ -107,8 +107,13 @@ async def tracker_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         keep_running = await check_tracker(get_services(context), context.bot, context.job.data)
     except asyncio.CancelledError:
         return  # shutting down; the next start checks it again
-    if not keep_running:
+    if not keep_running and not context.job.removed:  # pausing or deleting it already removed the job
         context.job.schedule_removal()
+
+
+def _search_settings(tracker: Tracker) -> tuple:
+    return (tracker.origin_code, tracker.destination_code, tracker.departure_date, tracker.departure_date_end,
+            tracker.direct_only, tracker.max_budget)
 
 
 async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
@@ -130,19 +135,32 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
         await _notify(services, bot, tracker, f"ℹ️ Your tracker for {route} on <b>{dates}</b> expired: the departure date has passed.")
         return False
 
+    partial = False
     try:
         if tracker.departure_date_end:
             offers = await services.provider.search_flights_range(
                 origin=tracker.origin_code, destination=tracker.destination_code,
-                start_date=tracker.departure_date, end_date=tracker.departure_date_end,
-                direct_only=tracker.direct_only,
+                start_date=max(tracker.departure_date, today_local().isoformat()),  # days already gone are skipped
+                end_date=tracker.departure_date_end, direct_only=tracker.direct_only,
             )
         else:
             offers = await services.provider.search_flights(
                 origin=tracker.origin_code, destination=tracker.destination_code,
                 departure_date=tracker.departure_date, direct_only=tracker.direct_only,
             )
+    except PartialSearchError as e:
+        offers, partial = e.offers, True
     except FlightSearchError:
+        offers = None
+
+    # A range search can take minutes; the user may have paused, deleted or edited the tracker meanwhile.
+    current = await db.get_tracker(tracker.id)
+    if not current or current.status != ACTIVE:
+        return False
+    if _search_settings(current) != _search_settings(tracker):
+        return True  # the next check uses the new settings
+
+    if offers is None:
         failures = await db.record_failure(tracker.id)
         if failures >= MAX_CONSECUTIVE_FAILURES:
             await db.set_tracker_status(tracker.id, PAUSED)
@@ -153,12 +171,15 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
         return True
 
     if not offers:
-        await db.record_no_flights(tracker.id)
+        if not partial:
+            await db.record_no_flights(tracker.id)
         return True
 
     offers.sort(key=lambda o: o.price)
     top = offers[:5]
     lowest = top[0]
+    if partial and lowest.price >= tracker.max_budget:
+        return True  # some days couldn't be searched, so this may not be the real lowest price: don't record it
     await db.record_price(tracker.id, lowest.price, lowest.airline)
     logger.info("[TRACKER] #%d %s -> %s lowest %s (budget %s)", tracker.id, tracker.origin_code,
                 tracker.destination_code, eur(lowest.price), eur(tracker.max_budget))
@@ -198,8 +219,10 @@ async def _notify(services: Services, bot: Bot, tracker: Tracker, text: str,
         await bot.send_message(chat_id=tracker.user_id, text=text, reply_markup=reply_markup)
         return True
     except Forbidden:
-        logger.warning("User %s blocked the bot; pausing tracker #%d", tracker.user_id, tracker.id)
-        await services.db.set_tracker_status(tracker.id, PAUSED)
+        current = await services.db.get_tracker(tracker.id)
+        if current and current.status == ACTIVE:  # an expired tracker stays expired
+            logger.warning("User %s blocked the bot; pausing tracker #%d", tracker.user_id, tracker.id)
+            await services.db.set_tracker_status(tracker.id, PAUSED)
     except TelegramError:
         logger.exception("Failed to send tracker #%d notification", tracker.id)
     return False
@@ -211,11 +234,16 @@ async def _notify(services: Services, bot: Bot, tracker: Tracker, text: str,
 
 async def digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     track_task(context.application)
+    services = get_services(context)
+    today = today_local()
+    if services.digest_runs.get(context.job.data) == today:
+        return  # the clocks went back, so tonight this delivery time came round twice
+    services.digest_runs[context.job.data] = today
     try:
-        keep_running = await send_digest(get_services(context), context.bot, context.job.data, context.user_data)
+        keep_running = await send_digest(services, context.bot, context.job.data, context.user_data)
     except asyncio.CancelledError:
         return  # shutting down; send_digest already told the user
-    if not keep_running:
+    if not keep_running and not context.job.removed:
         context.job.schedule_removal()
 
 
@@ -242,7 +270,16 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
     if is_past(start):
         start = today_local().isoformat()
 
-    status = await _send(bot, digest.user_id, f"{title}\n\n⏳ Searching deals for {digest_window_text(digest)}…")
+    try:
+        status = await bot.send_message(chat_id=digest.user_id,
+                                        text=f"{title}\n\n⏳ Searching deals for {digest_window_text(digest)}…")
+    except Forbidden:
+        logger.warning("User %s blocked the bot; pausing digest #%d", digest.user_id, digest.id)
+        await services.db.set_digest_status(digest.id, PAUSED)
+        return False  # don't run a whole explore for someone who can't receive it
+    except TelegramError:
+        logger.exception("Failed to send digest #%d", digest.id)
+        status = None
 
     when = short_window(start, end)
 

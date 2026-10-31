@@ -382,8 +382,16 @@ async def test_booking_links_keep_direct_only():
     [any_offer] = await provider.search_flights("SKG", "VIE", "2026-10-31")
     [direct_offer] = await provider.search_flights("SKG", "VIE", "2026-10-31", direct_only=True)
     assert any_offer.booking_url != direct_offer.booking_url
-    assert "max_stops" not in any_offer.booking_url and "max_stops=0" in direct_offer.booking_url
+    assert "max_stops" not in direct_offer.booking_url  # the filter is inside tfs, where Google reads it
     await provider.close()
+
+
+def test_direct_only_links_encode_the_stops_filter():
+    from urllib.parse import parse_qs, urlparse
+    from providers.fast_flights import build_google_flights_url
+    tfs = {direct: parse_qs(urlparse(build_google_flights_url("ATH", "LHR", "2026-11-21", direct_only=direct)).query)["tfs"]
+           for direct in (False, True)}
+    assert tfs[False] != tfs[True]
 
 
 def test_merge_keeps_different_flights_at_the_same_price():
@@ -411,3 +419,46 @@ def test_summary_card_for_a_city_is_dropped_when_a_detailed_card_exists():
     detailed = FlightOffer("SKG", "STN", "2027-01-01", 149.0, airline="Ryanair", departure_time="20:40")
     other_day = FlightOffer("SKG", "LON", "2027-01-02", 149.0, airline="Various Airlines")
     assert merge_duplicate_offers([summary, detailed, other_day]) == [detailed, other_day]
+
+
+@pytest.mark.asyncio
+async def test_an_answer_to_a_request_sent_before_a_block_keeps_the_pause_doubling():
+    slow_sent, release = asyncio.Event(), asyncio.Event()
+
+    async def handler(request):
+        if not slow_sent.is_set():
+            slow_sent.set()
+            await release.wait()  # sent first, answers after the block
+            return httpx.Response(200, text=results_page())
+        return httpx.Response(429)
+
+    time_ = FakeTime()
+    provider = FastFlightsProvider(client=mock_client(handler), clock=time_.clock, sleep=time_.sleep)
+    slow = asyncio.create_task(provider.search_flights("SKG", "VIE", "2026-12-01"))
+    await slow_sent.wait()
+    blocked = asyncio.create_task(provider.search_flights("SKG", "VIE", "2026-12-02"))
+    for _ in range(20):
+        await asyncio.sleep(0)
+        if provider.stats().rate_limit_pauses:
+            break
+    release.set()
+    assert (await slow)[0].price == 45.0
+    await asyncio.gather(blocked, return_exceptions=True)
+    assert provider._next_pause == 240  # 60, then 120 after the retry was blocked, then doubled again
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_a_range_with_failed_days_says_it_is_partial():
+    from providers.base import PartialSearchError
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(500) if len(calls) == 1 else httpx.Response(200, text=results_page(price=60.0))
+
+    provider = FastFlightsProvider(client=mock_client(handler))
+    with pytest.raises(PartialSearchError) as partial:
+        await provider.search_flights_range("SKG", "VIE", "2026-12-01", "2026-12-03")
+    assert [o.price for o in partial.value.offers] == [60.0, 60.0]
+    await provider.close()

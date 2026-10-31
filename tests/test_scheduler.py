@@ -223,3 +223,103 @@ async def test_removed_users_stop_getting_alerts(bot, provider, monkeypatch):
     assert (await bot.services.db.get_tracker(t.id)).status == PAUSED
     assert (await bot.services.db.get_digest(digest.id)).status == PAUSED
     assert bot.telegram.calls_to("sendMessage") == [] and provider.queries == []
+
+
+async def test_a_blocked_users_expired_tracker_stays_expired(bot):
+    from daemon.scheduler import cleanup_job
+    from types import SimpleNamespace
+    from datetime import timedelta
+    from utils.date_parser import today_local
+    db = bot.services.db
+    t = await tracker(bot, start=(today_local() - timedelta(days=2)).isoformat())  # recent enough to be kept a while
+    bot.telegram.blocked_chats.add(USER_ID)
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False
+    assert (await db.get_tracker(t.id)).status == EXPIRED
+    sends = len(bot.telegram.calls_to("sendMessage"))
+    await cleanup_job(SimpleNamespace(bot=bot.app.bot, bot_data=bot.app.bot_data, job_queue=bot.app.job_queue))
+    assert (await db.get_tracker(t.id)).status == EXPIRED
+    assert len(bot.telegram.calls_to("sendMessage")) == sends  # not expired again, so no new notice
+
+
+async def test_a_blocked_users_digest_pauses_without_searching(bot, provider):
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=2)
+    bot.telegram.blocked_chats.add(USER_ID)
+    assert await send_digest(bot.services, bot.app.bot, digest.id) is False
+    assert (await bot.services.db.get_digest(digest.id)).status == PAUSED
+    assert not provider.queries
+
+
+async def test_range_trackers_skip_days_that_have_passed(bot, provider):
+    from utils.date_parser import today_local
+    from datetime import timedelta
+    today = today_local()
+    t = await tracker(bot, start=(today - timedelta(days=2)).isoformat(), end=(today + timedelta(days=1)).isoformat())
+    await check_tracker(bot.services, bot.app.bot, t.id)
+    assert sorted({day for _, _, day, _ in provider.queries}) == [today.isoformat(), (today + timedelta(days=1)).isoformat()]
+
+
+async def paused_mid_search(bot, provider, change):
+    """Run a check whose search lets `change` happen to the tracker before results come back."""
+    import asyncio
+    provider.offers = offers_at(50.0)
+    searches = provider.search_flights
+    t = await tracker(bot)
+
+    async def slow_search(*args, **kwargs):
+        await change(t)
+        await asyncio.sleep(0)
+        return await searches(*args, **kwargs)
+
+    provider.search_flights = slow_search
+    return t, await check_tracker(bot.services, bot.app.bot, t.id)
+
+
+async def test_pausing_during_a_check_stops_its_alert(bot, provider):
+    db = bot.services.db
+    t, keep = await paused_mid_search(bot, provider, lambda t: db.set_tracker_status(t.id, PAUSED))
+    assert keep is False and "PRICE DROP ALERT" not in " ".join(bot.telegram.texts)
+
+
+async def test_deleting_during_a_check_is_quiet(bot, provider):
+    db = bot.services.db
+    t, keep = await paused_mid_search(bot, provider, lambda t: db.delete_tracker(t.id))
+    assert keep is False and await db.get_tracker(t.id) is None
+
+
+async def test_a_budget_edited_during_a_check_waits_for_the_next_check(bot, provider):
+    db = bot.services.db
+    t, keep = await paused_mid_search(bot, provider, lambda t: db.update_tracker(t.id, max_budget=40.0))
+    assert keep is True and "PRICE DROP ALERT" not in " ".join(bot.telegram.texts)
+    assert (await db.get_tracker(t.id)).status == ACTIVE
+
+
+async def test_partial_range_alerts_but_never_records_a_lowest_price(bot, provider):
+    from providers.base import FlightOffer, PartialSearchError
+    db = bot.services.db
+    t = await tracker(bot, start=future(5), end=future(7), budget=100.0)
+
+    async def partial(*args, **kwargs):
+        raise PartialSearchError([FlightOffer("ATH", "LON", future(6), price=150.0)], 2, 3)
+
+    provider.search_flights_range = partial
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is True
+    assert (await db.get_tracker(t.id)).last_price_found is None  # €150 may not be the real lowest
+
+    async def partial_cheap(*args, **kwargs):
+        raise PartialSearchError([FlightOffer("ATH", "LON", future(6), price=80.0)], 2, 3)
+
+    provider.search_flights_range = partial_cheap
+    assert await check_tracker(bot.services, bot.app.bot, t.id) is False  # €80 under budget is real: alert
+    assert "PRICE DROP ALERT" in bot.telegram.last_text
+
+
+async def test_a_digest_runs_once_on_the_night_the_clocks_go_back(bot, provider):
+    from types import SimpleNamespace
+    from daemon.scheduler import digest_job
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=1)
+    context = SimpleNamespace(application=bot.app, bot=bot.app.bot, bot_data=bot.app.bot_data, user_data={},
+                              job=SimpleNamespace(data=digest.id, removed=False, schedule_removal=lambda: None))
+    await digest_job(context)
+    searched = len(provider.queries)
+    await digest_job(context)  # the same local time comes round again an hour later
+    assert searched and len(provider.queries) == searched

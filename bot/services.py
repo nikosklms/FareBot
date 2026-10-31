@@ -19,6 +19,7 @@ class Services:
     timezone: tzinfo
     shutting_down: bool = False  # set on Ctrl+C so cancelled searches can say why they stopped
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    digest_runs: dict = field(default_factory=dict)  # digest id -> local date it last ran
 
 
 def get_services(context: ContextTypes.DEFAULT_TYPE) -> Services:

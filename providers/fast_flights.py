@@ -12,7 +12,7 @@ import httpx
 from fast_flights import FlightQuery, Passengers, create_query
 from selectolax.lexbor import LexborHTMLParser
 
-from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError, ProviderStats
+from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError, PartialSearchError, ProviderStats
 from providers.result_cache import ResultCache
 from services.airports_data import MULTI_AIRPORT_CITIES
 from utils.date_parser import generate_date_sequence
@@ -112,15 +112,14 @@ def build_google_flights_url(
 ) -> str:
     """Construct a valid Google Flights search URL with protobuf tfs parameter."""
     try:
+        # The stops filter must be inside the encoded search (tfs); Google ignores a separate URL parameter.
         q = create_query(
             flights=[FlightQuery(date=departure_date, from_airport=origin, to_airport=destination)],
             passengers=Passengers(adults=1),
-            currency=currency
+            currency=currency,
+            **({"max_stops": 0} if direct_only else {}),
         )
-        params = q.params()
-        if direct_only:
-            params["max_stops"] = 0
-        return f"https://www.google.com/travel/flights/search?{urllib.parse.urlencode(params)}"
+        return f"https://www.google.com/travel/flights/search?{urllib.parse.urlencode(q.params())}"
     except Exception as e:
         logger.warning(f"Failed to generate Google Flights tfs URL: {e}")
         text_query = f"Flights from {origin} to {destination} on {departure_date}"
@@ -461,7 +460,8 @@ class FastFlightsProvider(AbstractFlightProvider):
                     offers = await asyncio.to_thread(parse_google_flights_payload_generic, html, origin, dest_code,
                                                      departure_date, return_date, currency, direct_only)
                     self._latencies.append(time.perf_counter() - t0)
-                    self._next_pause = FIRST_PAUSE_SECONDS
+                    if started > self._paused_at:  # an answer to a request sent before the block proves nothing
+                        self._next_pause = FIRST_PAUSE_SECONDS
                     return offers
                 except GoogleRateLimitException as e:
                     self._pause_after_block(e, started)
@@ -515,4 +515,6 @@ class FastFlightsProvider(AbstractFlightProvider):
         offers = [offer for batch in results if isinstance(batch, list) for offer in batch]
         offers.sort(key=lambda o: o.price)
         logger.info(f"[PROVIDER] Range search {origin} -> {destination} across {len(dates)} dates: {len(offers)} offers")
+        if failures:
+            raise PartialSearchError(offers, len(failures), len(dates))
         return offers
