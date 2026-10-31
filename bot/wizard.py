@@ -256,7 +256,7 @@ def dates_step(prefix: str, state: int, on_dates: OnDates, on_back: Ask) -> list
 
 def timeframe_keyboard(prefix: str, day_options: list[int], default: int = 30) -> InlineKeyboardMarkup:
     labels = [f"{days} Days (Default)" if days == default else f"{days} Days" for days in day_options]
-    day_buttons = [button(label, f"{prefix}:days:{days}") for label, days in zip(labels, day_options)]
+    day_buttons = [button(label, f"{prefix}:days:{days}") for label, days in zip(labels, day_options, strict=True)]
     return markup(*pairs(day_buttons), [button("📆 Calendar", f"{prefix}:cal:open")], back=True)
 
 

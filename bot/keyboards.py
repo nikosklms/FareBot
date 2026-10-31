@@ -79,7 +79,7 @@ def flight_types(prefix: str) -> InlineKeyboardMarkup:
 
 def result_limits(prefix: str) -> InlineKeyboardMarkup:
     labels = [f"{n} (Default)" if n == DEFAULT_RESULT_LIMIT else str(n) for n in RESULT_LIMITS]
-    return markup(*pairs([button(text, f"{prefix}:{n}") for text, n in zip(labels, RESULT_LIMITS)]), back=True)
+    return markup(*pairs([button(text, f"{prefix}:{n}") for text, n in zip(labels, RESULT_LIMITS, strict=True)]), back=True)
 
 
 def stop_markup() -> InlineKeyboardMarkup:

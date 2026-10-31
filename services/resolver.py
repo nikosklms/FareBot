@@ -32,7 +32,7 @@ class LocationResolver:
         self._codes = {code for code, _, _ in self.data}
         self._names = [normalize(name) for _, name, _ in self.data]
         self._countries = [normalize(country) for _, _, country in self.data]
-        self._search_text = [f"{name} {country}" for name, country in zip(self._names, self._countries)]
+        self._search_text = [f"{name} {country}" for name, country in zip(self._names, self._countries, strict=True)]
 
     def resolve(self, query: str, limit: int = 5) -> list[Match]:
         """Best guesses for a typed place, best first. Always returns guesses for non-empty input.
