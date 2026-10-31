@@ -1,7 +1,7 @@
 """Background jobs: tracker price checks, weekly digests and nightly cleanup."""
 import asyncio
 import logging
-from datetime import time, tzinfo
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Optional
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -84,12 +84,27 @@ def unschedule_digest(job_queue: Optional[JobQueue], digest_id: int) -> None:
     _remove_jobs(job_queue, digest_job_name(digest_id))
 
 
+def first_check_in(tracker: Tracker, stagger: float, now: datetime) -> float:
+    """Seconds until a tracker's first check after a restart: when it was due anyway, and at
+    least the stagger, so restarting (or a crash loop) never checks every tracker at once."""
+    if not tracker.last_checked_at:
+        return stagger
+    try:
+        last = datetime.strptime(tracker.last_checked_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return stagger
+    due = last + timedelta(hours=tracker.frequency_hours)
+    return max(stagger, (due - now).total_seconds())
+
+
 async def register_jobs(application: Application) -> None:
     """Schedule every active tracker and digest at startup, spreading out the first checks."""
     services: Services = application.bot_data["services"]
     trackers = await services.db.active_trackers()
+    now = datetime.now(timezone.utc)
     for index, tracker in enumerate(trackers):
-        schedule_tracker(application.job_queue, tracker, first_seconds=10 + index * STARTUP_STAGGER_SECONDS)
+        first = first_check_in(tracker, 10 + index * STARTUP_STAGGER_SECONDS, now)
+        schedule_tracker(application.job_queue, tracker, first_seconds=first)
     digests = await services.db.active_digests()
     for digest in digests:
         schedule_digest(application.job_queue, digest, services.timezone)

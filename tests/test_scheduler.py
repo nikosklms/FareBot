@@ -323,3 +323,20 @@ async def test_a_digest_runs_once_on_the_night_the_clocks_go_back(bot, provider)
     searched = len(provider.queries)
     await digest_job(context)  # the same local time comes round again an hour later
     assert searched and len(provider.queries) == searched
+
+
+def test_after_a_restart_trackers_are_checked_when_due():
+    from datetime import datetime, timezone
+    from daemon.scheduler import first_check_in
+    from database.models import Tracker
+    now = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
+
+    def checked(at, hours=6):
+        return Tracker(id=1, user_id=1, origin_code="ATH", destination_code="LON", departure_date="2026-12-01",
+                       departure_date_end=None, direct_only=False, status=ACTIVE, max_budget=100.0,
+                       frequency_hours=hours, last_checked_at=at)
+
+    assert first_check_in(checked("2026-11-01 11:00:00"), 10, now) == 5 * 3600  # checked an hour ago
+    assert first_check_in(checked("2026-11-01 01:00:00"), 30, now) == 30         # overdue: soon, staggered
+    assert first_check_in(checked(None), 50, now) == 50                          # never checked
+    assert first_check_in(checked("not a time"), 10, now) == 10
