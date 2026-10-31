@@ -11,14 +11,16 @@ from telegram.request import BaseRequest, RequestData
 
 from bot.services import Services
 from providers.base import AbstractFlightProvider, FlightOffer
+from utils.date_parser import today_local
 
 USER_ID = 123
 BOT_USER = {"id": 999, "is_bot": True, "first_name": "FareBot", "username": "farebot"}
 
 
 def future(days: int) -> str:
-    """An ISO date `days` from today, so tests never go stale."""
-    return (date.today() + timedelta(days=days)).isoformat()
+    """An ISO date `days` from today in the bot's timezone, so tests never go stale or disagree
+    with the bot around midnight when TIMEZONE differs from the machine's."""
+    return (today_local() + timedelta(days=days)).isoformat()
 
 
 class FakeTelegram(BaseRequest):

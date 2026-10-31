@@ -1,7 +1,7 @@
 import asyncio
 
-from bot.lifecycle import RESTART_NOTICE, request_stop, track_task
-from daemon.scheduler import send_digest
+from bot.lifecycle import RESTART_NOTICE, request_stop
+from daemon.scheduler import schedule_digest
 from tests.fakes import USER_ID, future
 
 
@@ -35,10 +35,9 @@ async def test_stop_interrupts_running_digest(bot, provider):
     digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=3, delivery_day="Friday",
                                                  delivery_time="21:46")
 
-    async def job():
-        track_task(bot.app)
-        await send_digest(bot.services, bot.app.bot, digest.id, bot.user_data)
-    task = asyncio.create_task(job())
+    schedule_digest(bot.app.job_queue, digest, bot.services.timezone)
+    [job] = bot.app.job_queue.get_jobs_by_name(f"digest_job_{digest.id}")
+    task = asyncio.create_task(job.run(bot.app))  # digest_job, as at delivery time
     await started.wait()
 
     request_stop(bot.app)

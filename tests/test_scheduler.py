@@ -147,11 +147,17 @@ async def test_digest_report_has_collapsible_track_buttons(bot, provider):
     assert "Tracking started" in bot.telegram.last_text
 
 
-async def test_digest_job_runs_with_the_users_data(bot):
-    digest = await bot.services.db.create_digest(USER_ID, "ATH", "europe", days_ahead=30)
+async def test_digest_job_runs_with_the_users_data(bot, provider):
+    provider.offers = offers_at(40.0, typical_min=90.0, typical_max=110.0)
+    digest = await bot.services.db.create_digest(USER_ID, "ATH", "oceania", days_ahead=2)
     schedule_digest(bot.app.job_queue, digest, timezone.utc)
     [job] = bot.app.job_queue.get_jobs_by_name(f"digest_job_{digest.id}")
     assert job.user_id == USER_ID and job.chat_id == USER_ID
+
+    await job.run(bot.app)  # what the scheduler does at delivery time
+    assert "Weekly Flight Digest: ATH → Oceania" in bot.telegram.last_text
+    # The 'Track a deal' button appears only when the job passes the user's data along.
+    assert bot.telegram.button_data("Track a deal")
 
 
 async def test_price_equal_to_budget_is_not_a_drop(bot, provider):

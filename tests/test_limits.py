@@ -85,7 +85,7 @@ async def test_the_admin_keeps_the_higher_limit(bot):
     for day in range(MEMBER_MAX_ACTIVE + 1):
         await db.create_tracker(USER_ID, "ATH", "LON", future(10 + day), 100.0)
     await bot.send(f"/track ATH PAR {future(5)} 100")
-    assert "Tracking started" in bot.telegram.last_text or "Tracker #" in bot.telegram.last_text
+    assert "Tracking started" in bot.telegram.last_text
     assert await db.count_active(USER_ID) == MEMBER_MAX_ACTIVE + 2
 
 
