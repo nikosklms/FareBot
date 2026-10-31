@@ -145,7 +145,8 @@ class BotHarness:
     def jobs(self, prefix: str = "") -> list[str]:
         return [job.name for job in self.app.job_queue.jobs() if job.name.startswith(prefix)]
 
-    async def send(self, text: str, user_id: int = USER_ID) -> None:
+    async def send(self, text: str, user_id: int = USER_ID, edited: bool = False) -> None:
+        """A new message, or with edited=True the update Telegram sends when a message is edited."""
         message = {
             "message_id": next(self._ids),
             "date": int(time.time()),
@@ -156,7 +157,10 @@ class BotHarness:
         if text.startswith("/"):
             command = text.split()[0]
             message["entities"] = [{"type": "bot_command", "offset": 0, "length": len(command)}]
-        await self.app.process_update(Update.de_json({"update_id": next(self._ids), "message": message}, self.app.bot))
+        if edited:
+            message["edit_date"] = int(time.time())
+        kind = "edited_message" if edited else "message"
+        await self.app.process_update(Update.de_json({"update_id": next(self._ids), kind: message}, self.app.bot))
 
     async def press(self, data: str, user_id: int = USER_ID, message_id: int = 1) -> None:
         query = {

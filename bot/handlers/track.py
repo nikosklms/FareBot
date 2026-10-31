@@ -20,7 +20,8 @@ from utils.date_parser import describe_window, parse_date_or_range, window_probl
 ORIGIN, DESTINATION, DATES, FLIGHT_TYPE, BUDGET, FREQUENCY = range(6)
 DRAFT = "track"
 FREQUENCIES = [h for h in (6, 12, 24) if h >= MIN_POLL_INTERVAL_HOURS]
-USAGE = "Usage: <code>/track ATH LON 2026-09-01[..2026-09-15] 150 [direct]</code>"
+USAGE = ("Usage: <code>/track ATH LON 2026-09-01 150</code> (150 is your budget in €)\n"
+         "or a range, direct flights only: <code>/track ATH LON 2026-09-01..2026-09-15 150 direct</code>")
 
 
 class TrackerRejected(Exception):

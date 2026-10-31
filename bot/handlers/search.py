@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 ORIGIN, DESTINATION, DATES, FLIGHT_TYPE = range(4)
 DRAFT = "search"
 TOP_RESULTS = 5
-USAGE = "Usage: <code>/search ATH LON 2026-09-01[..2026-09-15] [direct]</code>"
+USAGE = ("Usage: <code>/search ATH LON 2026-09-01</code>\n"
+         "or a range, direct flights only: <code>/search ATH LON 2026-09-01..2026-09-15 direct</code>")
 
 
 async def start(update: Update, context: Context) -> int:

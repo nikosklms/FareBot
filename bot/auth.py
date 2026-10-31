@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 REQUESTED = "📨 <b>Access requested.</b> You'll get a message here as soon as you're approved."
 WAITING = "⏳ Your access request is still waiting for approval."
 DENIED_TEXT = "⛔ <b>Access denied</b>: you are not authorized to use this bot."
+EDITED = "✏️ I don't act on edited messages. Send it again as a new message."
 
 
 def admin_id() -> Optional[int]:
@@ -56,12 +57,19 @@ def decision_buttons(user_id: int, where: str) -> list:
 
 
 async def auth_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Runs before every other handler; stops updates from people who don't have access.
+    """Runs before every other handler; stops updates from people who don't have access,
+    and edited messages from everyone.
 
     Someone new who writes to the bot gets an access request sent to the admin.
     """
     user = update.effective_user
-    if user and await is_allowed(get_services(context).db, user.id):
+    allowed = bool(user) and await is_allowed(get_services(context).db, user.id)
+    if update.edited_message:
+        # Telegram sends edits as their own updates; running them would repeat (or break) the original.
+        if allowed:
+            await update.edited_message.reply_text(EDITED)
+        raise ApplicationHandlerStop
+    if allowed:
         return
     if update.message or update.callback_query:
         await _handle_outsider(update, context)

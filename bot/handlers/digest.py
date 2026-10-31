@@ -28,7 +28,9 @@ DEFAULT_DAYS = 30
 TIME_OPTIONS = ["09:00", "12:00", "15:00", "18:00", "21:00"]
 MAX_RESULTS = 20
 CLOCK = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
-USAGE = ("Usage: <code>/digest ATH europe [days] [budget] [Day@HH:MM] [results]</code>\n"
+USAGE = ("Usage: <code>/digest ATH europe</code>\n"
+         "Optionally add days ahead, budget, delivery day@time and number of results: "
+         "<code>/digest ATH europe 30 80 Sunday@15:00 10</code>\n"
          f"Regions: {', '.join(REGION_LABELS)}")
 
 

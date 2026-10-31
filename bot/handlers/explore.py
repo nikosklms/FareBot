@@ -34,7 +34,9 @@ DRAFT = "explore"
 DAY_OPTIONS = [7, 14, 30, 60, 90]
 DEFAULT_DAYS = 30
 MAX_RESULTS = 20
-USAGE = ("Usage: <code>/explore ATH europe [days] [budget] [results]</code>\n"
+USAGE = ("Usage: <code>/explore ATH europe</code>\n"
+         "Optionally add days ahead, budget (0 = any) and number of results: "
+         "<code>/explore ATH europe 30 100 10</code>\n"
          f"Regions: {', '.join(REGION_LABELS)}")
 
 
