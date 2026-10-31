@@ -212,3 +212,29 @@ async def test_a_backup_that_failed_halfway_is_redone(tmp_path, monkeypatch):
     assert version_and_trackers(path + ".v2.bak") == (2, 1)
     assert version_and_trackers(path) == (SCHEMA_VERSION, 1)
     assert not (tmp_path / "farebot.db.v2.bak.partial").exists()
+
+
+async def test_a_migration_that_fails_halfway_changes_nothing_and_can_be_retried(tmp_path, monkeypatch):
+    import pytest
+    import database.db as db_module
+    path = str(tmp_path / "legacy.db")
+    legacy_db(path, [row(1, "LON", "2027-03-15"), row(2, "REGION:EUROPE", "RELATIVE", timeframe_days=90)])
+
+    def crash(row):
+        raise RuntimeError("power cut")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db_module, "_digest_from_legacy", crash)  # fails after the new tables were created
+        with pytest.raises(RuntimeError):
+            await Database(path).migrate()
+
+    conn = sqlite3.connect(path)
+    tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+    assert "trackers_v1" not in tables and "digests" not in tables  # nothing half-done was left
+    conn.close()
+
+    db = Database(path)
+    await db.migrate()  # the next start simply tries again
+    assert (await db.get_tracker(1)).destination_code == "LON"
+    assert (await db.get_digest(2)).region == "europe"

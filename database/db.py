@@ -132,22 +132,34 @@ class Database:
 
     async def migrate(self) -> None:
         """Bring the database file up to SCHEMA_VERSION."""
-        async with aiosqlite.connect(self.path) as conn:
+        # isolation_level=None: we open the transaction ourselves (see below).
+        async with aiosqlite.connect(self.path, isolation_level=None) as conn:
             conn.row_factory = aiosqlite.Row
             async with conn.execute("PRAGMA user_version") as cur:
                 version = (await cur.fetchone())[0]
             if version >= SCHEMA_VERSION:
                 return
             await _backup_before_migrating(conn, f"{self.path}.v{version}.bak")
-            if version < 1:
-                await _migrate_to_v1(conn)
-            if version < 2:
-                await conn.execute(USERS_DDL)
-            if version < 3:
-                # Access requests in the users table replaced the log of unauthorized attempts.
-                await conn.execute("DROP TABLE IF EXISTS unauthorized_attempts")
-            await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            await conn.commit()
+            # v1 rebuilds tables that reference each other; foreign keys can only be turned off
+            # outside a transaction.
+            await conn.execute("PRAGMA foreign_keys = OFF")
+            # One explicit transaction, so table changes and data either all happen or none do:
+            # Python's sqlite3 would otherwise commit each CREATE TABLE on its own, and a crash
+            # halfway left tables behind that made every later start fail.
+            await conn.execute("BEGIN")
+            try:
+                if version < 1:
+                    await _migrate_to_v1(conn)
+                if version < 2:
+                    await conn.execute(USERS_DDL)
+                if version < 3:
+                    # Access requests in the users table replaced the log of unauthorized attempts.
+                    await conn.execute("DROP TABLE IF EXISTS unauthorized_attempts")
+                await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                await conn.execute("COMMIT")
+            except BaseException:
+                await conn.execute("ROLLBACK")
+                raise
             logger.info("Database migrated to schema version %d", SCHEMA_VERSION)
 
     # ------------------------------------------------------------------
@@ -487,8 +499,6 @@ async def _migrate_to_v1(conn: aiosqlite.Connection) -> None:
     several historical formats. Those rows move to the digests table with
     their ids preserved; plain trackers are copied as-is.
     """
-    await conn.execute("PRAGMA foreign_keys = OFF")
-
     if not await _table_exists(conn, "trackers"):
         await conn.execute(TRACKERS_DDL.format(name="trackers"))
         await conn.execute(DIGESTS_DDL)
