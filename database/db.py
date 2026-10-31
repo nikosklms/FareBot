@@ -7,11 +7,11 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-from database.models import ACTIVE, EXPIRED, PAUSED, WEEKDAYS, Digest, Tracker
+from database.models import ACTIVE, APPROVED, EXPIRED, PAUSED, PENDING, WEEKDAYS, Digest, Tracker, User
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 TRACKERS_DDL = """
 CREATE TABLE {name} (
@@ -69,6 +69,17 @@ CREATE TABLE IF NOT EXISTS unauthorized_attempts (
     full_name TEXT,
     input_text TEXT,
     attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+USERS_DDL = """
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    full_name TEXT,
+    status TEXT NOT NULL,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    decided_at TIMESTAMP
 )
 """
 
@@ -137,7 +148,10 @@ class Database:
                 version = (await cur.fetchone())[0]
             if version >= SCHEMA_VERSION:
                 return
-            await _migrate_to_v1(conn)
+            if version < 1:
+                await _migrate_to_v1(conn)
+            if version < 2:
+                await conn.execute(USERS_DDL)
             await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             await conn.commit()
             logger.info("Database migrated to schema version %d", SCHEMA_VERSION)
@@ -364,6 +378,43 @@ class Database:
             "INSERT INTO unauthorized_attempts (user_id, username, full_name, input_text) VALUES (?, ?, ?, ?)",
             (user_id or 0, username, full_name, input_text),
         )
+
+    # ------------------------------------------------------------------
+    # Users (access requests)
+    # ------------------------------------------------------------------
+
+    async def request_access(self, user_id: int, username: Optional[str], full_name: Optional[str]) -> bool:
+        """Record a pending request. Returns False if this user already asked (or was decided on)."""
+        async with self._connect() as db:
+            cur = await db.execute(
+                "INSERT OR IGNORE INTO users (user_id, username, full_name, status) VALUES (?, ?, ?, ?)",
+                (user_id, username, full_name, PENDING),
+            )
+            await db.commit()
+            return cur.rowcount == 1
+
+    async def get_user(self, user_id: int) -> Optional[User]:
+        async with self._connect() as db:
+            async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cur:
+                row = await cur.fetchone()
+        return User(**dict(row)) if row else None
+
+    async def list_users(self) -> list[User]:
+        async with self._connect() as db:
+            async with db.execute("SELECT * FROM users ORDER BY requested_at, user_id") as cur:
+                return [User(**dict(row)) for row in await cur.fetchall()]
+
+    async def is_approved(self, user_id: int) -> bool:
+        user = await self.get_user(user_id)
+        return bool(user and user.status == APPROVED)
+
+    async def set_user_status(self, user_id: int, status: str) -> None:
+        await self._execute("UPDATE users SET status = ?, decided_at = ? WHERE user_id = ?",
+                            (status, _now(), user_id))
+
+    async def delete_user(self, user_id: int) -> None:
+        """Forget a user entirely, so they can ask for access again."""
+        await self._execute("DELETE FROM users WHERE user_id = ?", (user_id,))
 
     async def purge_stale(self, today: date) -> StaleCleanup:
         """Expire trackers and fixed-date digests whose travel dates have passed, and delete

@@ -3,12 +3,13 @@ import logging
 import sys
 from typing import IO, Optional
 
-from telegram import LinkPreviewOptions
+from telegram import BotCommandScopeChat, LinkPreviewOptions
 from telegram.constants import ParseMode
 from telegram.ext import Application, ApplicationBuilder, Defaults
 from telegram.request import BaseRequest
 
-from bot.handlers import BOT_COMMANDS, register_handlers
+from bot.auth import admin_id
+from bot.handlers import ADMIN_COMMANDS, BOT_COMMANDS, register_handlers
 from bot.lifecycle import install_stop_signals
 from bot.services import SERVICES_KEY, Services
 from config import BASE_DIR, DB_PATH, TELEGRAM_BOT_TOKEN, check_config, get_timezone
@@ -38,6 +39,8 @@ async def on_startup(app: Application) -> None:
     services: Services = app.bot_data[SERVICES_KEY]
     await services.db.migrate()
     await app.bot.set_my_commands(BOT_COMMANDS)
+    if admin_id():  # the admin's command menu also lists /users
+        await app.bot.set_my_commands(BOT_COMMANDS + ADMIN_COMMANDS, scope=BotCommandScopeChat(admin_id()))
     await register_jobs(app)
     install_stop_signals(app)
 

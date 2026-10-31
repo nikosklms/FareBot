@@ -117,7 +117,7 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
     tracker = await db.get_tracker(tracker_id)
     if not tracker or tracker.status != ACTIVE:
         return False
-    if not auth.is_allowed(tracker.user_id):
+    if not await auth.is_allowed(db, tracker.user_id):
         logger.info("[TRACKER] #%d belongs to user %s, who is no longer allowed; pausing", tracker.id, tracker.user_id)
         await db.set_tracker_status(tracker.id, PAUSED)
         return False
@@ -227,7 +227,7 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
     digest = await services.db.get_digest(digest_id)
     if not digest or digest.status != ACTIVE:
         return False
-    if not auth.is_allowed(digest.user_id):
+    if not await auth.is_allowed(services.db, digest.user_id):
         logger.info("[DIGEST] #%d belongs to user %s, who is no longer allowed; pausing", digest.id, digest.user_id)
         await services.db.set_digest_status(digest.id, PAUSED)
         return False

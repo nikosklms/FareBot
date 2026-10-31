@@ -6,6 +6,11 @@ ACTIVE = "ACTIVE"
 PAUSED = "PAUSED"
 EXPIRED = "EXPIRED"
 
+# Access requests (users table); ALLOWED_USERS in .env always has access.
+PENDING = "PENDING"
+APPROVED = "APPROVED"
+DENIED = "DENIED"
+
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 SORT_MODES = ("discount", "price", "both")
 
@@ -62,3 +67,14 @@ class Digest:
             end = today + timedelta(days=self.days_ahead)
             return start.isoformat(), end.isoformat()
         return self.departure_date, self.departure_date_end
+
+
+@dataclass
+class User:
+    """Someone who asked to use the bot, and what the admin decided."""
+    user_id: int
+    username: Optional[str]
+    full_name: Optional[str]
+    status: str
+    requested_at: Optional[str] = None
+    decided_at: Optional[str] = None

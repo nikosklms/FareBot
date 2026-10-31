@@ -73,7 +73,7 @@ async def test_fresh_database_gets_current_schema(tmp_path):
     conn = sqlite3.connect(db.path)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"trackers", "digests", "price_history", "unauthorized_attempts"} <= tables
+    assert {"trackers", "digests", "price_history", "unauthorized_attempts", "users"} <= tables
 
 
 async def test_legacy_database_is_converted(tmp_path):

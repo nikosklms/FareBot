@@ -49,4 +49,4 @@ def check_config() -> None:
     if not TELEGRAM_BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN is not set. Add it to .env or the environment.")
     if not get_allowed_users():
-        logger.warning("ALLOWED_USERS is empty: nobody will be able to use the bot.")
+        logger.warning("ALLOWED_USERS is empty: there's no admin to approve users, so nobody can use the bot.")

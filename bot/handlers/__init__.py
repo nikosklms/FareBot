@@ -3,7 +3,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Type
 
 from bot.auth import auth_gate
 from bot.deal_buttons import toggle_deals_handler
-from bot.handlers import dashboard, digest, edit, explore, search, share, track
+from bot.handlers import access, dashboard, digest, edit, explore, search, share, track
 from bot.handlers.common import (
     cancel_command, error_handler, help_command, noop_pressed, start_command, stop_task_pressed,
 )
@@ -18,6 +18,7 @@ BOT_COMMANDS = [
     ("help", "❓ Help and shortcuts"),
     ("cancel", "❌ Cancel the current action"),
 ]
+ADMIN_COMMANDS = [("users", "👥 Approve and manage users")]
 
 
 def register_handlers(app: Application) -> None:
@@ -33,6 +34,7 @@ def register_handlers(app: Application) -> None:
         track.track_button_handler,
         toggle_deals_handler,
         *share.share_handlers,
+        *access.access_handlers,
         CallbackQueryHandler(stop_task_pressed, pattern=f"^{STOP_TASK}$"),
         CallbackQueryHandler(noop_pressed, pattern=f"^{NOOP}$"),
     ], group=0)

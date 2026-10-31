@@ -14,7 +14,7 @@ A Telegram bot that watches Google Flights for you. Search a route, track it unt
 - **`/digest`** runs an explore search every week and sends you the results at a time you pick.
 - **`/mytracks`** lists your trackers and digests. You can edit, pause, share or delete them.
 
-FareBot is meant to be self-hosted for yourself and a few friends. Only the Telegram users you list can use it. It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
+FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
 
 ## Setup
 
@@ -38,7 +38,7 @@ python main.py
 | Variable | Meaning |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather. |
-| `ALLOWED_USERS` | Comma-separated Telegram user IDs. The first one is told when someone else tries the bot. Changes apply without a restart. |
+| `ALLOWED_USERS` | Comma-separated Telegram user IDs that always have access. The first one is the admin: it gets access requests with Approve and Deny buttons, and `/users` lists everyone and lets you remove people. Changes apply without a restart. |
 | `TIMEZONE` | Timezone for digest delivery times, e.g. `Europe/Athens`. Defaults to the server's. |
 | `FAREBOT_DB_PATH` | SQLite file. Defaults to `farebot.db` in the project folder. |
 
