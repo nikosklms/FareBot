@@ -55,3 +55,53 @@ async def test_a_forged_calendar_month_is_ignored(bot):
     assert [endpoint for endpoint, _ in bot.telegram.calls[calls:]] == ["answerCallbackQuery"]
     await bot.press(f"src:date:cal:day:{future(12)}")  # the calendar still works
     assert "Now pick the last day" in bot.telegram.last_text
+
+
+async def member(bot):
+    await bot.services.db.request_access(MARIA, "@maria", "Maria")
+    await bot.services.db.set_user_status(MARIA, APPROVED)
+
+
+async def test_a_forged_days_button_cant_get_around_the_range_limit(bot, provider):
+    await member(bot)
+    await bot.send("/explore", user_id=MARIA)
+    await bot.press("exp:org:ATH", user_id=MARIA)
+    await bot.press("exp:reg:europe", user_id=MARIA)
+    await bot.press("exp:sort:price", user_id=MARIA)
+    await bot.press("exp:when:days:400", user_id=MARIA)
+    assert bot.telegram.alerts[-1] == "Pick between 1 and 180 days."
+    await bot.press("exp:when:days:0", user_id=MARIA)
+    assert bot.telegram.alerts[-1] == "Pick between 1 and 180 days."
+    assert not provider.queries
+
+
+@pytest.mark.parametrize("data", ["exp:lim:5000", "exp:lim:0"])
+async def test_buttons_only_accept_the_values_they_offer(bot, provider, data):
+    await bot.send("/explore")
+    for step in ("exp:org:ATH", "exp:reg:europe", "exp:sort:price", "exp:when:days:7"):
+        await bot.press(step)
+    asked = bot.telegram.last_text
+    await bot.press(data)
+    assert bot.telegram.last_text == asked and not provider.queries
+
+
+async def test_an_impossible_calendar_day_is_ignored(bot):
+    await start_to_dates(bot)
+    await bot.press("src:date:cal:open")
+    await bot.press("src:date:cal:day:2026-02-31")
+    assert "Something went wrong" not in " ".join(bot.telegram.texts)
+
+
+async def test_a_track_button_with_a_reversed_range_is_refused(bot):
+    await bot.press(f"trk:add:ATH:LON:{future(30)}:{future(5)}:50.00:1")
+    assert bot.telegram.alerts[-1] == BROKEN
+    assert await bot.services.db.count_active(USER_ID) == 0
+
+
+async def test_budgets_are_capped(bot):
+    await bot.send(f"/track ATH LON {future(5)} 1e307")
+    assert "couldn't read the date or budget" in bot.telegram.last_text
+    await bot.send("/explore ATH europe 30 999999")
+    assert "at most €100,000" in bot.telegram.last_text
+    await bot.send("/digest ATH europe 30 999999")
+    assert "at most €100,000" in bot.telegram.last_text

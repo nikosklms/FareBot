@@ -15,13 +15,13 @@ from bot.formatting import (
 )
 from bot.lifecycle import RESTART_NOTICE
 from bot.keyboards import (
-    DEFAULT_RESULT_LIMIT, EXPLORE_FROM_SEARCH, markup, quick_origins, regions, result_limits, sort_modes,
+    DEFAULT_RESULT_LIMIT, EXPLORE_FROM_SEARCH, RESULT_LIMITS, markup, quick_origins, regions, result_limits, sort_modes,
     stop_markup,
 )
 from bot.auth import max_range_days
 from bot.services import Services, get_services
 from bot.wizard import (
-    TEXT, Context, Steps, airport_step, choice_step, draft, respond, run_in_background, start_draft,
+    MAX_BUDGET, TEXT, Context, Steps, airport_step, choice_step, draft, respond, run_in_background, start_draft,
     timeframe_keyboard, timeframe_step, wizard_conversation,
 )
 from services.airports_data import REGION_LABELS, region_display_name
@@ -66,6 +66,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ Days ahead must be between 1 and {limit}.")
         return
     budget = float(numbers[1]) if len(numbers) > 1 else 0
+    if budget > MAX_BUDGET:
+        await update.message.reply_text(f"❌ The budget can be at most €{MAX_BUDGET:,}.")
+        return
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
     start_date, end_date = days_ahead_window(max(1, days))
     await run_explore(update, context, origin, region, start_date, end_date, "both",
@@ -220,5 +223,5 @@ def conversation() -> ConversationHandler:
         REGION: [choice_step("exp:reg", region_picked, "|".join(REGION_LABELS))],
         SORT: [choice_step("exp:sort", sort_picked, "discount|price|both")],
         WINDOW: timeframe_step("exp:when", WINDOW, days_picked, dates_picked, STEPS.again),
-        LIMIT: [choice_step("exp:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
+        LIMIT: [choice_step("exp:lim", limit_picked, "|".join(map(str, RESULT_LIMITS))), MessageHandler(TEXT, limit_typed)],
     }, STEPS.back)

@@ -22,7 +22,7 @@ async def test_full_wizard(bot, provider):
     await bot.press("exp:sort:discount")
     await bot.press("exp:when:days:7")
     assert f"{future(1)} ➔ {future(7)}" in bot.telegram.last_text
-    await bot.press("exp:lim:2")
+    await bot.send("2")  # counts the buttons don't offer are typed
     assert bot.telegram.button_data("Stop") == "task:stop"
     await bot.finish_background_task()
 

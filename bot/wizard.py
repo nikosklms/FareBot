@@ -176,13 +176,16 @@ def cancel_running_task(context: Context) -> bool:
     return False
 
 
+MAX_BUDGET = 100_000  # bigger amounts mean nothing for a flight, and wouldn't fit in a share link
+
+
 def parse_price(text: str) -> Optional[float]:
-    """A typed amount like '45', '€45.50' or '45,5'; None unless it's a finite number of at least 0."""
+    """A typed amount like '45', '€45.50' or '45,5'; None unless it's a number from 0 to MAX_BUDGET."""
     try:
         value = float(text.strip().replace("€", "").replace(",", "."))
     except ValueError:
         return None
-    return value if math.isfinite(value) and value >= 0 else None
+    return value if math.isfinite(value) and 0 <= value <= MAX_BUDGET else None
 
 
 # ----------------------------------------------------------------------
@@ -290,8 +293,12 @@ def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates, 
         return await on_days(update, context, int(text))
 
     async def picked(update: Update, context: Context) -> int:
+        days, limit = int(update.callback_query.data.rsplit(":", 1)[1]), max_range_days(update.effective_user.id)
+        if not 1 <= days <= limit:  # only a modified Telegram app sends other values
+            await update.callback_query.answer(f"Pick between 1 and {limit} days.", show_alert=True)
+            return state
         await update.callback_query.answer()
-        return await on_days(update, context, int(update.callback_query.data.rsplit(":", 1)[1]))
+        return await on_days(update, context, days)
 
     return [
         MessageHandler(TEXT, typed),
@@ -345,6 +352,10 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask)
         await update.callback_query.answer()
         cal = picker(context)
         day = update.callback_query.data.rsplit(":", 1)[1]
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            return state  # not a real day (e.g. Feb 31); the buttons we send never do this
         if cal["mode"] == RANGE and not cal["start"]:
             cal["start"] = day
             cal["month"] = day[:7]

@@ -97,6 +97,8 @@ async def track_button_pressed(update: Update, context: Context) -> None:
                 if day:
                     date.fromisoformat(day)  # rejects impossible dates like 2026-02-31
             problem = window_problem(start, end, max_days=max_range_days(query.from_user.id))
+            if end and end <= start:
+                problem = "This button doesn't work."
         except ValueError:
             pass
     if problem:

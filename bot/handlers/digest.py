@@ -7,12 +7,12 @@ from telegram import Update
 from telegram.ext import CommandHandler, ConversationHandler, MessageHandler
 
 from bot.formatting import budget_text, digest_card
-from bot.keyboards import DEFAULT_RESULT_LIMIT, button, markup, pairs, quick_origins, regions, result_limits, sort_modes
+from bot.keyboards import DEFAULT_RESULT_LIMIT, RESULT_LIMITS, button, markup, pairs, quick_origins, regions, result_limits, sort_modes
 from bot.auth import limit_reached, max_active, max_range_days
 from bot.services import get_services
 from bot.wizard import (
     parse_price,
-    TEXT, Context, Steps, airport_step, choice_step, draft, respond, start_draft, timeframe_keyboard,
+    MAX_BUDGET, TEXT, Context, Steps, airport_step, choice_step, draft, respond, start_draft, timeframe_keyboard,
     timeframe_step,
     wizard_conversation,
 )
@@ -74,6 +74,9 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ Days ahead must be between 1 and {limit}.")
         return
     budget = float(numbers[1]) if len(numbers) > 1 else 0
+    if budget > MAX_BUDGET:
+        await update.message.reply_text(f"❌ The budget can be at most €{MAX_BUDGET:,}.")
+        return
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
     await create_digest(update, context, {
         "origin": origin, "region": region, "sort": "both", "budget": budget or None,
@@ -244,9 +247,10 @@ def conversation() -> ConversationHandler:
         ORIGIN: airport_step("dig:org", ORIGIN, origin_picked, back=False),
         REGION: [choice_step("dig:reg", region_picked, "|".join(REGION_LABELS))],
         SORT: [choice_step("dig:sort", sort_picked, "discount|price|both")],
-        BUDGET: [choice_step("dig:bud", budget_picked, r"\d+"), MessageHandler(TEXT, budget_typed)],
+        BUDGET: [choice_step("dig:bud", budget_picked, "|".join(map(str, [*BUDGET_OPTIONS, 0]))),
+                 MessageHandler(TEXT, budget_typed)],
         WINDOW: timeframe_step("dig:when", WINDOW, days_picked, dates_picked, STEPS.again),
         DAY: [choice_step("dig:day", day_picked, "|".join(WEEKDAYS))],
-        TIME: [choice_step("dig:time", time_picked, r"\d{2}:\d{2}"), MessageHandler(TEXT, time_typed)],
-        LIMIT: [choice_step("dig:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
+        TIME: [choice_step("dig:time", time_picked, "|".join(TIME_OPTIONS)), MessageHandler(TEXT, time_typed)],
+        LIMIT: [choice_step("dig:lim", limit_picked, "|".join(map(str, RESULT_LIMITS))), MessageHandler(TEXT, limit_typed)],
     }, STEPS.back)

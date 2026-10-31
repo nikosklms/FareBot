@@ -17,7 +17,7 @@ from bot.handlers.dashboard import (
 )
 from bot.handlers.digest import BUDGET_OPTIONS, DAY_OPTIONS, DEFAULT_DAYS, MAX_RESULTS, TIME_OPTIONS, parse_clock
 from bot.handlers.track import FREQUENCIES
-from bot.keyboards import button, flight_types, markup, pairs, result_limits, sort_modes
+from bot.keyboards import RESULT_LIMITS, button, flight_types, markup, pairs, result_limits, sort_modes
 from bot.auth import limit_reached
 from bot.services import get_services
 from bot.wizard import (
@@ -353,15 +353,16 @@ ASKS = {
 def conversation() -> ConversationHandler:
     states = {
         MENU: [choice_step("edit:field", field_picked, "|".join(ASKS)), CallbackQueryHandler(done, pattern="^edit:done$")],
-        BUDGET: [MessageHandler(TEXT, budget_typed), choice_step("edit:bud", budget_picked, r"\d+")],
+        BUDGET: [MessageHandler(TEXT, budget_typed),
+                 choice_step("edit:bud", budget_picked, "|".join(map(str, [*BUDGET_OPTIONS, 0])))],
         DATES: dates_step("edit:date", DATES, dates_picked, ask_dates),
         FLIGHTS: [choice_step("edit:direct", flights_picked, "0|1")],
         FREQUENCY: [choice_step("edit:freq", frequency_picked, "|".join(map(str, FREQUENCIES)))],
         WINDOW: timeframe_step("edit:when", WINDOW, window_days_picked, window_dates_picked, ask_window),
         SORT: [choice_step("edit:sort", sort_picked, "discount|price|both")],
-        LIMIT: [choice_step("edit:lim", limit_picked, r"\d+"), MessageHandler(TEXT, limit_typed)],
+        LIMIT: [choice_step("edit:lim", limit_picked, "|".join(map(str, RESULT_LIMITS))), MessageHandler(TEXT, limit_typed)],
         DAY: [choice_step("edit:day", day_picked, "|".join(WEEKDAYS))],
-        TIME: [choice_step("edit:time", time_picked, r"\d{2}:\d{2}"), MessageHandler(TEXT, time_typed)],
+        TIME: [choice_step("edit:time", time_picked, "|".join(TIME_OPTIONS)), MessageHandler(TEXT, time_typed)],
     }
     states = {state: [_current_message_only(h) for h in handlers] for state, handlers in states.items()}
     return wizard_conversation("edit", [
