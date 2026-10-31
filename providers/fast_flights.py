@@ -13,6 +13,7 @@ from fast_flights import FlightQuery, Passengers, create_query
 from selectolax.lexbor import LexborHTMLParser
 
 from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError
+from providers.result_cache import ResultCache
 from services.airports_data import MULTI_AIRPORT_CITIES
 from utils.date_parser import generate_date_sequence
 
@@ -331,8 +332,9 @@ class FastFlightsProvider(AbstractFlightProvider):
 
     concurrency = CONCURRENT_REQUESTS
 
-    def __init__(self, client: Optional[GoogleFlightsClient] = None) -> None:
+    def __init__(self, client: Optional[GoogleFlightsClient] = None, cache: Optional[ResultCache] = None) -> None:
         self._fetcher = client or GoogleFlightsClient()
+        self.cache = cache or ResultCache()
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._latencies: deque[float] = deque(maxlen=100)
 
@@ -356,6 +358,19 @@ class FastFlightsProvider(AbstractFlightProvider):
         return_date: Optional[str] = None,
         currency: str = "EUR",
         direct_only: bool = False
+    ) -> List[FlightOffer]:
+        key = (origin.upper(), destination.upper(), departure_date, return_date, currency, direct_only)
+        return await self.cache.get_or_fetch(key, lambda: self._search_google(
+            origin, destination, departure_date, return_date, currency, direct_only))
+
+    async def _search_google(
+        self,
+        origin: str,
+        destination: str,
+        departure_date: str,
+        return_date: Optional[str],
+        currency: str,
+        direct_only: bool,
     ) -> List[FlightOffer]:
         if self._semaphore is None:
             self._semaphore = asyncio.Semaphore(self.concurrency)
