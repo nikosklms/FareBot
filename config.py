@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -41,10 +42,45 @@ def get_timezone() -> tzinfo:
     return datetime.now().astimezone().tzinfo
 
 
+_warned_about: set[str] = set()
+
+
+def _is_user_id(text: str) -> bool:
+    return text.isascii() and text.isdecimal()  # isdigit() also accepts '²', which int() rejects
+
+
+def _entries(raw: str) -> list[str]:
+    return [part for part in re.split(r"[,;\s]+", raw) if part]
+
+
+def allowed_users_problem(raw: str) -> str | None:
+    """What's wrong with an ALLOWED_USERS value, or None."""
+    entries = _entries(raw)
+    bad = [part for part in entries if not _is_user_id(part)]
+    if entries and not _is_user_id(entries[0]):
+        return (f"ALLOWED_USERS starts with '{entries[0]}', which isn't a Telegram user ID. The first ID is "
+                "the admin, so nobody can use the bot until it's fixed.")
+    if bad:
+        return f"ALLOWED_USERS has entries that aren't Telegram user IDs, which are ignored: {', '.join(bad)}"
+    return None
+
+
 def get_allowed_users() -> list[int]:
-    """Read ALLOWED_USERS fresh on every call so edits to .env apply without a restart."""
+    """Read ALLOWED_USERS fresh on every call so edits to .env apply without a restart.
+
+    IDs can be separated by commas, spaces or semicolons. Entries that aren't IDs are ignored,
+    except the first: it's the admin, so a typo there empties the list rather than making the
+    next person admin.
+    """
     raw = dotenv_values(BASE_DIR / ".env").get("ALLOWED_USERS") or os.getenv("ALLOWED_USERS", "")
-    return [int(uid) for uid in (part.strip() for part in raw.split(",")) if uid.isdigit()]
+    problem = allowed_users_problem(raw)
+    if problem and raw not in _warned_about:
+        _warned_about.add(raw)
+        logger.error(problem)
+    entries = _entries(raw)
+    if entries and not _is_user_id(entries[0]):
+        return []
+    return [int(part) for part in entries if _is_user_id(part)]
 
 
 def check_config() -> None:
