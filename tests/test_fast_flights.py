@@ -462,3 +462,11 @@ async def test_a_range_with_failed_days_says_it_is_partial():
         await provider.search_flights_range("SKG", "VIE", "2026-12-01", "2026-12-03")
     assert [o.price for o in partial.value.offers] == [60.0, 60.0]
     await provider.close()
+
+
+def test_typical_prices_of_cheap_routes_are_kept():
+    from providers.fast_flights import _extract_typical_price_range
+    insight = [None, None, None, None, [None, 12], [None, 35]]
+    assert _extract_typical_price_range([None, None, None, None, None, insight]) == (12.0, 35.0)
+    broken = [None, None, None, None, [None, 40], [None, 30]]  # max below min: not a range
+    assert _extract_typical_price_range([None, None, None, None, None, broken]) == (None, None)

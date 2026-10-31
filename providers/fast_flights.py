@@ -134,7 +134,9 @@ def _extract_typical_price_range(payload: Any) -> tuple[Optional[float], Optiona
             if isinstance(p5[4], list) and len(p5[4]) >= 2 and isinstance(p5[4][1], (int, float)):
                 if isinstance(p5[5], list) and len(p5[5]) >= 2 and isinstance(p5[5][1], (int, float)):
                     min_val, max_val = float(p5[4][1]), float(p5[5][1])
-                    if 15 <= min_val <= 3000 and 20 <= max_val <= 5000 and max_val > min_val:
+                    # A known position, so any sane range counts (a cheap route can be €12-35).
+                    # Strategy 2's bounds are there to skip times like [13, 25] while scanning.
+                    if 0 < min_val < max_val:
                         return min_val, max_val
 
     # Strategy 2: Walk for explicit Google price insight node structure [enum_val, [None, curr], ..., [None, min], [None, max]]
