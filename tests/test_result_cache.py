@@ -150,3 +150,42 @@ async def test_provider_does_not_cache_failed_searches():
         await provider.search_flights("SKG", "VIE", "2026-10-31")
     assert [o.price for o in await provider.search_flights("SKG", "VIE", "2026-10-31")] == [45.0]
     await provider.close()
+
+
+async def test_provider_stats_count_cache_hits_and_google_requests():
+    provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(200, text=results_page())))
+    for _ in range(3):
+        await provider.search_flights("SKG", "VIE", "2026-10-31")
+    await provider.search_flights("SKG", "VIE", "2026-10-31", direct_only=True)
+    stats = provider.stats()
+    assert (stats.searches, stats.from_cache, stats.shared, stats.google_requests) == (4, 2, 0, 2)
+    assert stats.rate_limit_pauses == 0 and stats.paused_for == 0 and stats.average_latency > 0
+    await provider.close()
+
+
+async def test_a_search_arriving_as_another_is_stopped_gets_its_own_request():
+    cache = ResultCache()
+    stopped = asyncio.create_task(cache.get_or_fetch("k", Fetcher([offer(1)], release=asyncio.Event())))
+    await asyncio.sleep(0)
+    stopped.cancel()
+    await asyncio.sleep(0)  # the stopped search cancels the shared request; it hasn't finished cancelling yet
+    assert (await cache.get_or_fetch("k", Fetcher([offer(83)])))[0].price == 83
+
+
+async def test_city_results_with_a_failed_airport_are_not_cached():
+    requests = 0
+
+    def handler(request):
+        nonlocal requests
+        requests += 1
+        return httpx.Response(500) if requests == 1 else httpx.Response(200, text=results_page())
+
+    provider = FastFlightsProvider(client=mock_client(handler))
+    airports = 3  # ROM, FCO and CIA
+    assert await provider.search_flights("ATH", "ROM", "2026-10-31")  # one airport failed, the rest answered
+    assert requests == airports
+    await provider.search_flights("ATH", "ROM", "2026-10-31")  # not cached: searched again, all succeed
+    assert requests == 2 * airports
+    await provider.search_flights("ATH", "ROM", "2026-10-31")  # complete this time, so cached
+    assert requests == 2 * airports
+    await provider.close()

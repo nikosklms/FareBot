@@ -275,6 +275,8 @@ async def test_continued_blocks_double_the_pause_and_skip_google_meanwhile():
     with pytest.raises(FlightSearchError):
         await provider.search_flights("SKG", "VIE", "2026-11-01")
     assert len(calls) == 2  # a long pause fails at once, without contacting Google
+    stats = provider.stats()
+    assert (stats.google_requests, stats.rate_limit_pauses, stats.paused_for) == (2, 2, 120)
 
     time_.now += 120
     assert [o.price for o in await provider.search_flights("SKG", "VIE", "2026-11-02")] == [45.0]

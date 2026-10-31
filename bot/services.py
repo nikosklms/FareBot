@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from datetime import tzinfo
+from dataclasses import dataclass, field
+from datetime import datetime, timezone, tzinfo
 
 from telegram.ext import ContextTypes
 
@@ -18,6 +18,7 @@ class Services:
     resolver: LocationResolver
     timezone: tzinfo
     shutting_down: bool = False  # set on Ctrl+C so cancelled searches can say why they stopped
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 def get_services(context: ContextTypes.DEFAULT_TYPE) -> Services:

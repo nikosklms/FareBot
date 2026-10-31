@@ -23,6 +23,18 @@ class FlightOffer:
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@dataclass
+class ProviderStats:
+    """Counts since the bot started, for /stats."""
+    searches: int = 0
+    from_cache: int = 0          # answered from a result less than 30 minutes old
+    shared: int = 0              # joined an identical search that was already running
+    google_requests: int = 0
+    rate_limit_pauses: int = 0
+    paused_for: float = 0.0      # seconds left in the current rate-limit pause
+    average_latency: float = 0.0
+
+
 class FlightSearchError(Exception):
     """Google Flights couldn't be searched (rate limiting, network or server errors).
 
@@ -37,6 +49,9 @@ class AbstractFlightProvider(ABC):
     def average_latency(self) -> float:
         """Average seconds per query, used for time estimates."""
         return 1.0
+
+    def stats(self) -> ProviderStats:
+        return ProviderStats()
 
     async def close(self) -> None:  # noqa: B027 - optional hook, most providers have nothing to release
         """Release network resources when the bot stops."""

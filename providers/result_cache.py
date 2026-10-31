@@ -16,13 +16,15 @@ MAX_ENTRIES = 4000
 class _Running:
     task: asyncio.Future
     waiters: int = 0
+    keep: bool = True
 
 
 class ResultCache:
     """Recent search results shared by every user, so repeated searches skip Google.
 
     A search that is already running is shared as well: a second identical search waits
-    for the first instead of sending its own request. Failed searches aren't stored.
+    for the first instead of sending its own request. Failed searches aren't stored, and
+    neither are results the fetch marks incomplete with keep_out().
     """
 
     def __init__(self, ttl: float = CACHE_SECONDS, max_entries: int = MAX_ENTRIES,
@@ -53,7 +55,7 @@ class ResultCache:
             self.misses += 1
             running = _Running(asyncio.ensure_future(fetch()))
             self._running[key] = running
-            running.task.add_done_callback(lambda task: self._finished(key, task))
+            running.task.add_done_callback(lambda task: self._finished(key, running))
         else:
             self.shared += 1
 
@@ -65,14 +67,25 @@ class ResultCache:
             running.waiters -= 1
             if running.waiters == 0:
                 running.task.cancel()
+                # Forget it now, not when the cancellation completes, so a search arriving
+                # in between starts its own request instead of joining a cancelled one.
+                if self._running.get(key) is running:
+                    del self._running[key]
             raise
         running.waiters -= 1
         return list(result) if result is not None else None
 
-    def _finished(self, key: Hashable, task: asyncio.Future) -> None:
-        if self._running.get(key) is not None and self._running[key].task is task:
+    def keep_out(self, key: Hashable) -> None:
+        """Don't store the result of the running search for key (e.g. it's incomplete)."""
+        running = self._running.get(key)
+        if running is not None:
+            running.keep = False
+
+    def _finished(self, key: Hashable, running: _Running) -> None:
+        task = running.task
+        if self._running.get(key) is running:
             del self._running[key]
-        if task.cancelled() or task.exception() is not None or task.result() is None:
+        if task.cancelled() or task.exception() is not None or task.result() is None or not running.keep:
             return
         self._entries.pop(key, None)
         self._entries[key] = (self._clock(), task.result())

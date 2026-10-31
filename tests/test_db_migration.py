@@ -127,3 +127,88 @@ async def test_new_rows_after_migration_get_fresh_ids(tmp_path):
     digest = await db.create_digest(user_id=1, origin_code="SKG", region="asia", days_ahead=30)
     assert tracker.id == 2
     assert digest.id == 10
+
+
+def version_and_trackers(path):
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0], conn.execute("SELECT COUNT(*) FROM trackers").fetchone()[0]
+    finally:
+        conn.close()
+
+
+async def test_migrating_backs_up_the_database_first(tmp_path):
+    path = str(tmp_path / "farebot.db")
+    db = Database(path)
+    await db.migrate()
+    await db.create_tracker(user_id=1, origin_code="ATH", destination_code="LON", departure_date="2027-03-15",
+                            max_budget=80.0)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    await db.migrate()
+
+    assert version_and_trackers(path + ".v2.bak") == (2, 1)
+    assert version_and_trackers(path) == (SCHEMA_VERSION, 1)
+
+
+async def test_an_existing_backup_is_never_overwritten(tmp_path):
+    path = str(tmp_path / "farebot.db")
+    db = Database(path)
+    await db.migrate()
+    sqlite3.connect(path + ".v2.bak").close()  # left by an earlier attempt that failed halfway
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    await db.migrate()
+
+    assert sqlite3.connect(path + ".v2.bak").execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0
+
+
+async def test_new_and_up_to_date_databases_are_not_backed_up(tmp_path):
+    path = str(tmp_path / "farebot.db")
+    db = Database(path)
+    await db.migrate()  # new and empty
+    await db.migrate()  # already current
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["farebot.db"]
+
+
+async def test_legacy_databases_are_backed_up_too(tmp_path):
+    path = str(tmp_path / "legacy.db")
+    legacy_db(path, [row(1, "LON", "2027-03-15")])
+    await Database(path).migrate()
+    assert version_and_trackers(path + ".v0.bak") == (0, 1)
+
+
+async def test_a_backup_that_failed_halfway_is_redone(tmp_path, monkeypatch):
+    import aiosqlite
+    import pytest
+    path = str(tmp_path / "farebot.db")
+    db = Database(path)
+    await db.migrate()
+    await db.create_tracker(user_id=1, origin_code="ATH", destination_code="LON", departure_date="2027-03-15",
+                            max_budget=80.0)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    async def disk_full(self, target, **kwargs):
+        await target.execute("CREATE TABLE half_written (x)")
+        await target.commit()
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(aiosqlite.Connection, "backup", disk_full)
+        with pytest.raises(OSError):
+            await db.migrate()
+    assert version_and_trackers(path)[0] == 2  # nothing migrated without a backup
+
+    await db.migrate()
+    assert version_and_trackers(path + ".v2.bak") == (2, 1)
+    assert version_and_trackers(path) == (SCHEMA_VERSION, 1)
+    assert not (tmp_path / "farebot.db.v2.bak.partial").exists()

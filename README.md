@@ -38,9 +38,9 @@ python main.py
 | Variable | Meaning |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather. |
-| `ALLOWED_USERS` | Comma-separated Telegram user IDs that always have access. The first one is the admin: it gets access requests with Approve and Deny buttons, and `/users` lists everyone and lets you remove people. Changes apply without a restart. |
+| `ALLOWED_USERS` | Comma-separated Telegram user IDs that always have access. The first one is the admin: it gets access requests with Approve and Deny buttons, `/users` lists everyone and lets you remove people, and `/stats` shows searches, cache savings and users. Changes apply without a restart. |
 | `TIMEZONE` | Timezone for digest delivery times, e.g. `Europe/Athens`. Defaults to the server's. |
-| `FAREBOT_DB_PATH` | SQLite file. Defaults to `farebot.db` in the project folder. |
+| `FAREBOT_DB_PATH` | SQLite file. Defaults to `farebot.db` in the project folder. Before an update changes its layout, it's copied to `farebot.db.v<old version>.bak`. |
 
 ## Shortcuts
 

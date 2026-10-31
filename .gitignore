@@ -8,3 +8,5 @@ __pycache__/
 docs/
 farebot.lock
 *.log
+*.bak
+*.bak.partial

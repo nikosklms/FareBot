@@ -12,7 +12,7 @@ import httpx
 from fast_flights import FlightQuery, Passengers, create_query
 from selectolax.lexbor import LexborHTMLParser
 
-from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError
+from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError, ProviderStats
 from providers.result_cache import ResultCache
 from services.airports_data import MULTI_AIRPORT_CITIES
 from utils.date_parser import generate_date_sequence
@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 CONCURRENT_REQUESTS = 5
 
 # When Google rate-limits us, every request pauses: 60 s at first, doubling while blocks continue.
-# Retrying straight away only prolongs a block. Searches wait out a short pause and fail at once
-# during a longer one, without contacting Google.
+# Retrying straight away only prolongs a block. A search waits when at most a minute of the pause
+# is left, and otherwise fails at once without contacting Google.
 FIRST_PAUSE_SECONDS = 60
 MAX_PAUSE_SECONDS = 15 * 60
 MAX_WAIT_SECONDS = 60
@@ -349,6 +349,8 @@ class FastFlightsProvider(AbstractFlightProvider):
         self._paused_at = float("-inf")
         self._paused_until = float("-inf")
         self._next_pause = FIRST_PAUSE_SECONDS
+        self._google_requests = 0
+        self._rate_limit_pauses = 0
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._latencies: deque[float] = deque(maxlen=100)
 
@@ -356,6 +358,18 @@ class FastFlightsProvider(AbstractFlightProvider):
         if not self._latencies:
             return 0.5
         return sum(self._latencies) / len(self._latencies)
+
+    def stats(self) -> ProviderStats:
+        cache = self.cache
+        return ProviderStats(
+            searches=cache.hits + cache.shared + cache.misses,
+            from_cache=cache.hits,
+            shared=cache.shared,
+            google_requests=self._google_requests,
+            rate_limit_pauses=self._rate_limit_pauses,
+            paused_for=max(0.0, self._paused_until - self._clock()),
+            average_latency=self.average_latency() if self._latencies else 0.0,
+        )
 
     def latency_samples(self) -> list[float]:
         """Seconds per Google request (fetch and parse, not queue time), last 100 requests."""
@@ -375,10 +389,11 @@ class FastFlightsProvider(AbstractFlightProvider):
     ) -> List[FlightOffer]:
         key = (origin.upper(), destination.upper(), departure_date, return_date, currency, direct_only)
         return await self.cache.get_or_fetch(key, lambda: self._search_google(
-            origin, destination, departure_date, return_date, currency, direct_only))
+            key, origin, destination, departure_date, return_date, currency, direct_only))
 
     async def _search_google(
         self,
+        key: tuple,
         origin: str,
         destination: str,
         departure_date: str,
@@ -398,6 +413,8 @@ class FastFlightsProvider(AbstractFlightProvider):
         ))
         if all(batch is None for batch in results):
             raise FlightSearchError(f"Couldn't search {origin} -> {destination} on {departure_date}")
+        if any(batch is None for batch in results):
+            self.cache.keep_out(key)  # some of the city's airports failed; search them again next time
         all_offers = [offer for batch in results if batch for offer in batch]
 
         offers = merge_duplicate_offers([o for o in all_offers if o.is_direct or not direct_only])
@@ -437,6 +454,7 @@ class FastFlightsProvider(AbstractFlightProvider):
                     return None
                 t0 = time.perf_counter()
                 started = self._clock()
+                self._google_requests += 1
                 try:
                     html = await self._fetcher.fetch_html(q)
                     # Parsing a results page takes tens of milliseconds; keep it off the event loop.
@@ -454,7 +472,7 @@ class FastFlightsProvider(AbstractFlightProvider):
         return None
 
     async def _wait_out_pause(self) -> bool:
-        """Wait for a short rate-limit pause to end. False during a long one: don't contact Google."""
+        """Wait out the pause if at most a minute is left. False otherwise: don't contact Google."""
         remaining = self._paused_until - self._clock()
         if remaining <= 0:
             return True
@@ -469,6 +487,7 @@ class FastFlightsProvider(AbstractFlightProvider):
         now = self._clock()
         self._paused_at = now
         self._paused_until = now + self._next_pause
+        self._rate_limit_pauses += 1
         logger.warning(f"[RATE_LIMIT] {error}. Pausing Google requests for {self._next_pause:.0f}s")
         self._next_pause = min(self._next_pause * 2, MAX_PAUSE_SECONDS)
 

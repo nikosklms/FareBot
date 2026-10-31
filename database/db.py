@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -137,6 +138,7 @@ class Database:
                 version = (await cur.fetchone())[0]
             if version >= SCHEMA_VERSION:
                 return
+            await _backup_before_migrating(conn, f"{self.path}.v{version}.bak")
             if version < 1:
                 await _migrate_to_v1(conn)
             if version < 2:
@@ -449,6 +451,27 @@ class Database:
 # ----------------------------------------------------------------------
 # Migration from the pre-versioned schema
 # ----------------------------------------------------------------------
+
+async def _backup_before_migrating(conn: aiosqlite.Connection, path: str) -> None:
+    """Copy the database before its schema changes. An existing copy is kept: it was made before
+    any earlier attempt, so it's the one to restore if a migration fails halfway.
+
+    The copy is written to a temporary file and renamed when complete, so a copy that failed
+    halfway (a full disk) is never mistaken for a good one.
+    """
+    async with conn.execute("SELECT COUNT(*) FROM sqlite_master") as cur:
+        if (await cur.fetchone())[0] == 0:
+            return  # a new, empty database
+    if os.path.exists(path):
+        return
+    partial = path + ".partial"
+    if os.path.exists(partial):
+        os.remove(partial)
+    async with aiosqlite.connect(partial) as target:
+        await conn.backup(target)
+    os.replace(partial, path)
+    logger.info("Backed up the database to %s before migrating", path)
+
 
 async def _table_exists(conn: aiosqlite.Connection, name: str) -> bool:
     async with conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)) as cur:
