@@ -1,4 +1,9 @@
-# FareBot
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo-dark.svg">
+    <img src="assets/brand/logo-light.svg" width="480" alt="FareBot">
+  </picture>
+</p>
 
 A Telegram bot that watches Google Flights for you. Search a route, track it until it drops under your budget, or scan a whole region for the best deals from your airport.
 
