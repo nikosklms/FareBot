@@ -14,50 +14,31 @@ A Telegram bot that watches Google Flights for you. Search a route, track it unt
 - **`/digest`** runs an explore search every week and sends you the results at a time you pick.
 - **`/mytracks`** lists your trackers and digests. You can edit, pause, share or delete them.
 
-FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
+FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. As the admin you also get `/users` to manage people and `/stats` for usage; everyone else can have 3 active trackers and digests and search up to 180 days at a time. It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
 
 ## Setup
 
-You need Python 3.10 or newer and a bot token from [@BotFather](https://t.me/BotFather).
+Get a bot token from [@BotFather](https://t.me/BotFather) and your user ID from [@userinfobot](https://t.me/userinfobot), then:
 
 ```bash
-git clone https://github.com/nikosklms/FareBot.git
-cd FareBot
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Put your token and your Telegram user ID in `.env` ([@userinfobot](https://t.me/userinfobot) tells you your ID), then start the bot:
-
-```bash
-python main.py
-```
-
-### With Docker
-
-Set `TIMEZONE` in `.env` too, to your timezone's name from the [tz database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) (e.g. `Europe/Athens`, `Africa/Lagos`, `America/New_York`): a container has no local timezone, so digests would otherwise follow UTC. Then:
-
-```bash
+git clone https://github.com/nikosklms/FareBot.git && cd FareBot
+cp .env.example .env    # add your token, user ID and timezone
 docker compose up -d --build
 ```
 
-The database lives in `./data`, and the bot restarts on its own after a crash or reboot. `docker compose logs -f` shows the log. To move an existing database in, stop the bot and copy `farebot.db` into `./data` first.
-
-Without Compose:
+The database is kept in `./data`, and `docker compose logs -f` shows the log. Without Docker, on Python 3.10+:
 
 ```bash
-docker build -t farebot .
-docker run -d --name farebot --restart unless-stopped --env-file .env -v "$PWD/data:/data" farebot
+pip install -r requirements.txt
+python main.py
 ```
 
 | Variable | Meaning |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather. |
-| `ALLOWED_USERS` | Comma-separated Telegram user IDs that always have access. The first one is the admin: it gets access requests with Approve and Deny buttons, `/users` lists everyone and lets you remove people, and `/stats` shows searches, cache savings and users. Everyone else can have 3 active trackers and digests and search up to 180 days at a time (the admin: 20 and 330). Changes apply without a restart. |
-| `TIMEZONE` | Timezone for digest delivery times, e.g. `Europe/Athens`. Defaults to the server's; required with Docker. |
-| `FAREBOT_DB_PATH` | SQLite file. Defaults to `farebot.db` in the project folder. Before an update changes its layout, it's copied to `farebot.db.v<old version>.bak`. |
+| `ALLOWED_USERS` | Comma-separated Telegram user IDs with access. The first one is the admin. Changes apply without a restart. |
+| `TIMEZONE` | Your [tz database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) name for digest times, e.g. `Europe/Athens`. Required with Docker. |
+| `FAREBOT_DB_PATH` | Optional. SQLite file, `farebot.db` by default. |
 
 ## Shortcuts
 
@@ -72,7 +53,7 @@ Every command walks you through its options with buttons, or takes them in one l
 
 ## How it works
 
-Each search is one request to Google Flights for one route and one day, so a single `/explore` can send hundreds. The bot runs 5 at a time, which comes to about 430 searches a minute without being rate-limited (measured with `tools/benchmark.py`). Long searches run in the background with a progress bar and a Stop button, so the bot keeps answering meanwhile. Results are cached for 15 minutes and shared between users, and identical searches running at the same time share one request, so repeated or overlapping searches don't go to Google again. If Google rate-limits the bot, every request pauses for a minute instead of retrying straight away, and the pause doubles (up to 15 minutes) while the blocks continue.
+Each search is one request to Google Flights for one route and one day, so a single `/explore` can send hundreds. The bot runs 5 at a time, which comes to about 430 searches a minute without being rate-limited (measured with `tools/benchmark.py`). Long searches run in the background with a progress bar and a Stop button, so the bot keeps answering meanwhile. When several run at once, searches someone is waiting for go before digests and tracker checks, and smaller jobs go before bigger ones without freezing them, so a long digest never holds up a quick `/search`. Results are cached for 15 minutes and shared between users, and identical searches running at the same time share one request, so repeated or overlapping searches don't go to Google again. If Google rate-limits the bot, every request pauses for a minute instead of retrying straight away, and the pause doubles (up to 15 minutes) while the blocks continue.
 
 Trackers and digests are scheduled jobs that are reloaded from SQLite on startup.
 
@@ -82,8 +63,8 @@ Trackers and digests are scheduled jobs that are reloaded from SQLite on startup
 | `bot/formatting.py` | Message text. |
 | `daemon/scheduler.py` | Tracker checks, weekly digests and nightly cleanup. |
 | `database/` | SQLite access, models and migrations. |
-| `providers/fast_flights.py` | Google Flights requests and parsing. |
-| `services/` | Deal ranking, airport data and airport name search. |
+| `providers/` | Google Flights requests and parsing, the result cache and the request scheduler. |
+| `services/` | Deal ranking, airport data, airport name search and progress estimates. |
 
 ## Development
 
