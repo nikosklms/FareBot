@@ -9,6 +9,9 @@ served made a long digest block everyone queued behind it, including a user's on
 2. Within each group, 4 of every 5 slots go to the job with the fewest searches left, so
    small jobs finish fast; the 5th rotates through the other jobs, so every job keeps
    moving and none starves.
+3. A search several jobs are waiting on (the cache lets a job join a search another job
+   already started) counts for all of them, so it moves at the most urgent one's pace.
+   Otherwise a small job waiting on a big job's search would wait at the big job's pace.
 
 Simulated on 5 and 20 simultaneous digests, this cut the average wait by about a third
 against first come first served, stayed within ~10% of pure shortest-first, and no job
@@ -20,9 +23,11 @@ from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Iterator, Optional
+from typing import AsyncIterator, Awaitable, Iterator, Optional, TypeVar
 
 ROTATE_EVERY = 5  # every 5th slot in a group goes to a job other than the shortest
+
+T = TypeVar("T")
 
 
 @dataclass(eq=False)
@@ -52,10 +57,48 @@ def search_job(name: str, interactive: bool) -> Iterator[SearchJob]:
         CURRENT_JOB.reset(token)
 
 
+@dataclass(eq=False)
+class _Ticket:
+    """One request waiting for a slot, filed under every job waiting on it."""
+    future: asyncio.Future
+    scheduler: "SlotScheduler"
+    share: Optional["SharedSearch"]
+    owners: list[SearchJob] = field(default_factory=list)
+    state: str = "waiting"  # then "granted" or "cancelled"
+
+
+class SharedSearch:
+    """The jobs waiting on one search. The cache starts each search inside one and adds every
+    job that joins it later, so the search's queued requests count for all of those jobs."""
+
+    def __init__(self, job: Optional[SearchJob]) -> None:
+        self.jobs = [job] if job else []
+        self.tickets: list[_Ticket] = []
+
+    def add(self, job: Optional[SearchJob]) -> None:
+        if job is None or job in self.jobs:
+            return
+        self.jobs.append(job)
+        for ticket in self.tickets:
+            if ticket.state == "waiting":
+                ticket.scheduler._add_owner(ticket, job)
+
+    async def run(self, work: Awaitable[T]) -> T:
+        token = CURRENT_SHARE.set(self)  # the tasks the search starts inherit it
+        try:
+            return await work
+        finally:
+            CURRENT_SHARE.reset(token)
+
+
+CURRENT_SHARE: ContextVar[Optional[SharedSearch]] = ContextVar("farebot_shared_search", default=None)
+
+
 @dataclass
 class _Group:
-    """Waiting requests of one kind (interactive or background), per job in arrival order."""
-    queues: dict[SearchJob, deque[asyncio.Future]] = field(default_factory=dict)
+    """Waiting requests of one kind (interactive or background), per job in arrival order.
+    Requests that were granted or stopped are dropped lazily when they reach the front."""
+    queues: dict[SearchJob, deque[_Ticket]] = field(default_factory=dict)
     granted: int = 0
     rotation: int = 0
 
@@ -68,74 +111,78 @@ class SlotScheduler:
 
     @asynccontextmanager
     async def slot(self) -> AsyncIterator[None]:
-        job = CURRENT_JOB.get() or self._untagged
-        await self._acquire(job)
-        job.running += 1
+        ticket = await self._acquire()
+        owners = list(ticket.owners)
+        for job in owners:
+            job.running += 1
         try:
             yield
         finally:
-            job.running -= 1
+            for job in owners:
+                job.running -= 1
             self._release()
 
-    async def _acquire(self, job: SearchJob) -> None:
-        if self._free > 0 and not self._waiting():
-            self._free -= 1
-            return
-        future = asyncio.get_running_loop().create_future()
-        self._groups[job.interactive].queues.setdefault(job, deque()).append(future)
-        job.waiting += 1
+    async def _acquire(self) -> _Ticket:
+        share = CURRENT_SHARE.get()
+        owners = share.jobs if share and share.jobs else [CURRENT_JOB.get() or self._untagged]
+        ticket = _Ticket(asyncio.get_running_loop().create_future(), self, share)
+        for job in list(owners):
+            self._add_owner(ticket, job)
+        if share:
+            share.tickets.append(ticket)
+        self._dispatch()
         try:
-            await future
+            await ticket.future
         except asyncio.CancelledError:
-            if future.done() and not future.cancelled():
+            if ticket.state == "granted":
                 self._release()  # the slot arrived just as we were cancelled: pass it on
             else:
-                self._forget(job, future)
+                self._finish(ticket, "cancelled")
             raise
+        return ticket
+
+    def _add_owner(self, ticket: _Ticket, job: SearchJob) -> None:
+        ticket.owners.append(job)
+        job.waiting += 1
+        self._groups[job.interactive].queues.setdefault(job, deque()).append(ticket)
+
+    def _finish(self, ticket: _Ticket, state: str) -> None:
+        ticket.state = state
+        for job in ticket.owners:
+            job.waiting -= 1
+        if ticket.share:
+            ticket.share.tickets.remove(ticket)
 
     def _release(self) -> None:
         self._free += 1
-        while self._free > 0:
-            picked = self._pick()
-            if picked is None:
-                return
-            job, future = picked
-            if future.cancelled():
-                continue  # its task was stopped while waiting; _forget never saw it
-            self._free -= 1
-            future.set_result(None)
+        self._dispatch()
 
-    def _pick(self) -> Optional[tuple[SearchJob, asyncio.Future]]:
+    def _dispatch(self) -> None:
+        while self._free > 0:
+            ticket = self._pick()
+            if ticket is None:
+                return
+            self._finish(ticket, "granted")
+            self._free -= 1
+            ticket.future.set_result(None)
+
+    def _pick(self) -> Optional[_Ticket]:
         """The next waiting request: interactive first, then the hybrid rule within the group."""
         for interactive in (True, False):
             group = self._groups[interactive]
+            for job, queue in list(group.queues.items()):
+                while queue and queue[0].state != "waiting":
+                    queue.popleft()
+                if not queue:
+                    del group.queues[job]
             if not group.queues:
                 continue
             jobs = list(group.queues)
-            shortest = min(jobs, key=lambda j: j.left)  # ties go to the job that queued first
+            job = min(jobs, key=lambda j: j.left)  # ties go to the job that queued first
             group.granted += 1
-            job = shortest
             if group.granted % ROTATE_EVERY == 0 and len(jobs) > 1:
-                others = [j for j in jobs if j is not shortest]
+                others = [j for j in jobs if j is not job]
                 job = others[group.rotation % len(others)]
                 group.rotation += 1
-            queue = group.queues[job]
-            future = queue.popleft()
-            job.waiting -= 1
-            if not queue:
-                del group.queues[job]
-            return job, future
+            return group.queues[job][0]
         return None
-
-    def _forget(self, job: SearchJob, future: asyncio.Future) -> None:
-        group = self._groups[job.interactive]
-        queue = group.queues.get(job)
-        if queue is None or future not in queue:
-            return  # already taken off the queue by _release
-        queue.remove(future)
-        job.waiting -= 1
-        if not queue:
-            del group.queues[job]
-
-    def _waiting(self) -> bool:
-        return any(group.queues for group in self._groups.values())

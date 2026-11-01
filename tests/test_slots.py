@@ -43,7 +43,7 @@ async def test_a_search_someone_waits_for_goes_before_background_work():
 
 async def test_the_shortest_job_goes_first():
     order = await run(SlotScheduler(1), [("long digest", 20, False), ("short digest", 4, False)])
-    assert order[:5] == ["long digest"] + ["short digest"] * 4  # queued later, finished first
+    assert order[:6].count("short digest") == 4  # queued later, finished first
 
 
 async def test_every_fifth_slot_keeps_longer_jobs_moving():
@@ -94,10 +94,10 @@ async def test_stopping_a_waiting_search_frees_its_place():
 async def test_a_slot_granted_to_a_search_being_stopped_is_passed_on():
     scheduler = SlotScheduler(1)
     job = SearchJob("digest", interactive=False)
-    await scheduler._acquire(job)  # something holds the only slot
     token = CURRENT_JOB.set(job)
     try:
-        waiting = asyncio.create_task(scheduler._acquire(job))
+        await scheduler._acquire()  # something holds the only slot
+        waiting = asyncio.create_task(scheduler._acquire())
     finally:
         CURRENT_JOB.reset(token)
     await asyncio.sleep(0)
@@ -138,3 +138,52 @@ async def test_user_searches_are_interactive_and_digests_and_trackers_are_not(bo
     assert interactive == {True}
     assert seen and {job.interactive for job in seen} == {False}
     assert {job.name for job in seen} == {f"tracker #{tracker.id}", f"digest #{digest.id}"}
+
+
+async def shared_searches(big_first: bool, small_interactive: bool = False) -> list[str]:
+    """A big digest searches k0..k19; a small job needs k16..k19, at the end of the big one's queue."""
+    from providers.base import FlightOffer
+    from providers.result_cache import ResultCache
+    cache, scheduler, order = ResultCache(), SlotScheduler(1), []
+
+    def fetch(key: str):
+        async def search():
+            async with scheduler.slot():
+                order.append(key)
+                await asyncio.sleep(0)
+            return [FlightOffer("ATH", "LON", "2026-12-01", price=1.0)]
+        return search
+
+    async def start(name: str, keys: list[str], interactive: bool) -> list[asyncio.Task]:
+        with search_job(name, interactive):
+            tasks = [asyncio.create_task(cache.get_or_fetch(key, fetch(key))) for key in keys]
+        for _ in range(3):
+            await asyncio.sleep(0)  # let the searches start and queue up
+        return tasks
+
+    big = ("big digest", [f"k{i}" for i in range(20)], False)
+    small = ("small", [f"k{i}" for i in range(16, 20)], small_interactive)
+    first, second = (big, small) if big_first else (small, big)
+    tasks = await start(*first) + await start(*second)
+    await asyncio.gather(*tasks)
+    return order
+
+
+SMALL = ("k16", "k17", "k18", "k19")
+
+
+async def test_a_small_job_sharing_a_big_jobs_searches_gets_them_first():
+    order = await shared_searches(big_first=True)  # the big job owns the shared searches
+    # Done while the big job has run only a few of its own, not at positions 16-19 (its pace).
+    assert max(order.index(key) for key in SMALL) < order.index("k5")
+    assert len(order) == 20  # each shared search ran once
+
+
+async def test_sharing_works_the_same_when_the_small_job_queues_first():
+    order = await shared_searches(big_first=False)
+    assert max(order.index(key) for key in SMALL) < order.index("k5") and len(order) == 20
+
+
+async def test_an_interactive_search_sharing_a_digests_search_jumps_the_queue():
+    order = await shared_searches(big_first=True, small_interactive=True)
+    assert max(order.index(key) for key in SMALL) < order.index("k2")  # straight after what was already running

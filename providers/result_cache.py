@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Hashable, List, Optional
 
 from providers.base import FlightOffer
+from providers.slots import CURRENT_JOB, SharedSearch
 
 # Prices on Google Flights change a few times a day at most; 15 minutes old is still the price a user would see.
 CACHE_SECONDS = 15 * 60
@@ -16,6 +17,7 @@ MAX_ENTRIES = 8000
 @dataclass
 class _Running:
     task: asyncio.Future
+    share: SharedSearch  # the jobs waiting on this search, for the request scheduler
     waiters: int = 0
     keep: bool = True
 
@@ -54,11 +56,15 @@ class ResultCache:
         running = self._running.get(key)
         if running is None:
             self.misses += 1
-            running = _Running(asyncio.ensure_future(fetch()))
+            share = SharedSearch(CURRENT_JOB.get())
+            running = _Running(asyncio.ensure_future(share.run(fetch())), share)
             self._running[key] = running
             running.task.add_done_callback(lambda task: self._finished(key, running))
         else:
             self.shared += 1
+            # Tell the scheduler this job waits on the search too, so a small job joining a big
+            # job's search isn't served at the big job's pace.
+            running.share.add(CURRENT_JOB.get())
 
         running.waiters += 1
         try:
