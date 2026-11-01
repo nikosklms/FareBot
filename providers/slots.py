@@ -109,19 +109,15 @@ class SlotScheduler:
         self._groups = {True: _Group(), False: _Group()}
         self._untagged = SearchJob("untagged", interactive=False)
         self._jobs: dict[SearchJob, None] = {}  # every job seen, for finish estimates (ordered set)
+        self._shared: set[_Ticket] = set()  # waiting or running requests with several owners
 
     @asynccontextmanager
     async def slot(self) -> AsyncIterator[None]:
         ticket = await self._acquire()
-        owners = list(ticket.owners)
-        for job in owners:
-            job.running += 1
         try:
             yield
         finally:
-            for job in owners:
-                job.running -= 1
-            self._release()
+            self._done(ticket)
 
     async def _acquire(self) -> _Ticket:
         share = CURRENT_SHARE.get()
@@ -136,8 +132,8 @@ class SlotScheduler:
             await ticket.future
         except asyncio.CancelledError:
             if ticket.state == "granted":
-                self._release()  # the slot arrived just as we were cancelled: pass it on
-            else:
+                self._done(ticket)  # the slot arrived just as we were cancelled: pass it on
+            elif ticket.state == "waiting":  # (already "cancelled" if _dispatch skipped it)
                 self._finish(ticket, "cancelled")
             raise
         return ticket
@@ -149,33 +145,58 @@ class SlotScheduler:
         together completing `rate` requests per second. Unlike extrapolating the job's own speed
         so far, this knows it will speed up once smaller or interactive jobs ahead of it finish.
         `upcoming` counts requests the job is about to queue.
+
+        A request several jobs wait on is sent once, so it's counted once: under the owner the
+        rule serves first, and the job then also waits for that owner to finish.
         """
         for other in [j for j in self._jobs if j.left == 0]:
             del self._jobs[other]
         left = {j: float(j.left) for j in self._jobs}
         left[job] = left.get(job, 0.0) + upcoming
+        waits_for = {job}
+        for ticket in self._shared:
+            doer = min(ticket.owners, key=lambda j: (not j.interactive, j.left))
+            for owner in ticket.owners:
+                if owner is not doer:
+                    left[owner] = left.get(owner, 0.0) - 1
+            if job in ticket.owners:
+                waits_for.add(doer)
         elapsed = 0.0
-        while left.get(job, 0.0) > 1e-9:
+        while any(left.get(j, 0.0) > 1e-9 for j in waits_for):
+            left = {j: n for j, n in left.items() if n > 1e-9}
             shares = _shares(left)
             step = min(left[j] / (share * rate) for j, share in shares.items())
             for j, share in shares.items():
                 left[j] -= share * rate * step
             elapsed += step
-            left = {j: n for j, n in left.items() if n > 1e-9}
         return elapsed
 
     def _add_owner(self, ticket: _Ticket, job: SearchJob) -> None:
         self._jobs[job] = None
         ticket.owners.append(job)
+        if len(ticket.owners) > 1:
+            self._shared.add(ticket)
         job.waiting += 1
         self._groups[job.interactive].queues.setdefault(job, deque()).append(ticket)
 
     def _finish(self, ticket: _Ticket, state: str) -> None:
+        """The request stops waiting: it got a slot ("granted") or its search was stopped ("cancelled")."""
         ticket.state = state
         for job in ticket.owners:
             job.waiting -= 1
+            if state == "granted":
+                job.running += 1
         if ticket.share:
             ticket.share.tickets.remove(ticket)
+        if state == "cancelled":
+            self._shared.discard(ticket)
+
+    def _done(self, ticket: _Ticket) -> None:
+        """A granted request is over: free its slot."""
+        for job in ticket.owners:
+            job.running -= 1
+        self._shared.discard(ticket)
+        self._release()
 
     def _release(self) -> None:
         self._free += 1
@@ -186,6 +207,11 @@ class SlotScheduler:
             ticket = self._pick()
             if ticket is None:
                 return
+            if ticket.future.done():
+                # Its search was stopped a moment ago and its own cleanup hasn't run yet: skip it,
+                # or set_result() fails in whichever search is handing over its slot.
+                self._finish(ticket, "cancelled")
+                continue
             self._finish(ticket, "granted")
             self._free -= 1
             ticket.future.set_result(None)

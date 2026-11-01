@@ -107,6 +107,24 @@ async def test_a_slot_granted_to_a_search_being_stopped_is_passed_on():
     assert scheduler._free == 1 and job.waiting == 0
 
 
+async def test_a_search_stopped_just_before_a_slot_frees_up_is_skipped():
+    scheduler = SlotScheduler(1)
+    job = SearchJob("digest", interactive=False)
+    token = CURRENT_JOB.set(job)
+    try:
+        await scheduler._acquire()  # something holds the only slot
+        stopped = asyncio.create_task(scheduler._acquire())
+        following = asyncio.create_task(scheduler._acquire())
+    finally:
+        CURRENT_JOB.reset(token)
+    await asyncio.sleep(0)
+    stopped.cancel()  # the user presses Stop, which cancels the waiting request at once…
+    scheduler._release()  # …and a request finishes before the stopped one has cleaned up
+    await asyncio.gather(stopped, return_exceptions=True)
+    await asyncio.wait_for(following, timeout=1)  # the slot went to the next request instead
+    assert scheduler._free == 0 and job.waiting == 0 and job.running == 2
+
+
 async def jobs_seen(bot, provider) -> list[SearchJob]:
     seen = []
     searches = provider.search_flights
@@ -223,6 +241,34 @@ def test_background_estimates_count_interactive_work_ahead_of_them():
     jobs = running_jobs(scheduler, digest=(600, False), search=(60, True))
     assert round(scheduler.finish_in(jobs["search"], rate=6)) == 10
     assert round(scheduler.finish_in(jobs["digest"], rate=6)) == 110  # waits for the search, then runs alone
+
+
+async def test_estimates_count_a_shared_search_once():
+    from providers.base import FlightOffer
+    from providers.result_cache import ResultCache
+    cache, scheduler, gate = ResultCache(), SlotScheduler(1), asyncio.Event()
+
+    async def search():
+        async with scheduler.slot():
+            await gate.wait()
+        return [FlightOffer("ATH", "LON", "2026-12-01", price=1.0)]
+
+    async def start(name: str, keys: range) -> tuple[SearchJob, list[asyncio.Task]]:
+        with search_job(name, interactive=False) as job:
+            tasks = [asyncio.create_task(cache.get_or_fetch(f"k{i}", search)) for i in keys]
+        for _ in range(3):
+            await asyncio.sleep(0)
+        return job, tasks
+
+    big, big_tasks = await start("big digest", range(20))
+    small, small_tasks = await start("small digest", range(16, 20))  # joins 4 of the big one's searches
+    # 20 requests in all, not 24: the small job gets its 4 at 4/5 of the speed (5 s), the big one
+    # does 1 meanwhile and its other 15 alone.
+    assert round(scheduler.finish_in(small, rate=1)) == 5
+    assert round(scheduler.finish_in(big, rate=1)) == 20
+    gate.set()
+    await asyncio.gather(*big_tasks, *small_tasks)
+    assert not scheduler._shared and big.left == small.left == 0
 
 
 def test_a_job_about_to_start_is_estimated_with_its_upcoming_requests():
