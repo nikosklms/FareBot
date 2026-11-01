@@ -9,6 +9,7 @@ from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler, MessageHandler
 
 from bot.deal_buttons import COLLAPSED, remember_deal_buttons
+from bot.delivery import deliver
 from bot.formatting import (
     GOOGLE_UNREACHABLE, deal_report, eur, failed_searches_note, flight_type_label, progress_text, query_scope,
     short_window, split_message,
@@ -212,24 +213,20 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
 
     sections = rank_deals(search.deals, sort_mode, limit, region)
     note = failed_searches_note(search.failed_queries, search.total_queries)
+    bot, chat_id = status.get_bot(), status.chat_id
     if not sections:
         if search.all_failed:
-            await status.edit_text(f"{headline}\n\n{GOOGLE_UNREACHABLE}")
+            await deliver(bot, chat_id, status, [f"{headline}\n\n{GOOGLE_UNREACHABLE}"])
             return
         budget_note = f" under {eur(max_budget)}" if max_budget else ""
-        await status.edit_text(f"{headline}\n\nℹ️ No deals found{budget_note}. Try a wider date window."
-                               + (f"\n\n{note}" if note else ""))
+        await deliver(bot, chat_id, status, [f"{headline}\n\nℹ️ No deals found{budget_note}. Try a wider date window."
+                                             + (f"\n\n{note}" if note else "")])
         return
 
     chunks = split_message(deal_report(headline, sections) + (f"\n\n{note}" if note else ""))
-    message = status
-    for index, chunk in enumerate(chunks):
-        reply_markup = COLLAPSED if index == len(chunks) - 1 else None
-        if index == 0:
-            message = await status.edit_text(chunk, reply_markup=reply_markup)
-        else:
-            message = await status.reply_text(chunk, reply_markup=reply_markup)
-    remember_deal_buttons(user_data, message.message_id, sections, direct_only)
+    message = await deliver(bot, chat_id, status, chunks, COLLAPSED)
+    if message:
+        remember_deal_buttons(user_data, message.message_id, sections, direct_only)
 
 
 def conversation() -> ConversationHandler:

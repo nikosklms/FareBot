@@ -15,6 +15,7 @@ from bot.formatting import (
 )
 from bot import auth
 from bot.deal_buttons import COLLAPSED, remember_deal_buttons
+from bot.delivery import deliver
 from bot.keyboards import button
 from bot.lifecycle import track_task
 from bot.services import Services, get_services
@@ -288,7 +289,8 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
         start = today_local().isoformat()
 
     try:
-        status = await bot.send_message(chat_id=digest.user_id,
+        # Silent: the results message that replaces it is the one worth a notification.
+        status = await bot.send_message(chat_id=digest.user_id, disable_notification=True,
                                         text=f"{title}\n\n⏳ Searching deals for {digest_window_text(digest)}…")
     except Forbidden:
         logger.warning("User %s blocked the bot; pausing digest #%d", digest.user_id, digest.id)
@@ -320,19 +322,13 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
         else:
             text = (f"{title}\n\nℹ️ No deals found this week (budget: {budget_text(digest.max_budget)}).\n"
                     "You can change the budget in /mytracks." + (f"\n\n{note}" if note else ""))
-        if not await _edit(status, text):
-            await _send(bot, digest.user_id, text)
+        await deliver(bot, digest.user_id, status, [text])
         return True
 
     report = deal_report(f"{title}\n📅 {when}", sections) + (f"\n\n{note}" if note else "")
     chunks = split_message(report)
     track_markup = COLLAPSED if user_data is not None else None
-    last_message = None
-    for index, chunk in enumerate(chunks):
-        reply_markup = track_markup if index == len(chunks) - 1 else None
-        last_message = await _edit(status, chunk, reply_markup) if index == 0 else None
-        if not last_message:
-            last_message = await _send(bot, digest.user_id, chunk, reply_markup)
+    last_message = await deliver(bot, digest.user_id, status, chunks, track_markup)
     if user_data is not None and last_message:
         remember_deal_buttons(user_data, last_message.message_id, sections, digest.direct_only)
     return True

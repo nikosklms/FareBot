@@ -8,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler
 
+from bot.delivery import deliver
 from bot.formatting import (
     GOOGLE_UNREACHABLE, failed_searches_note, flight_type_label, offers_block, progress_text, query_scope,
     short_window,
@@ -193,14 +194,15 @@ async def _search_and_report(services: Services, status: Message, header: str,
         raise
 
     failed = sum(1 for batch in batches if batch is None)
+    bot, chat_id = status.get_bot(), status.chat_id
     if failed == len(dates):
-        await status.edit_text(f"{header}\n\n{GOOGLE_UNREACHABLE}")
+        await deliver(bot, chat_id, status, [f"{header}\n\n{GOOGLE_UNREACHABLE}"])
         return
     offers = [offer for batch in batches if batch for offer in batch]
     end_date = dates[-1] if len(dates) > 1 else None
     text, keyboard = search_results(origin, destination, dates[0], end_date, direct_only, offers)
     note = failed_searches_note(failed, len(dates), "days")
-    await status.edit_text(text + (f"\n\n{note}" if note else ""), reply_markup=keyboard)
+    await deliver(bot, chat_id, status, [text + (f"\n\n{note}" if note else "")], keyboard)
 
 
 def search_results(origin: str, destination: str, start_date: str, end_date: Optional[str],
