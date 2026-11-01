@@ -113,7 +113,8 @@ async def find_deals(
         if on_progress:
             await on_progress(done, total_queries, seconds_left, len(airports), len(dates))
 
-    progress = Progress(total, report, provider.average_latency() / provider.concurrency)
+    progress = Progress(total, report, provider.average_latency() / provider.concurrency,
+                        estimate=provider.seconds_left)
     await progress.start()
 
     failed = 0

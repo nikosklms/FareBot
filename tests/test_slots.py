@@ -187,3 +187,65 @@ async def test_sharing_works_the_same_when_the_small_job_queues_first():
 async def test_an_interactive_search_sharing_a_digests_search_jumps_the_queue():
     order = await shared_searches(big_first=True, small_interactive=True)
     assert max(order.index(key) for key in SMALL) < order.index("k2")  # straight after what was already running
+
+
+def running_jobs(scheduler: SlotScheduler, **sizes: tuple[int, bool]) -> dict[str, SearchJob]:
+    """Jobs with this many requests left (and whether interactive), as the scheduler would see them."""
+    jobs = {}
+    for name, (left, interactive) in sizes.items():
+        jobs[name] = SearchJob(name, interactive, waiting=left)
+        scheduler._jobs[jobs[name]] = None
+    return jobs
+
+
+def test_estimates_count_the_jobs_sharing_the_slots():
+    scheduler = SlotScheduler(5)
+    jobs = running_jobs(scheduler, yours=(2880, False), marias=(1080, False))
+    # Maria's is shorter, so it gets 4/5 of the 6 requests a second and finishes first...
+    assert round(scheduler.finish_in(jobs["marias"], rate=6)) == 225
+    # ...while yours finishes when all the work is done, as if it ran alone after hers.
+    assert round(scheduler.finish_in(jobs["yours"], rate=6)) == 660
+
+
+def test_the_bigger_jobs_estimate_holds_steady_as_the_smaller_one_finishes():
+    scheduler = SlotScheduler(5)
+    jobs = running_jobs(scheduler, yours=(2880, False), marias=(1080, False))
+    before = scheduler.finish_in(jobs["yours"], rate=6)
+    # 225 s later: Maria's is done, and yours did its 1/5 share meanwhile (6 * 0.2 * 225 = 270).
+    jobs["marias"].waiting = 0
+    jobs["yours"].waiting = 2880 - 270
+    after = scheduler.finish_in(jobs["yours"], rate=6)
+    assert round(before - 225) == round(after)  # it simply counted down: no climb, no sudden drop
+
+
+def test_background_estimates_count_interactive_work_ahead_of_them():
+    scheduler = SlotScheduler(5)
+    jobs = running_jobs(scheduler, digest=(600, False), search=(60, True))
+    assert round(scheduler.finish_in(jobs["search"], rate=6)) == 10
+    assert round(scheduler.finish_in(jobs["digest"], rate=6)) == 110  # waits for the search, then runs alone
+
+
+def test_a_job_about_to_start_is_estimated_with_its_upcoming_requests():
+    scheduler = SlotScheduler(5)
+    running_jobs(scheduler, big=(1200, False))
+    starting = SearchJob("new digest", interactive=False)
+    assert round(scheduler.finish_in(starting, rate=6, upcoming=600)) == 125  # shorter: 4/5 of the speed
+
+
+async def test_progress_reports_the_schedulers_estimate():
+    from services.progress import Progress
+    reported = []
+
+    async def on_progress(done, total, seconds_left):
+        reported.append(seconds_left)
+
+    estimates = iter([600.0, 300.0])
+    progress = Progress(10, on_progress, seconds_per_query=1.0, interval=0, estimate=lambda upcoming: next(estimates))
+    await progress.start()
+
+    async def search():
+        return None
+
+    await progress.track(search())
+    assert reported[0] == 600  # from the scheduler, not 10 searches x 1 s
+    assert 300 <= reported[1] <= 600  # moving towards the new estimate, smoothed

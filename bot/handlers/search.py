@@ -175,7 +175,7 @@ async def _search_and_report(services: Services, status: Message, header: str,
 
     provider = services.provider
     progress = Progress(len(dates), show_progress if len(dates) > 1 else None,
-                        provider.average_latency() / provider.concurrency)
+                        provider.average_latency() / provider.concurrency, estimate=provider.seconds_left)
     async def search_day(day: str) -> Optional[list]:
         try:
             return await provider.search_flights(origin=origin, destination=destination, departure_date=day,
@@ -184,8 +184,8 @@ async def _search_and_report(services: Services, status: Message, header: str,
             return None
 
     try:
-        await progress.start()
         with search_job(f"search {origin}-{destination}", interactive=True):  # someone is waiting: goes first
+            await progress.start()
             batches = await asyncio.gather(*(progress.track(search_day(day)) for day in dates))
     except asyncio.CancelledError:
         await _edit_quietly(status, RESTART_NOTICE if services.shutting_down else "⏹ Search stopped.")

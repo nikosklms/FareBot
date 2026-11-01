@@ -63,6 +63,12 @@ class AbstractFlightProvider(ABC):
     def stats(self) -> ProviderStats:
         return ProviderStats()
 
+    def seconds_left(self, upcoming: int = 0) -> Optional[float]:
+        """Estimated seconds until the current job's searches are done, counting the other jobs
+        sharing the request slots; None when the provider can't tell. `upcoming` counts searches
+        the job is about to start."""
+        return None
+
     async def close(self) -> None:  # noqa: B027 - optional hook, most providers have nothing to release
         """Release network resources when the bot stops."""
 

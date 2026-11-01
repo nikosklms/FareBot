@@ -108,6 +108,7 @@ class SlotScheduler:
         self._free = slots
         self._groups = {True: _Group(), False: _Group()}
         self._untagged = SearchJob("untagged", interactive=False)
+        self._jobs: dict[SearchJob, None] = {}  # every job seen, for finish estimates (ordered set)
 
     @asynccontextmanager
     async def slot(self) -> AsyncIterator[None]:
@@ -141,7 +142,30 @@ class SlotScheduler:
             raise
         return ticket
 
+    def finish_in(self, job: SearchJob, rate: float, upcoming: int = 0) -> float:
+        """Seconds until the job's requests are done, if no new jobs arrive.
+
+        Plays the scheduling rule forward over every job's remaining requests, with all slots
+        together completing `rate` requests per second. Unlike extrapolating the job's own speed
+        so far, this knows it will speed up once smaller or interactive jobs ahead of it finish.
+        `upcoming` counts requests the job is about to queue.
+        """
+        for other in [j for j in self._jobs if j.left == 0]:
+            del self._jobs[other]
+        left = {j: float(j.left) for j in self._jobs}
+        left[job] = left.get(job, 0.0) + upcoming
+        elapsed = 0.0
+        while left.get(job, 0.0) > 1e-9:
+            shares = _shares(left)
+            step = min(left[j] / (share * rate) for j, share in shares.items())
+            for j, share in shares.items():
+                left[j] -= share * rate * step
+            elapsed += step
+            left = {j: n for j, n in left.items() if n > 1e-9}
+        return elapsed
+
     def _add_owner(self, ticket: _Ticket, job: SearchJob) -> None:
+        self._jobs[job] = None
         ticket.owners.append(job)
         job.waiting += 1
         self._groups[job.interactive].queues.setdefault(job, deque()).append(ticket)
@@ -186,3 +210,18 @@ class SlotScheduler:
                 group.rotation += 1
             return group.queues[job][0]
         return None
+
+
+def _shares(left: dict[SearchJob, float]) -> dict[SearchJob, float]:
+    """Each job's share of the slots under the rule above: interactive jobs take everything;
+    within a group the shortest gets 4/5 and the rest split the rotating 1/5."""
+    for interactive in (True, False):
+        jobs = [j for j in left if j.interactive == interactive]
+        if not jobs:
+            continue
+        if len(jobs) == 1:
+            return {jobs[0]: 1.0}
+        shortest = min(jobs, key=lambda j: left[j])
+        rest = 1 / ROTATE_EVERY / (len(jobs) - 1)
+        return {j: 1 - 1 / ROTATE_EVERY if j is shortest else rest for j in jobs}
+    return {}

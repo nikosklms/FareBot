@@ -14,7 +14,7 @@ from selectolax.lexbor import LexborHTMLParser
 
 from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError, PartialSearchError, ProviderStats
 from providers.result_cache import ResultCache
-from providers.slots import SlotScheduler
+from providers.slots import CURRENT_JOB, SlotScheduler
 from services.airports_data import MULTI_AIRPORT_CITIES
 from utils.date_parser import generate_date_sequence
 
@@ -360,6 +360,18 @@ class FastFlightsProvider(AbstractFlightProvider):
             average_latency=self.average_latency() if self._latencies else 0.0,
         )
 
+    def seconds_left(self, upcoming: int = 0) -> Optional[float]:
+        job = CURRENT_JOB.get()
+        if job is None:
+            return None
+        rate = self.concurrency / self.average_latency()  # requests per second with every slot busy
+        return self._scheduler().finish_in(job, rate, upcoming)
+
+    def _scheduler(self) -> SlotScheduler:
+        if self._slots is None:  # created on first use: the benchmark sets concurrency after __init__
+            self._slots = SlotScheduler(self.concurrency)
+        return self._slots
+
     def latency_samples(self) -> list[float]:
         """Seconds per Google request (fetch and parse, not queue time), last 100 requests."""
         return list(self._latencies)
@@ -390,9 +402,6 @@ class FastFlightsProvider(AbstractFlightProvider):
         currency: str,
         direct_only: bool,
     ) -> List[FlightOffer]:
-        if self._slots is None:  # created on first use: the benchmark sets concurrency after __init__
-            self._slots = SlotScheduler(self.concurrency)
-
         target_destinations = MULTI_AIRPORT_CITIES.get(destination.upper(), [destination])
         t_start = time.perf_counter()
 
@@ -437,7 +446,7 @@ class FastFlightsProvider(AbstractFlightProvider):
             query_kwargs["max_stops"] = 0
         q = create_query(**query_kwargs)
 
-        async with self._slots.slot():
+        async with self._scheduler().slot():
             for _ in range(2):  # one retry, after the pause a rate limit starts
                 if not await self._wait_out_pause():
                     return None
