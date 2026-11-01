@@ -24,6 +24,7 @@ from bot.wizard import (
     MAX_BUDGET, TEXT, Context, Steps, airport_step, choice_step, draft, respond, run_in_background, start_draft,
     timeframe_keyboard, timeframe_step, wizard_conversation,
 )
+from providers.slots import search_job
 from services.airports_data import REGION_LABELS, region_display_name
 from services.explore_engine import find_deals, rank_deals
 from utils.date_parser import days_ahead_window, describe_window
@@ -182,8 +183,9 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
             pass
 
     try:
-        search = await find_deals(services.provider, origin, region, start_date, end_date,
-                                  max_budget=max_budget, on_progress=progress)
+        with search_job(f"explore {origin}-{region}", interactive=True):  # someone is waiting: goes first
+            search = await find_deals(services.provider, origin, region, start_date, end_date,
+                                      max_budget=max_budget, on_progress=progress)
     except asyncio.CancelledError:
         notice = RESTART_NOTICE if services.shutting_down else "⏹ Search stopped."
         try:

@@ -14,6 +14,7 @@ from selectolax.lexbor import LexborHTMLParser
 
 from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchError, PartialSearchError, ProviderStats
 from providers.result_cache import ResultCache
+from providers.slots import SlotScheduler
 from services.airports_data import MULTI_AIRPORT_CITIES
 from utils.date_parser import generate_date_sequence
 
@@ -339,7 +340,7 @@ class FastFlightsProvider(AbstractFlightProvider):
         self._next_pause = FIRST_PAUSE_SECONDS
         self._google_requests = 0
         self._rate_limit_pauses = 0
-        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._slots: Optional[SlotScheduler] = None
         self._latencies: deque[float] = deque(maxlen=100)
 
     def average_latency(self) -> float:
@@ -389,8 +390,8 @@ class FastFlightsProvider(AbstractFlightProvider):
         currency: str,
         direct_only: bool,
     ) -> List[FlightOffer]:
-        if self._semaphore is None:
-            self._semaphore = asyncio.Semaphore(self.concurrency)
+        if self._slots is None:  # created on first use: the benchmark sets concurrency after __init__
+            self._slots = SlotScheduler(self.concurrency)
 
         target_destinations = MULTI_AIRPORT_CITIES.get(destination.upper(), [destination])
         t_start = time.perf_counter()
@@ -436,7 +437,7 @@ class FastFlightsProvider(AbstractFlightProvider):
             query_kwargs["max_stops"] = 0
         q = create_query(**query_kwargs)
 
-        async with self._semaphore:
+        async with self._slots.slot():
             for _ in range(2):  # one retry, after the pause a rate limit starts
                 if not await self._wait_out_pause():
                     return None

@@ -22,6 +22,7 @@ from config import MAX_CONSECUTIVE_FAILURES
 from database.models import ACTIVE, EXPIRED, PAUSED, Digest, Tracker
 from providers.base import FlightSearchError, PartialSearchError
 from providers.fast_flights import build_google_flights_url
+from providers.slots import search_job
 from services.airports_data import region_display_name
 from services.explore_engine import find_deals, rank_deals
 from utils.date_parser import describe_window, is_past, today_local
@@ -152,17 +153,18 @@ async def check_tracker(services: Services, bot: Bot, tracker_id: int) -> bool:
 
     partial = False
     try:
-        if tracker.departure_date_end:
-            offers = await services.provider.search_flights_range(
-                origin=tracker.origin_code, destination=tracker.destination_code,
-                start_date=max(tracker.departure_date, today_local().isoformat()),  # days already gone are skipped
-                end_date=tracker.departure_date_end, direct_only=tracker.direct_only,
-            )
-        else:
-            offers = await services.provider.search_flights(
-                origin=tracker.origin_code, destination=tracker.destination_code,
-                departure_date=tracker.departure_date, direct_only=tracker.direct_only,
-            )
+        with search_job(f"tracker #{tracker.id}", interactive=False):
+            if tracker.departure_date_end:
+                offers = await services.provider.search_flights_range(
+                    origin=tracker.origin_code, destination=tracker.destination_code,
+                    start_date=max(tracker.departure_date, today_local().isoformat()),  # days already gone are skipped
+                    end_date=tracker.departure_date_end, direct_only=tracker.direct_only,
+                )
+            else:
+                offers = await services.provider.search_flights(
+                    origin=tracker.origin_code, destination=tracker.destination_code,
+                    departure_date=tracker.departure_date, direct_only=tracker.direct_only,
+                )
     except PartialSearchError as e:
         offers, partial = e.offers, True
     except FlightSearchError:
@@ -302,8 +304,9 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
         await _edit(status, progress_text(title, f"{when} · {query_scope(airports, days)}", done, total, seconds))
 
     try:
-        search = await find_deals(services.provider, digest.origin_code, digest.region, start, end,
-                                  max_budget=digest.max_budget, on_progress=progress)
+        with search_job(f"digest #{digest.id}", interactive=False):
+            search = await find_deals(services.provider, digest.origin_code, digest.region, start, end,
+                                      max_budget=digest.max_budget, on_progress=progress)
     except asyncio.CancelledError:
         await _edit(status, f"{title}\n\n⏹ This week's digest was interrupted because the bot restarted. "
                             f"It runs again next {digest.delivery_day} at {digest.delivery_time}.")

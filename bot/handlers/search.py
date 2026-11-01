@@ -25,6 +25,7 @@ from bot.wizard import (
 )
 from providers.base import FlightSearchError
 from providers.fast_flights import build_google_flights_url
+from providers.slots import search_job
 from services.airports_data import region_display_name
 from services.progress import Progress
 from utils.date_parser import describe_window, generate_date_sequence, parse_date_or_range, window_problem
@@ -184,7 +185,8 @@ async def _search_and_report(services: Services, status: Message, header: str,
 
     try:
         await progress.start()
-        batches = await asyncio.gather(*(progress.track(search_day(day)) for day in dates))
+        with search_job(f"search {origin}-{destination}", interactive=True):  # someone is waiting: goes first
+            batches = await asyncio.gather(*(progress.track(search_day(day)) for day in dates))
     except asyncio.CancelledError:
         await _edit_quietly(status, RESTART_NOTICE if services.shutting_down else "⏹ Search stopped.")
         raise
