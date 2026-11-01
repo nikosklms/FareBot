@@ -176,6 +176,7 @@ def cancel_running_task(context: Context) -> bool:
     return False
 
 
+DIRECT_WORDS = ("direct", "-d", "--direct")  # marks a shortcut as direct flights only
 MAX_BUDGET = 100_000  # bigger amounts mean nothing for a flight, and wouldn't fit in a share link
 
 
@@ -224,6 +225,26 @@ def airport_step(prefix: str, state: int, on_pick: OnAirport, back: bool = True,
         MessageHandler(TEXT, typed),
         CallbackQueryHandler(picked, pattern=rf"^{prefix}:[A-Z]{{3}}$"),
     ]
+
+
+RECENT_ORIGINS_KEY = "recent_origins"
+RECENT_ORIGINS = 4
+
+
+def remember_origin(user_data: dict, code: str) -> None:
+    """Offer this airport first next time the user picks an origin."""
+    user_data[RECENT_ORIGINS_KEY] = [code, *(c for c in user_data.get(RECENT_ORIGINS_KEY, []) if c != code)]
+
+
+async def origin_question(update: Update, context: Context, prefix: str) -> tuple[str, InlineKeyboardMarkup]:
+    """'Where are you flying from?' with the user's recent origins as buttons: searches since
+    the bot started, then their trackers and digests."""
+    saved = await get_services(context).db.recent_origins(update.effective_user.id, RECENT_ORIGINS)
+    codes = list(dict.fromkeys([*context.user_data.get(RECENT_ORIGINS_KEY, []), *saved]))[:RECENT_ORIGINS]
+    if not codes:
+        return "Where are you flying from? (e.g. Athens, ATH)", markup()
+    return ("Where are you flying from? Tap a recent airport or type a city name:",
+            keyboards.recent_airports(prefix, codes))
 
 
 # ----------------------------------------------------------------------

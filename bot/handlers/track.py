@@ -12,8 +12,8 @@ from bot.keyboards import TRACK_ADD, button, flight_types, markup
 from bot.auth import limit_reached, max_active, max_range_days
 from bot.services import get_services
 from bot.wizard import (
-    DATES_PROMPT, TEXT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
-    Steps, parse_price, start_draft, wizard_conversation,
+    DATES_PROMPT, DIRECT_WORDS, TEXT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, origin_question,
+    remember_origin, respond, Steps, parse_price, start_draft, wizard_conversation,
 )
 from config import MIN_POLL_INTERVAL_HOURS
 from daemon.scheduler import schedule_tracker
@@ -67,6 +67,7 @@ async def create_tracker_for_user(
         frequency_hours=frequency_hours, direct_only=direct_only,
     )
     schedule_tracker(context.job_queue, tracker)
+    remember_origin(context.user_data, origin)
     return tracker
 
 
@@ -152,7 +153,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     if problem:
         await update.message.reply_text(f"❌ {problem}")
         return
-    direct_only = len(args) > 4 and args[4].lower() in ("direct", "-d", "--direct")
+    direct_only = len(args) > 4 and args[4].lower() in DIRECT_WORDS
     try:
         tracker = await create_tracker_for_user(
             context, update.effective_user.id, origin, destination,
@@ -165,8 +166,8 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
 
 
 async def ask_origin(update: Update, context: Context) -> int:
-    await respond(update, "🔔 <b>New price tracker</b>\n\n🛫 <b>Step 1/6</b>: Where are you flying from? "
-                          "(e.g. Athens, ATH)", markup())
+    question, buttons = await origin_question(update, context, "trk:org")
+    await respond(update, f"🔔 <b>New price tracker</b>\n\n🛫 <b>Step 1/6</b>: {question}", buttons)
     return ORIGIN
 
 

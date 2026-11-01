@@ -3,7 +3,7 @@ from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from services.airports_data import REGION_LABELS
+from services.airports_data import REGION_LABELS, airport_name
 
 CANCEL = "cancel"
 BACK = "back"
@@ -13,7 +13,6 @@ TRACK_ADD = "trk:add"
 # '/search' hands a region destination to '/explore' with 'exp:from:<ORIGIN>:<region>'.
 EXPLORE_FROM_SEARCH = rf"^exp:from:[A-Z]{{3}}:({'|'.join(REGION_LABELS)})$"
 
-QUICK_ORIGINS = [("ATH", "Athens"), ("SKG", "Thessaloniki"), ("HER", "Heraklion"), ("LON", "London")]
 RESULT_LIMITS = [5, 10, 15, 20]
 DEFAULT_RESULT_LIMIT = 10
 
@@ -49,8 +48,8 @@ def airport_choices(prefix: str, matches: list[tuple[str, str, str, float]], bac
                   back=back)
 
 
-def quick_origins(prefix: str) -> InlineKeyboardMarkup:
-    return markup(*pairs([button(f"{code} - {name}", f"{prefix}:{code}") for code, name in QUICK_ORIGINS]))
+def recent_airports(prefix: str, codes: list[str]) -> InlineKeyboardMarkup:
+    return markup(*[[button(f"{code} - {airport_name(code) or code}", f"{prefix}:{code}")] for code in codes])
 
 
 def regions(prefix: str, back_data: str = BACK) -> InlineKeyboardMarkup:

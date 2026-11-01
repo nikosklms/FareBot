@@ -9,9 +9,9 @@ from tests.fakes import USER_ID, future
 WIZARDS = {
     "search": ("/search", 4, [">ATH", "src:org:ATH", ">LON", "src:dst:LON", f">{future(10)}"]),
     "track": ("/track", 6, [">ATH", "trk:org:ATH", ">LON", "trk:dst:LON", f">{future(10)}", "trk:direct:1", ">150"]),
-    "explore": ("/explore", 5, ["exp:org:ATH", "exp:reg:europe", "exp:sort:both", "exp:when:days:7"]),
-    "digest": ("/digest", 8, ["dig:org:ATH", "dig:reg:europe", "dig:sort:both", "dig:bud:80", "dig:when:days:30",
-                              "dig:day:Friday", "dig:time:18:00"]),
+    "explore": ("/explore", 6, ["exp:org:ATH", "exp:reg:europe", "exp:sort:both", "exp:when:days:7", "exp:direct:0"]),
+    "digest": ("/digest", 9, ["dig:org:ATH", "dig:reg:europe", "dig:sort:both", "dig:bud:80", "dig:when:days:30",
+                              "dig:direct:1", "dig:day:Friday", "dig:time:18:00"]),
 }
 
 

@@ -14,14 +14,15 @@ def regional_offers(origin, destination, day):
 async def test_full_wizard(bot, provider):
     provider.offers = regional_offers
     await bot.send("/explore")
-    assert "Step 1/5" in bot.telegram.last_text
+    assert "Step 1/6" in bot.telegram.last_text
     await bot.press("exp:org:ATH")
-    assert "Step 2/5" in bot.telegram.last_text
+    assert "Step 2/6" in bot.telegram.last_text
     await bot.press("exp:reg:europe")
     assert "Europe" in bot.telegram.last_text
     await bot.press("exp:sort:discount")
     await bot.press("exp:when:days:7")
     assert f"{future(1)} ➔ {future(7)}" in bot.telegram.last_text
+    await bot.press("exp:direct:0")
     await bot.send("2")  # counts the buttons don't offer are typed
     assert bot.telegram.button_data("Stop") == "task:stop"
     await bot.finish_background_task()
@@ -46,6 +47,7 @@ async def test_typed_timeframe_and_limit(bot, provider):
     await bot.send("400")
     assert "between 1 and 330" in bot.telegram.last_text
     await bot.send("3")
+    await bot.press("exp:direct:0")
     await bot.send("50")
     assert "from 1 to 20" in bot.telegram.last_text
     await bot.send("1")

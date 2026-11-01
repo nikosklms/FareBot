@@ -36,12 +36,12 @@ Every command starts a step-by-step wizard. Add arguments to skip it:
 <code>/track ATH LON 2026-09-01 150</code>
 <code>/track ATH LON 2026-09-01..2026-09-15 150 direct</code>
 
-🌟 <b>Explore</b>: origin, region, then optional days ahead (default 30), budget (0 = any) and number of results (default 10)
-<code>/explore ATH europe 30 100 10</code>
+🌟 <b>Explore</b>: origin, region, then optional days ahead (default 30), budget (0 = any), number of results (default 10) and <code>direct</code>
+<code>/explore ATH europe 30 100 10 direct</code>
 Tracking a deal sets the target budget 10% below its price.
 
-🗞️ <b>Digest</b>: origin, region, then optional days ahead, budget, delivery day@time and number of results
-<code>/digest ATH europe 30 80 Sunday@15:00 10</code>
+🗞️ <b>Digest</b>: origin, region, then optional days ahead, budget, delivery day@time, number of results and <code>direct</code>
+<code>/digest ATH europe 30 80 Sunday@15:00 10 direct</code>
 
 🌍 <b>Regions</b>: europe, islands, middle_east, asia, africa, oceania, latin_america, north_america
 

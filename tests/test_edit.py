@@ -29,7 +29,7 @@ async def test_menu_lists_fields_for_each_kind(bot):
 
     await bot.press(f"dash:edit:d:{digest.id}")
     assert [label for label, _ in bot.telegram.last_buttons()] == [
-        "🎯 Budget", "📅 Departures", "📊 Ranking", "🔢 Deals Shown", "⏰ Day", "🕒 Time", "✅ Done"]
+        "🎯 Budget", "📅 Departures", "⚙️ Flights", "📊 Ranking", "🔢 Deals Shown", "⏰ Day", "🕒 Time", "✅ Done"]
 
 
 async def test_edit_every_tracker_field(bot):

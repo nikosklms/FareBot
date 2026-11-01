@@ -58,6 +58,7 @@ class Digest:
     delivery_time: str
     max_results: int
     status: str
+    direct_only: bool = False
     created_at: Optional[str] = None
 
     def window(self, today: date) -> tuple[str, Optional[str]]:

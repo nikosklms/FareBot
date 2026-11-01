@@ -20,8 +20,8 @@ from bot.keyboards import (
 from bot.auth import max_range_days
 from bot.services import Services, get_services
 from bot.wizard import (
-    DATES_PROMPT, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, respond,
-    Steps, run_in_background, start_draft, wizard_conversation,
+    DATES_PROMPT, DIRECT_WORDS, Context, airport_step, choice_step, dates_keyboard, dates_step, draft, origin_question,
+    remember_origin, respond, Steps, run_in_background, start_draft, wizard_conversation,
 )
 from providers.base import FlightSearchError
 from providers.fast_flights import build_google_flights_url
@@ -66,13 +66,13 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     if problem:
         await update.message.reply_text(f"❌ {problem}")
         return
-    direct_only = len(args) > 3 and args[3].lower() in ("direct", "-d", "--direct")
+    direct_only = len(args) > 3 and args[3].lower() in DIRECT_WORDS
     await run_search(update, context, origin, destination, start_date, end_date, direct_only)
 
 
 async def ask_origin(update: Update, context: Context) -> int:
-    await respond(update, "🔍 <b>Flight search</b>\n\n🛫 <b>Step 1/4</b>: Where are you flying from? "
-                          "(e.g. Athens, ATH)", markup())
+    question, buttons = await origin_question(update, context, "src:org")
+    await respond(update, f"🔍 <b>Flight search</b>\n\n🛫 <b>Step 1/4</b>: {question}", buttons)
     return ORIGIN
 
 
@@ -158,6 +158,7 @@ STEPS = Steps(DRAFT, ask_origin, ask_destination, ask_dates, ask_flight_type)
 
 async def run_search(update: Update, context: Context, origin: str, destination: str,
                      start_date: str, end_date: Optional[str], direct_only: bool) -> None:
+    remember_origin(context.user_data, origin)
     dates = generate_date_sequence(start_date, end_date) if end_date else [start_date]
     header = f"🔍 <b>{origin} ✈️ {destination}</b> · {'direct only' if direct_only else 'any flights'}"
     stop = stop_markup() if len(dates) > 1 else None

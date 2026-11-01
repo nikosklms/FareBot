@@ -47,8 +47,8 @@ Every command walks you through its options with buttons, or takes them in one l
 ```text
 /search ATH LON 2026-09-01..2026-09-15 direct
 /track ATH LON 2026-09-01 150 direct
-/explore ATH europe 30 100 10        # origin, region, days ahead, budget (0 = any), results
-/digest ATH europe 30 80 Sunday@15:00 10
+/explore ATH europe 30 100 10 direct # origin, region, days ahead, budget (0 = any), results
+/digest ATH europe 30 80 Sunday@15:00 10 direct
 ```
 
 ## How it works

@@ -5,7 +5,8 @@ Telegram allows 64 characters from A-Z, a-z, 0-9, '_' and '-':
   tracker: t-ORIGIN-DEST-START-END-DIRECT-BUDGET-HOURS
   digest:  g-ORIGIN-REGION-WINDOW-SORT-BUDGET-WEEKDAY-TIME-RESULTS
 Dates are YYYYMMDD (END is 0 for a single date), budgets are cents (0 = any), a digest WINDOW is
-either days ahead or START_END, SORT is d/p/b and TIME is HHMM.
+either days ahead or START_END, SORT is d/p/b (D/P/B for direct flights only: the longest digest
+link already uses all 64 characters of callback data) and TIME is HHMM.
 """
 import re
 import urllib.parse
@@ -51,7 +52,8 @@ def share_payload(item: Union[Tracker, Digest]) -> str:
     else:
         window = (str(item.days_ahead) if item.days_ahead is not None
                   else "_".join(_compact(d) for d in (item.departure_date, item.departure_date_end) if d))
-        parts = ["g", item.origin_code, item.region, window, SORTS[item.sort_mode], _cents(item.max_budget),
+        sort = SORTS[item.sort_mode].upper() if item.direct_only else SORTS[item.sort_mode]
+        parts = ["g", item.origin_code, item.region, window, sort, _cents(item.max_budget),
                  str(WEEKDAYS.index(item.delivery_day)), item.delivery_time.replace(":", ""), str(item.max_results)]
     return "-".join(parts)
 
@@ -80,7 +82,8 @@ def parse_digest(parts: list[str]) -> dict:
         end = rest[0] if rest else None
     settings = {
         "origin": origin, "region": region, "days": days, "start": start, "end": end,
-        "sort": {code: mode for mode, code in SORTS.items()}[sort], "budget": int(cents) / 100 or None,
+        "sort": {code: mode for mode, code in SORTS.items()}[sort.lower()], "direct_only": sort.isupper(),
+        "budget": int(cents) / 100 or None,
         "day": WEEKDAYS[int(weekday)], "time": f"{int(hhmm[:2]):02d}:{int(hhmm[2:]):02d}", "limit": int(results),
     }
     if not (CODE.match(origin) and region in REGION_LABELS and len(hhmm) == 4 and int(hhmm[:2]) < 24
@@ -120,6 +123,7 @@ def preview(kind: str, s: dict) -> str:
         f"📍 <b>Route</b>: {s['origin']} ✈️ {region_display_name(s['region'])}",
         f"⏰ <b>Delivery</b>: every {s['day']} at {s['time']}",
         f"📅 <b>Departures</b>: {window}",
+        f"⚙️ <b>Flights</b>: {flight_type_label(s['direct_only'])}",
         f"🎯 <b>Budget</b>: {budget_text(s['budget'])}",
         f"📊 <b>Shows</b>: up to {s['limit']} deals",
     ])

@@ -90,6 +90,7 @@ async def find_deals(
     end_date: Optional[str] = None,
     max_budget: Optional[float] = None,
     on_progress: Optional[ProgressCallback] = None,
+    direct_only: bool = False,
 ) -> DealSearch:
     """Query every airport in a region for every date in the window."""
     origin = origin.upper()
@@ -122,7 +123,7 @@ async def find_deals(
     async def fetch(code: str, departure_date: str) -> list:
         nonlocal failed
         try:
-            return await provider.search_flights(origin, code, departure_date)
+            return await provider.search_flights(origin, code, departure_date, direct_only=direct_only)
         except Exception:
             failed += 1
             logger.warning("[EXPLORE] Query failed: %s -> %s on %s", origin, code, departure_date, exc_info=True)

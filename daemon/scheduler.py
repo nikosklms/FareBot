@@ -278,7 +278,7 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
         return False
 
     region = region_display_name(digest.region)
-    title = f"🗞️ <b>Weekly Flight Digest: {digest.origin_code} → {region}</b>"
+    title = f"🗞️ <b>Weekly Flight Digest: {digest.origin_code} → {region}</b>" + (" · direct only" if digest.direct_only else "")
     start, end = digest.window(today_local())
     if is_past(end or start):
         await services.db.set_digest_status(digest.id, EXPIRED)
@@ -306,7 +306,8 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
     try:
         with search_job(f"digest #{digest.id}", interactive=False):
             search = await find_deals(services.provider, digest.origin_code, digest.region, start, end,
-                                      max_budget=digest.max_budget, on_progress=progress)
+                                      max_budget=digest.max_budget, on_progress=progress,
+                                      direct_only=digest.direct_only)
     except asyncio.CancelledError:
         await _edit(status, f"{title}\n\n⏹ This week's digest was interrupted because the bot restarted. "
                             f"It runs again next {digest.delivery_day} at {digest.delivery_time}.")
@@ -333,7 +334,7 @@ async def send_digest(services: Services, bot: Bot, digest_id: int, user_data: O
         if not last_message:
             last_message = await _send(bot, digest.user_id, chunk, reply_markup)
     if user_data is not None and last_message:
-        remember_deal_buttons(user_data, last_message.message_id, sections)
+        remember_deal_buttons(user_data, last_message.message_id, sections, digest.direct_only)
     return True
 
 

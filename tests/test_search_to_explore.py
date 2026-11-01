@@ -16,10 +16,11 @@ async def test_region_button_continues_as_explore(bot, provider):
     await bot.press("src:regions")
     assert "Which region?" in bot.telegram.last_text
     await bot.press("exp:from:SKG:europe")
-    assert "Step 3/5" in bot.telegram.last_text and "Europe" in bot.telegram.last_text
+    assert "Step 3/6" in bot.telegram.last_text and "Europe" in bot.telegram.last_text
 
     await bot.press("exp:sort:price")
     await bot.press("exp:when:days:2")
+    await bot.press("exp:direct:0")
     await bot.press("exp:lim:5")
     await bot.finish_background_task()
     assert "Deals from SKG to Europe" in bot.telegram.last_text
@@ -32,7 +33,7 @@ async def test_typed_region_offers_explore(bot):
     assert "is a whole region" in bot.telegram.last_text
     assert bot.telegram.button_data("Explore Latin America") == "exp:from:SKG:latin_america"
     await bot.press("exp:from:SKG:latin_america")
-    assert "Step 3/5" in bot.telegram.last_text
+    assert "Step 3/6" in bot.telegram.last_text
 
 
 async def test_back_from_region_picker_returns_to_destination(bot):

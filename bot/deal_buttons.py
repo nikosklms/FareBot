@@ -17,19 +17,20 @@ TRACK_DISCOUNT = 0.90  # tracking a deal targets 10% below its price
 COLLAPSED = InlineKeyboardMarkup([[button("🔔 Track a deal", SHOW_DEALS)]])
 
 
-def deal_buttons(sections: list[DealSection]) -> list[tuple[str, str]]:
-    """(label, callback data) of each deal's Track button."""
+def deal_buttons(sections: list[DealSection], direct_only: bool = False) -> list[tuple[str, str]]:
+    """(label, callback data) of each deal's Track button; the tracker searches the same flights as the results."""
     buttons = []
     for index, deal in numbered_deals(sections):
         budget = round(deal.price * TRACK_DISCOUNT, 2)
         buttons.append((f"🔔 Track #{index}: {deal.destination} (alert under €{budget:.2f})",
-                        track_button_data(deal.origin, deal.destination, deal.departure_date, None, budget)))
+                        track_button_data(deal.origin, deal.destination, deal.departure_date, None, budget, direct_only)))
     return buttons
 
 
-def remember_deal_buttons(user_data: dict, message_id: int, sections: list[DealSection]) -> None:
+def remember_deal_buttons(user_data: dict, message_id: int, sections: list[DealSection],
+                          direct_only: bool = False) -> None:
     saved = user_data.setdefault(DEAL_BUTTONS_KEY, {})
-    saved[message_id] = deal_buttons(sections)
+    saved[message_id] = deal_buttons(sections, direct_only)
     while len(saved) > REMEMBERED_RESULTS:
         saved.pop(next(iter(saved)))
 

@@ -10,19 +10,19 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandl
 
 from bot.deal_buttons import COLLAPSED, remember_deal_buttons
 from bot.formatting import (
-    GOOGLE_UNREACHABLE, deal_report, eur, failed_searches_note, progress_text, query_scope, short_window,
-    split_message,
+    GOOGLE_UNREACHABLE, deal_report, eur, failed_searches_note, flight_type_label, progress_text, query_scope,
+    short_window, split_message,
 )
 from bot.lifecycle import RESTART_NOTICE
 from bot.keyboards import (
-    DEFAULT_RESULT_LIMIT, EXPLORE_FROM_SEARCH, RESULT_LIMITS, markup, quick_origins, regions, result_limits, sort_modes,
+    DEFAULT_RESULT_LIMIT, EXPLORE_FROM_SEARCH, RESULT_LIMITS, flight_types, markup, regions, result_limits, sort_modes,
     stop_markup,
 )
 from bot.auth import max_range_days
 from bot.services import Services, get_services
 from bot.wizard import (
-    MAX_BUDGET, TEXT, Context, Steps, airport_step, choice_step, draft, respond, run_in_background, start_draft,
-    timeframe_keyboard, timeframe_step, wizard_conversation,
+    DIRECT_WORDS, MAX_BUDGET, TEXT, Context, Steps, airport_step, choice_step, draft, origin_question, remember_origin,
+    respond, run_in_background, start_draft, timeframe_keyboard, timeframe_step, wizard_conversation,
 )
 from providers.slots import search_job
 from services.airports_data import REGION_LABELS, region_display_name
@@ -31,14 +31,14 @@ from utils.date_parser import days_ahead_window, describe_window
 
 logger = logging.getLogger(__name__)
 
-ORIGIN, REGION, SORT, WINDOW, LIMIT = range(5)
+ORIGIN, REGION, SORT, WINDOW, FLIGHT_TYPE, LIMIT = range(6)
 DRAFT = "explore"
 DAY_OPTIONS = [7, 14, 30, 60, 90]
 DEFAULT_DAYS = 30
 MAX_RESULTS = 20
 USAGE = ("Usage: <code>/explore ATH europe</code>\n"
-         "Optionally add days ahead, budget (0 = any) and number of results: "
-         "<code>/explore ATH europe 30 100 10</code>\n"
+         "Optionally add days ahead, budget (0 = any), number of results and direct flights only: "
+         "<code>/explore ATH europe 30 100 10 direct</code>\n"
          f"Regions: {', '.join(REGION_LABELS)}")
 
 
@@ -51,10 +51,11 @@ async def start(update: Update, context: Context) -> int:
 
 
 async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
-    """ORIGIN REGION [DAYS] [BUDGET] [RESULTS]"""
+    """ORIGIN REGION [DAYS] [BUDGET] [RESULTS] [direct]"""
     region = args[1].lower() if len(args) > 1 else ""
-    numbers = args[2:5]
-    if region not in REGION_LABELS or not all(n.replace(".", "", 1).isdigit() for n in numbers):
+    direct_only = any(a.lower() in DIRECT_WORDS for a in args[2:])
+    numbers = [a for a in args[2:] if a.lower() not in DIRECT_WORDS]
+    if region not in REGION_LABELS or len(numbers) > 3 or not all(n.replace(".", "", 1).isdigit() for n in numbers):
         await update.message.reply_text(USAGE)
         return
     origin = get_services(context).resolver.best_guess(args[0])
@@ -73,7 +74,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     limit = int(float(numbers[2])) if len(numbers) > 2 else DEFAULT_RESULT_LIMIT
     start_date, end_date = days_ahead_window(max(1, days))
     await run_explore(update, context, origin, region, start_date, end_date, "both",
-                      min(max(limit, 1), MAX_RESULTS), budget or None)
+                      min(max(limit, 1), MAX_RESULTS), budget or None, direct_only)
 
 
 async def start_from_search(update: Update, context: Context) -> int:
@@ -86,33 +87,40 @@ async def start_from_search(update: Update, context: Context) -> int:
 
 
 async def ask_origin(update: Update, context: Context) -> int:
-    await respond(update, "🌟 <b>Explore flight deals</b>\n\n🛫 <b>Step 1/5</b>: Pick an origin airport or type a "
-                          "city name:", quick_origins("exp:org"))
+    question, buttons = await origin_question(update, context, "exp:org")
+    await respond(update, f"🌟 <b>Explore flight deals</b>\n\n🛫 <b>Step 1/6</b>: {question}", buttons)
     return ORIGIN
 
 
 async def ask_region(update: Update, context: Context) -> int:
-    await respond(update, f"🛫 <b>From</b>: {draft(context, DRAFT)['origin']}\n\n🌍 <b>Step 2/5</b>: Which region?",
+    await respond(update, f"🛫 <b>From</b>: {draft(context, DRAFT)['origin']}\n\n🌍 <b>Step 2/6</b>: Which region?",
                   regions("exp:reg"))
     return REGION
 
 
 async def ask_sort(update: Update, context: Context) -> int:
     await respond(update, f"🌍 <b>Region</b>: {region_display_name(draft(context, DRAFT)['region'])}\n\n"
-                          "📊 <b>Step 3/5</b>: How should deals be ranked?", sort_modes("exp:sort"))
+                          "📊 <b>Step 3/6</b>: How should deals be ranked?", sort_modes("exp:sort"))
     return SORT
 
 
 async def ask_window(update: Update, context: Context) -> int:
-    await respond(update, "📅 <b>Step 4/5</b>: How far ahead should I look? Tap a button, type a number of days, "
+    await respond(update, "📅 <b>Step 4/6</b>: How far ahead should I look? Tap a button, type a number of days, "
                           "or pick dates on the calendar:", timeframe_keyboard("exp:when", DAY_OPTIONS, DEFAULT_DAYS))
     return WINDOW
 
 
-async def ask_limit(update: Update, context: Context) -> int:
+async def ask_flight_type(update: Update, context: Context) -> int:
     d = draft(context, DRAFT)
     await respond(update, f"📅 <b>Departures</b>: {describe_window(d['start'], d['end'])}\n\n"
-                          f"📊 <b>Step 5/5</b>: How many deals should I show? (1–{MAX_RESULTS})",
+                          "⚙️ <b>Step 5/6</b>: Which flights do you want?", flight_types("exp:direct"))
+    return FLIGHT_TYPE
+
+
+async def ask_limit(update: Update, context: Context) -> int:
+    d = draft(context, DRAFT)
+    await respond(update, f"⚙️ <b>Flights</b>: {flight_type_label(d['direct_only'])}\n\n"
+                          f"📊 <b>Step 6/6</b>: How many deals should I show? (1–{MAX_RESULTS})",
                   result_limits("exp:lim"))
     return LIMIT
 
@@ -142,9 +150,15 @@ async def dates_picked(update: Update, context: Context, start_date: str, end_da
     return await STEPS.next(update, context)
 
 
+async def flight_type_picked(update: Update, context: Context, value: str) -> int:
+    draft(context, DRAFT)["direct_only"] = value == "1"
+    return await STEPS.next(update, context)
+
+
 async def limit_picked(update: Update, context: Context, value: str) -> int:
     d = draft(context, DRAFT)
-    await run_explore(update, context, d["origin"], d["region"], d["start"], d["end"], d["sort"], int(value))
+    await run_explore(update, context, d["origin"], d["region"], d["start"], d["end"], d["sort"], int(value),
+                      direct_only=d["direct_only"])
     return ConversationHandler.END
 
 
@@ -157,21 +171,23 @@ async def limit_typed(update: Update, context: Context) -> int:
     return await limit_picked(update, context, text)
 
 
-STEPS = Steps(DRAFT, ask_origin, ask_region, ask_sort, ask_window, ask_limit)
+STEPS = Steps(DRAFT, ask_origin, ask_region, ask_sort, ask_window, ask_flight_type, ask_limit)
 
 
 async def run_explore(update: Update, context: Context, origin: str, region: str, start_date: str,
-                      end_date: Optional[str], sort_mode: str, limit: int, max_budget: Optional[float] = None) -> None:
-    title = f"🌟 <b>Deals from {origin} to {region_display_name(region)}</b>"
+                      end_date: Optional[str], sort_mode: str, limit: int, max_budget: Optional[float] = None,
+                      direct_only: bool = False) -> None:
+    remember_origin(context.user_data, origin)
+    title = f"🌟 <b>Deals from {origin} to {region_display_name(region)}</b>" + (" · direct only" if direct_only else "")
     status = await respond(update, f"{title}\n📅 {short_window(start_date, end_date)}\n\n⏳ Starting…", stop_markup())
     run_in_background(context, update, _explore_and_report(
         get_services(context), context.user_data, status, title, origin, region, start_date, end_date, sort_mode,
-        limit, max_budget))
+        limit, max_budget, direct_only))
 
 
 async def _explore_and_report(services: Services, user_data: dict, status: Message, title: str, origin: str,
                               region: str, start_date: str, end_date: Optional[str], sort_mode: str, limit: int,
-                              max_budget: Optional[float]) -> None:
+                              max_budget: Optional[float], direct_only: bool) -> None:
     when = short_window(start_date, end_date)
     headline = f"{title}\n📅 {when}"
 
@@ -185,7 +201,7 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
     try:
         with search_job(f"explore {origin}-{region}", interactive=True):  # someone is waiting: goes first
             search = await find_deals(services.provider, origin, region, start_date, end_date,
-                                      max_budget=max_budget, on_progress=progress)
+                                      max_budget=max_budget, on_progress=progress, direct_only=direct_only)
     except asyncio.CancelledError:
         notice = RESTART_NOTICE if services.shutting_down else "⏹ Search stopped."
         try:
@@ -213,7 +229,7 @@ async def _explore_and_report(services: Services, user_data: dict, status: Messa
             message = await status.edit_text(chunk, reply_markup=reply_markup)
         else:
             message = await status.reply_text(chunk, reply_markup=reply_markup)
-    remember_deal_buttons(user_data, message.message_id, sections)
+    remember_deal_buttons(user_data, message.message_id, sections, direct_only)
 
 
 def conversation() -> ConversationHandler:
@@ -225,5 +241,6 @@ def conversation() -> ConversationHandler:
         REGION: [choice_step("exp:reg", region_picked, "|".join(REGION_LABELS))],
         SORT: [choice_step("exp:sort", sort_picked, "discount|price|both")],
         WINDOW: timeframe_step("exp:when", WINDOW, days_picked, dates_picked, STEPS.again),
+        FLIGHT_TYPE: [choice_step("exp:direct", flight_type_picked, "0|1")],
         LIMIT: [choice_step("exp:lim", limit_picked, "|".join(map(str, RESULT_LIMITS))), MessageHandler(TEXT, limit_typed)],
     }, STEPS.back)

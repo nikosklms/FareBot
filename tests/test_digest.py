@@ -8,15 +8,16 @@ async def only_digest(bot):
 
 async def test_full_wizard_creates_and_schedules_digest(bot):
     await bot.send("/digest")
-    assert "Step 1/8" in bot.telegram.last_text
+    assert "Step 1/9" in bot.telegram.last_text
     await bot.press("dig:org:ATH")
     await bot.press("dig:reg:latin_america")
     await bot.press("dig:sort:price")
     await bot.send("cheap")
     assert "Type an amount" in bot.telegram.last_text
     await bot.send("120")
-    assert "Step 5/8" in bot.telegram.last_text
+    assert "Step 5/9" in bot.telegram.last_text
     await bot.press("dig:when:days:60")
+    await bot.press("dig:direct:1")
     await bot.press("dig:day:Friday")
     await bot.send("25:00")
     assert "Type a time" in bot.telegram.last_text
@@ -26,6 +27,7 @@ async def test_full_wizard_creates_and_schedules_digest(bot):
     digest = await only_digest(bot)
     assert (digest.origin_code, digest.region, digest.sort_mode, digest.max_budget) == ("ATH", "latin_america", "price", 120.0)
     assert (digest.days_ahead, digest.delivery_day, digest.delivery_time, digest.max_results) == (60, "Friday", "08:30", 5)
+    assert digest.direct_only and "Direct flights only" in bot.telegram.last_text
     assert "Weekly digest scheduled" in bot.telegram.last_text
     assert bot.jobs("digest_job_") == [f"digest_job_{digest.id}"]
 
@@ -39,12 +41,13 @@ async def test_fixed_dates_and_any_budget(bot):
     await bot.press("dig:when:cal:open")
     await bot.press(f"dig:when:cal:day:{future(30)}")
     await bot.press(f"dig:when:cal:day:{future(40)}")
+    await bot.press("dig:direct:0")
     await bot.press("dig:day:Sunday")
     await bot.press("dig:time:15:00")
     await bot.press("dig:lim:10")
 
     digest = await only_digest(bot)
-    assert digest.max_budget is None and digest.days_ahead is None
+    assert digest.max_budget is None and digest.days_ahead is None and not digest.direct_only
     assert (digest.departure_date, digest.departure_date_end) == (future(30), future(40))
 
 

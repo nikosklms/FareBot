@@ -222,6 +222,7 @@ def digest_card(digest: Digest) -> str:
         f"📍 <b>Route</b>: {digest.origin_code} ✈️ {region_display_name(digest.region)}",
         f"⏰ <b>Delivery</b>: every {digest.delivery_day} at {digest.delivery_time}",
         f"📅 <b>Departures</b>: {digest_window_text(digest)}",
+        f"⚙️ <b>Flights</b>: {flight_type_label(digest.direct_only)}",
         f"🎯 <b>Budget</b>: {budget_text(digest.max_budget)}",
         f"📊 <b>Shows</b>: up to {digest.max_results} deals ({sort_label.get(digest.sort_mode, digest.sort_mode)})",
         f"📊 <b>Status</b>: {digest.status}",

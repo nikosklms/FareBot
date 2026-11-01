@@ -12,7 +12,7 @@ from database.models import ACTIVE, APPROVED, EXPIRED, PAUSED, PENDING, WEEKDAYS
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 TRACKERS_DDL = """
 CREATE TABLE {name} (
@@ -33,6 +33,7 @@ CREATE TABLE {name} (
 )
 """
 
+# Digests as of schema v1; later versions add columns (see migrate).
 DIGESTS_DDL = """
 CREATE TABLE digests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +85,7 @@ TRACKER_EDITABLE = {"departure_date", "departure_date_end", "direct_only", "max_
 # Changing these means a different search, so earlier prices no longer apply.
 TRACKER_SEARCH_FIELDS = {"departure_date", "departure_date_end", "direct_only"}
 DIGEST_EDITABLE = {"max_budget", "days_ahead", "departure_date", "departure_date_end", "sort_mode",
-                   "delivery_day", "delivery_time", "max_results", "status"}
+                   "delivery_day", "delivery_time", "max_results", "direct_only", "status"}
 
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CLOCK = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
@@ -112,7 +113,9 @@ def _tracker(row: aiosqlite.Row) -> Tracker:
 
 
 def _digest(row: aiosqlite.Row) -> Digest:
-    return Digest(**dict(row))
+    data = dict(row)
+    data["direct_only"] = bool(data["direct_only"])
+    return Digest(**data)
 
 
 class Database:
@@ -155,6 +158,8 @@ class Database:
                 if version < 3:
                     # Access requests in the users table replaced the log of unauthorized attempts.
                     await conn.execute("DROP TABLE IF EXISTS unauthorized_attempts")
+                if version < 4 and not await _column_exists(conn, "digests", "direct_only"):
+                    await conn.execute("ALTER TABLE digests ADD COLUMN direct_only INTEGER NOT NULL DEFAULT 0")
                 await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 await conn.execute("COMMIT")
             except BaseException:
@@ -297,14 +302,15 @@ class Database:
         delivery_day: str = "Sunday",
         delivery_time: str = "15:00",
         max_results: int = 10,
+        direct_only: bool = False,
     ) -> Digest:
         async with self._connect() as db:
             cur = await db.execute(
                 "INSERT INTO digests (user_id, origin_code, region, max_budget, days_ahead, departure_date,"
-                " departure_date_end, sort_mode, delivery_day, delivery_time, max_results)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " departure_date_end, sort_mode, delivery_day, delivery_time, max_results, direct_only)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (user_id, origin_code, region, max_budget, days_ahead, departure_date,
-                 departure_date_end, sort_mode, delivery_day, delivery_time, max_results),
+                 departure_date_end, sort_mode, delivery_day, delivery_time, max_results, int(direct_only)),
             )
             await db.commit()
             digest_id = cur.lastrowid
@@ -340,15 +346,17 @@ class Database:
         sort_mode: str = "both",
         delivery_day: str = "Sunday",
         delivery_time: str = "15:00",
+        direct_only: bool = False,
     ) -> Optional[Digest]:
         """An existing active or paused digest with exactly the same settings."""
         async with self._connect() as db:
             async with db.execute(
                 "SELECT * FROM digests WHERE user_id = ? AND origin_code = ? AND region = ?"
                 " AND days_ahead IS ? AND departure_date IS ? AND departure_date_end IS ? AND max_budget IS ?"
-                " AND sort_mode = ? AND delivery_day = ? AND delivery_time = ? AND status IN (?, ?) LIMIT 1",
+                " AND sort_mode = ? AND delivery_day = ? AND delivery_time = ? AND direct_only = ?"
+                " AND status IN (?, ?) LIMIT 1",
                 (user_id, origin_code, region, days_ahead, departure_date, departure_date_end, max_budget,
-                 sort_mode, delivery_day, delivery_time, ACTIVE, PAUSED),
+                 sort_mode, delivery_day, delivery_time, int(direct_only), ACTIVE, PAUSED),
             ) as cur:
                 row = await cur.fetchone()
         return _digest(row) if row else None
@@ -367,6 +375,17 @@ class Database:
     # ------------------------------------------------------------------
     # Shared
     # ------------------------------------------------------------------
+
+    async def recent_origins(self, user_id: int, limit: int) -> list[str]:
+        """Airports the user's trackers and digests start from, most recently created first."""
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT origin_code FROM (SELECT origin_code, created_at FROM trackers WHERE user_id = ?"
+                " UNION ALL SELECT origin_code, created_at FROM digests WHERE user_id = ?)"
+                " GROUP BY origin_code ORDER BY MAX(created_at) DESC LIMIT ?",
+                (user_id, user_id, limit),
+            ) as cur:
+                return [row[0] for row in await cur.fetchall()]
 
     async def count_active(self, user_id: int) -> int:
         """Active trackers plus active digests, for the per-user limit."""
@@ -489,6 +508,11 @@ async def _backup_before_migrating(conn: aiosqlite.Connection, path: str) -> Non
 async def _table_exists(conn: aiosqlite.Connection, name: str) -> bool:
     async with conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)) as cur:
         return await cur.fetchone() is not None
+
+
+async def _column_exists(conn: aiosqlite.Connection, table: str, column: str) -> bool:
+    async with conn.execute(f"PRAGMA table_info({table})") as cur:
+        return any(row[1] == column for row in await cur.fetchall())
 
 
 async def _migrate_to_v1(conn: aiosqlite.Connection) -> None:

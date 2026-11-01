@@ -34,7 +34,7 @@ DRAFT = "edit"
 
 FIELDS = {
     TRACKER: [("dates", "📅 Dates"), ("flights", "⚙️ Flights"), ("budget", "🎯 Budget"), ("frequency", "🔄 Checks")],
-    DIGEST: [("budget", "🎯 Budget"), ("window", "📅 Departures"), ("sort", "📊 Ranking"),
+    DIGEST: [("budget", "🎯 Budget"), ("window", "📅 Departures"), ("flights", "⚙️ Flights"), ("sort", "📊 Ranking"),
              ("limit", "🔢 Deals Shown"), ("day", "⏰ Day"), ("time", "🕒 Time")],
 }
 
