@@ -308,7 +308,7 @@ def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates, 
     async def typed(update: Update, context: Context) -> int:
         text = update.message.text.strip()
         limit = await max_range_days(get_services(context).db, update.effective_user.id)
-        if not text.isdigit() or not 1 <= int(text) <= limit:
+        if not text.isdecimal() or not 1 <= int(text) <= limit:
             await update.message.reply_text(
                 f"❌ Type a number of days between 1 and {limit}, or tap a button.",
                 reply_markup=markup(back=True),

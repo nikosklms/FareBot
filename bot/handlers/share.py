@@ -76,7 +76,7 @@ def parse_tracker(parts: list[str]) -> dict:
 def parse_digest(parts: list[str]) -> dict:
     origin, region, window, sort, cents, weekday, hhmm, results = parts
     days, start, end = None, None, None
-    if window.isdigit() and len(window) < 8:
+    if window.isdecimal() and len(window) < 8:
         days = int(window)
     else:
         start, *rest = [_iso(d) for d in window.split("_")]

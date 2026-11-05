@@ -41,6 +41,6 @@ def register_handlers(app: Application) -> None:
         CallbackQueryHandler(stop_task_pressed, pattern=f"^{STOP_TASK}$"),
         CallbackQueryHandler(noop_pressed, pattern=f"^{NOOP}$"),
     ], group=0)
-    for group, wizard in enumerate([search, track, explore, digest, edit], start=1):
+    for group, wizard in enumerate([search, track, explore, digest, edit, limits], start=1):
         app.add_handler(wizard.conversation(), group=group)
     app.add_error_handler(error_handler)

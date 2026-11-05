@@ -5,6 +5,8 @@
   </picture>
 </p>
 
+---
+
 A Telegram bot that watches Google Flights for you. Search a route, track it until it drops under your budget, or scan a whole region for the best deals from your airport.
 
 <p align="center">
@@ -23,7 +25,15 @@ A Telegram bot that watches Google Flights for you. Search a route, track it unt
 - **`/digest`** runs an explore search every week and sends you the results at a time you pick.
 - **`/mytracks`** lists your trackers and digests. You can edit, pause, share or delete them.
 
-FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. As the admin you also get `/users` to manage people, `/stats` for usage, and `/limits` to set how many active trackers and digests people can have and how many days they can search, for everyone or for one person (by default 3 and 180 days). It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
+FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. As the admin you also get `/users` to manage people and `/stats` for usage; by default everyone else can have 3 active trackers and digests and search up to 180 days at a time (see [Admin tools](#admin-tools)). It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
+
+## Admin tools
+
+As the admin you can change limits and manage everyone's trackers and digests from the chat.
+
+- **`/limits`** sets how many active trackers and digests people can have (1–20) and how many days ahead they can search (30–330), for everyone or for one person. The defaults are 3 and 180 days. Tap a number or type one. Lowering a limit doesn't pause anything people already have.
+- **Anyone's trackers and digests**: open a person in `/limits`, or send `/mytracks ID`, to pause, resume, edit or delete theirs. Their limits don't apply to you, and they get a message when you change something.
+- **Shortcuts** take the ID shown in `/users`: `/limits ID active 5 days 90`, `/limits everyone days 120`, `/limits ID reset`.
 
 ## Setup
 

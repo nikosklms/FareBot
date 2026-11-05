@@ -1,4 +1,4 @@
-from database.models import ACTIVE, PAUSED
+from database.models import ACTIVE, APPROVED, PAUSED
 from tests.fakes import USER_ID, future
 
 OTHER_USER = 456
@@ -61,9 +61,11 @@ async def test_delete(bot):
     assert "Digest" in bot.telegram.last_text and "deleted" in bot.telegram.last_text
 
 
-async def test_cannot_touch_other_users_items(bot):
-    tracker = await make_tracker(bot, user_id=OTHER_USER)
-    await bot.press(f"dash:del:t:{tracker.id}")
+async def test_members_cannot_touch_other_users_items(bot):
+    await bot.services.db.request_access(OTHER_USER, None, "Other")
+    await bot.services.db.set_user_status(OTHER_USER, APPROVED)
+    tracker = await make_tracker(bot)  # the admin's
+    await bot.press(f"dash:del:t:{tracker.id}", user_id=OTHER_USER)
     assert bot.telegram.alerts[-1] == "This item no longer exists."
     assert await bot.services.db.get_tracker(tracker.id) is not None
 

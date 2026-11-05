@@ -9,9 +9,14 @@ from services.resolver import LocationResolver
 from tests.fakes import USER_ID, BotHarness, FakeProvider, FakeTelegram
 
 
+# Every module that imports get_allowed_users, so no test reads the real .env.
+ALLOWED_USERS_IMPORTERS = ["bot.auth", "bot.handlers.access", "bot.handlers.limits", "bot.handlers.stats"]
+
+
 @pytest.fixture(autouse=True)
 def allowed_users(monkeypatch):
-    monkeypatch.setattr("bot.auth.get_allowed_users", lambda: [USER_ID])
+    for module in ALLOWED_USERS_IMPORTERS:
+        monkeypatch.setattr(f"{module}.get_allowed_users", lambda: [USER_ID])
 
 
 @pytest.fixture

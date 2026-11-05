@@ -56,7 +56,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     region = args[1].lower() if len(args) > 1 else ""
     direct_only = any(a.lower() in DIRECT_WORDS for a in args[2:])
     numbers = [a for a in args[2:] if a.lower() not in DIRECT_WORDS]
-    if region not in REGION_LABELS or len(numbers) > 3 or not all(n.replace(".", "", 1).isdigit() for n in numbers):
+    if region not in REGION_LABELS or len(numbers) > 3 or not all(n.replace(".", "", 1).isdecimal() for n in numbers):
         await update.message.reply_text(USAGE)
         return
     origin = get_services(context).resolver.best_guess(args[0])
@@ -166,7 +166,7 @@ async def limit_picked(update: Update, context: Context, value: str) -> int:
 
 async def limit_typed(update: Update, context: Context) -> int:
     text = update.message.text.strip()
-    if not text.isdigit() or not 1 <= int(text) <= MAX_RESULTS:
+    if not text.isdecimal() or not 1 <= int(text) <= MAX_RESULTS:
         await update.message.reply_text(f"❌ Type a number from 1 to {MAX_RESULTS}, or tap a button.",
                                         reply_markup=markup(back=True))
         return LIMIT

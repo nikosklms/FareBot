@@ -1,4 +1,4 @@
-from database.models import ACTIVE, EXPIRED, PAUSED
+from database.models import ACTIVE, APPROVED, EXPIRED, PAUSED
 from tests.fakes import USER_ID, future
 
 OTHER_USER = 456
@@ -137,9 +137,11 @@ async def test_back_returns_to_the_menu_without_saving(bot):
     assert (await bot.services.db.get_tracker(tracker.id)).frequency_hours == 6
 
 
-async def test_cannot_edit_other_users_items(bot):
-    tracker = await bot.services.db.create_tracker(OTHER_USER, "ATH", "LON", future(10), 100.0)
-    await bot.press(f"dash:edit:t:{tracker.id}")
+async def test_members_cannot_edit_other_users_items(bot):
+    await bot.services.db.request_access(OTHER_USER, None, "Other")
+    await bot.services.db.set_user_status(OTHER_USER, APPROVED)
+    tracker = await bot.services.db.create_tracker(USER_ID, "ATH", "LON", future(10), 100.0)  # the admin's
+    await bot.press(f"dash:edit:t:{tracker.id}", user_id=OTHER_USER)
     assert bot.telegram.alerts[-1] == "This item no longer exists."
 
 

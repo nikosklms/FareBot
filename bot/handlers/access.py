@@ -8,12 +8,12 @@ from telegram import InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
-from bot.auth import admin_id, decision_buttons, describe_user
+from bot.auth import admin_id, button_name, decision_buttons, describe_user
 from bot.keyboards import button
 from bot.services import get_services
 from config import get_allowed_users
 from database.db import Database
-from database.models import APPROVED, DENIED, PENDING, User
+from database.models import APPROVED, DENIED, PENDING
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,6 @@ TELL_USER = {
 RESULT = {APPROVED: "✅ Approved", DENIED: "❌ Denied", None: "🚫 Removed"}
 
 
-def _short_name(user: User) -> str:
-    name = user.full_name or user.username or str(user.user_id)
-    return name if len(name) <= 18 else name[:17] + "…"
-
-
 async def users_view(db: Database) -> tuple[str, InlineKeyboardMarkup]:
     users = await db.list_users()
     groups = {status: [u for u in users if u.status == status] for status in (PENDING, APPROVED, DENIED)}
@@ -39,10 +34,11 @@ async def users_view(db: Database) -> tuple[str, InlineKeyboardMarkup]:
     for status, title in ((PENDING, "⏳ <b>Waiting</b>"), (APPROVED, "✅ <b>Approved</b>"), (DENIED, "❌ <b>Denied</b>")):
         lines += ["", f"{title} ({len(groups[status])})"]
         lines += [f"• {describe_user(u.user_id, u.username, u.full_name)}" for u in groups[status]] or ["• nobody"]
+    lines += ["", "💡 Tap an ID to copy it, for <code>/limits ID</code> or <code>/mytracks ID</code>."]
 
     rows = [decision_buttons(u.user_id, "l") for u in groups[PENDING]]
-    rows += [[button(f"🚫 Remove {_short_name(u)}", f"acc:rm:{u.user_id}:l")] for u in groups[APPROVED]]
-    rows += [[button(f"✅ Approve {_short_name(u)}", f"acc:ok:{u.user_id}:l")] for u in groups[DENIED]]
+    rows += [[button(f"🚫 Remove {button_name(u.user_id, u.username, u.full_name)}", f"acc:rm:{u.user_id}:l")] for u in groups[APPROVED]]
+    rows += [[button(f"✅ Approve {button_name(u.user_id, u.username, u.full_name)}", f"acc:ok:{u.user_id}:l")] for u in groups[DENIED]]
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 

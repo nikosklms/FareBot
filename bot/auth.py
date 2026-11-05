@@ -74,6 +74,18 @@ def describe_user(user_id: int, username: Optional[str], full_name: Optional[str
     return f"{escape(full_name or 'Unknown')}{handle} · ID <code>{user_id}</code>"
 
 
+def button_name(user_id: int, username: Optional[str], full_name: Optional[str]) -> str:
+    """A short plain-text name for a button (buttons don't show HTML)."""
+    name = full_name or username or f"ID {user_id}"
+    return name if len(name) <= 24 else name[:23] + "…"
+
+
+def parse_user_id(text: str) -> Optional[int]:
+    """A Telegram user ID typed by the admin, or None if it can't be one (SQLite can't even store
+    numbers past 2^63, and Telegram IDs are far smaller)."""
+    return int(text) if text.isdecimal() and len(text) <= 18 else None
+
+
 def decision_buttons(user_id: int, where: str) -> list:
     """Approve/Deny for one user; where is 'r' (request message) or 'l' (the /users list)."""
     return [button("✅ Approve", f"acc:ok:{user_id}:{where}"), button("❌ Deny", f"acc:no:{user_id}:{where}")]

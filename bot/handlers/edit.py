@@ -11,9 +11,9 @@ from typing import Any, Optional
 from telegram import Message, Update
 from telegram.ext import BaseHandler, CallbackQueryHandler, ConversationHandler, MessageHandler
 
-from bot.formatting import budget_text, digest_card, digest_window_text, eur, flight_type_label, tracker_card
+from bot.formatting import budget_text, digest_window_text, eur, flight_type_label
 from bot.handlers.dashboard import (
-    DIGEST, TRACKER, Item, item_buttons, label_for, load_owned, set_active,
+    DIGEST, TRACKER, Item, item_buttons, item_card, label_for, load_owned, set_active, tell_owner_after_edits,
 )
 from bot.handlers.digest import BUDGET_OPTIONS, DAY_OPTIONS, DEFAULT_DAYS, MAX_RESULTS, TIME_OPTIONS, parse_clock
 from bot.handlers.track import FREQUENCIES
@@ -74,10 +74,6 @@ def _current_message_only(handler: BaseHandler) -> BaseHandler:
     return handler
 
 
-def _card(kind: str, item: Item) -> str:
-    return tracker_card(item) if kind == TRACKER else digest_card(item)
-
-
 # ----------------------------------------------------------------------
 # Entry, menu and finishing
 # ----------------------------------------------------------------------
@@ -119,7 +115,7 @@ async def show_menu(update: Update, context: Context, note: str = "") -> int:
         return ConversationHandler.END
     kind = draft(context, DRAFT)["kind"]
     fields = [button(label, f"edit:field:{key}") for key, label in FIELDS[kind]]
-    await _show(update, context, f"{note}✏️ <b>Editing</b>\n\n{_card(kind, item)}\n\nWhat do you want to change?",
+    await _show(update, context, f"{note}✏️ <b>Editing</b>\n\n{item_card(kind, item)}\n\nWhat do you want to change?",
                 markup(*pairs(fields), [button("✅ Done", "edit:done")], cancel=False))
     return MENU
 
@@ -135,7 +131,7 @@ async def done(update: Update, context: Context) -> int:
     item = await _item(update, context)
     if item:
         kind = draft(context, DRAFT)["kind"]
-        await respond(update, _card(kind, item), item_buttons(kind, item))
+        await respond(update, item_card(kind, item), item_buttons(kind, item))
     return ConversationHandler.END
 
 
@@ -156,6 +152,8 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
         await respond(update, "This item no longer exists.")
         return ConversationHandler.END
     kind = draft(context, DRAFT)["kind"]
+    actor = update.effective_user.id
+    card_before = item_card(kind, item)
     notes = []
 
     if kind == TRACKER and {"departure_date", "direct_only"} & set(changes):
@@ -169,14 +167,15 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
     if kind == TRACKER:
         item = await services.db.update_tracker(item.id, **changes)
         if "max_budget" in changes and item.last_price_found and item.last_price_found < item.max_budget:
+            who = "you'll" if actor == item.user_id else "they'll"
             notes.append(f"⚠️ The last price found was {eur(item.last_price_found)}, already below this "
-                         "budget, so you'll get an alert at the next check.")
+                         f"budget, so {who} get an alert at the next check.")
         if "max_budget" in changes and item.status == PAUSED:
-            notes.append("It was paused, so I've resumed it." if await set_active(services, context, kind, item, True)
+            notes.append("It was paused, so I've resumed it." if await set_active(services, context, kind, item, True, actor)
                          else await limit_reached(services.db, item.user_id))
         elif "departure_date" in changes and item.status == EXPIRED and not is_past(item.last_departure_date):
             notes.append("The new dates are in the future, so it's active again."
-                         if await set_active(services, context, kind, item, True) else await limit_reached(services.db, item.user_id))
+                         if await set_active(services, context, kind, item, True, actor) else await limit_reached(services.db, item.user_id))
         elif item.status == ACTIVE:
             schedule_tracker(context.job_queue, item)
     else:
@@ -184,10 +183,12 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
         window_changed = {"days_ahead", "departure_date"} & set(changes)
         if window_changed and item.status == EXPIRED:
             notes.append("It's active again with the new departures."
-                         if await set_active(services, context, kind, item, True) else await limit_reached(services.db, item.user_id))
+                         if await set_active(services, context, kind, item, True, actor) else await limit_reached(services.db, item.user_id))
         elif item.status == ACTIVE:
             schedule_digest(context.job_queue, item, services.timezone)
 
+    if item_card(kind, item) != card_before:
+        tell_owner_after_edits(context, actor, kind, item)
     return await show_menu(update, context, note=f"✅ <b>Saved.</b> {' '.join(notes)}\n\n")
 
 
@@ -308,7 +309,7 @@ async def limit_picked(update: Update, context: Context, value: str) -> int:
 
 async def limit_typed(update: Update, context: Context) -> int:
     text = update.message.text.strip()
-    if not text.isdigit() or not 1 <= int(text) <= MAX_RESULTS:
+    if not text.isdecimal() or not 1 <= int(text) <= MAX_RESULTS:
         await update.message.reply_text(f"❌ Type a number from 1 to {MAX_RESULTS}, or tap a button.",
                                         reply_markup=markup(back=True))
         return LIMIT
