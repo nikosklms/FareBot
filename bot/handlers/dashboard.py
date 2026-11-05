@@ -55,7 +55,7 @@ def label_for(kind: str, item_id: int) -> str:
 async def set_active(services: Services, context: ContextTypes.DEFAULT_TYPE, kind: str, item: Item,
                      active: bool) -> bool:
     """Pause or (re)activate an item. Activation is refused at the per-user limit; returns success."""
-    if active and item.status != ACTIVE and await services.db.count_active(item.user_id) >= max_active(item.user_id):
+    if active and item.status != ACTIVE and await services.db.count_active(item.user_id) >= await max_active(services.db, item.user_id):
         return False
     item.status = ACTIVE if active else PAUSED
     if kind == TRACKER:
@@ -91,7 +91,7 @@ async def dashboard_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(f"⏸ {label} paused.", reply_markup=item_buttons(kind, item))
     elif action == "resume":
         if not await set_active(services, context, kind, item, active=True):
-            await query.message.reply_text(limit_reached(item.user_id))
+            await query.message.reply_text(await limit_reached(services.db, item.user_id))
             return
         await query.edit_message_text(f"▶️ {label} resumed.", reply_markup=item_buttons(kind, item))
     elif action == "del":

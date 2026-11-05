@@ -275,7 +275,8 @@ def dates_step(prefix: str, state: int, on_dates: OnDates, on_back: Ask) -> list
                 reply_markup=markup(back=True),
             )
             return state
-        problem = window_problem(start, end, max_days=max_range_days(update.effective_user.id))
+        limit = await max_range_days(get_services(context).db, update.effective_user.id)
+        problem = window_problem(start, end, max_days=limit)
         if problem:
             await update.message.reply_text(f"❌ {problem}", reply_markup=markup(back=True))
             return state
@@ -293,7 +294,9 @@ def dates_step(prefix: str, state: int, on_dates: OnDates, on_back: Ask) -> list
     ]
 
 
-def timeframe_keyboard(prefix: str, day_options: list[int], default: int = 30) -> InlineKeyboardMarkup:
+def timeframe_keyboard(prefix: str, day_options: list[int], default: int, max_days: int) -> InlineKeyboardMarkup:
+    """Days-ahead buttons up to max_days (the user's limit), and the calendar."""
+    day_options = [days for days in day_options if days <= max_days]
     labels = [f"{days} Days (Default)" if days == default else f"{days} Days" for days in day_options]
     day_buttons = [button(label, f"{prefix}:days:{days}") for label, days in zip(labels, day_options, strict=True)]
     return markup(*pairs(day_buttons), [button("📆 Calendar", f"{prefix}:cal:open")], back=True)
@@ -304,7 +307,7 @@ def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates, 
 
     async def typed(update: Update, context: Context) -> int:
         text = update.message.text.strip()
-        limit = max_range_days(update.effective_user.id)
+        limit = await max_range_days(get_services(context).db, update.effective_user.id)
         if not text.isdigit() or not 1 <= int(text) <= limit:
             await update.message.reply_text(
                 f"❌ Type a number of days between 1 and {limit}, or tap a button.",
@@ -314,7 +317,8 @@ def timeframe_step(prefix: str, state: int, on_days: OnDays, on_dates: OnDates, 
         return await on_days(update, context, int(text))
 
     async def picked(update: Update, context: Context) -> int:
-        days, limit = int(update.callback_query.data.rsplit(":", 1)[1]), max_range_days(update.effective_user.id)
+        days = int(update.callback_query.data.rsplit(":", 1)[1])
+        limit = await max_range_days(get_services(context).db, update.effective_user.id)
         if not 1 <= days <= limit:  # only a modified Telegram app sends other values
             await update.callback_query.answer(f"Pick between 1 and {limit} days.", show_alert=True)
             return state
@@ -385,7 +389,8 @@ def calendar_handlers(prefix: str, state: int, on_dates: OnDates, on_close: Ask)
             return state
         start, end = sorted([cal["start"] or day, day])
         end = end if end != start else None
-        problem = window_problem(start, end, max_days=max_range_days(update.effective_user.id))
+        limit = await max_range_days(get_services(context).db, update.effective_user.id)
+        problem = window_problem(start, end, max_days=limit)
         if problem:
             cal["start"] = None
             await respond(update, f"❌ {problem} Pick the first day again:", render(context))

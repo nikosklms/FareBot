@@ -23,6 +23,7 @@ from bot.auth import max_range_days
 from bot.handlers.track import FREQUENCIES, TrackerRejected, create_tracker_for_user, tracker_created_text
 from bot.keyboards import button
 from bot.services import get_services
+from database.db import Database
 from database.models import WEEKDAYS, Digest, Tracker
 from services.airports_data import REGION_LABELS, region_display_name
 from utils.date_parser import describe_window, is_past, window_problem
@@ -129,9 +130,9 @@ def preview(kind: str, s: dict) -> str:
     ])
 
 
-def _dates_problem(kind: str, s: dict, user_id: int) -> Optional[str]:
+async def _dates_problem(db: Database, kind: str, s: dict, user_id: int) -> Optional[str]:
     """Why this user can't add it: its dates have passed, or it's longer than they may search."""
-    limit = max_range_days(user_id)
+    limit = await max_range_days(db, user_id)
     if kind == "g" and s["days"]:
         too_long = s["days"] > limit
     elif is_past(s["start"]):
@@ -148,7 +149,7 @@ async def open_shared(update: Update, context: ContextTypes.DEFAULT_TYPE, payloa
         await update.message.reply_text("🔗 That share link is broken or incomplete. Ask for a new one.")
         return
     kind, settings = parsed
-    problem = _dates_problem(kind, settings, update.effective_user.id)
+    problem = await _dates_problem(get_services(context).db, kind, settings, update.effective_user.id)
     if problem:
         await update.message.reply_text(f"{preview(kind, settings)}\n\n⚠️ {problem}")
         return
@@ -164,7 +165,7 @@ async def add_pressed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.edit_message_text("👌 Not added.")
         return
     parsed = parse_payload(query.data.removeprefix(ADD))
-    problem = parsed and _dates_problem(*parsed, query.from_user.id)
+    problem = parsed and await _dates_problem(get_services(context).db, *parsed, query.from_user.id)
     if not parsed or problem:
         await query.answer("This link can't be used anymore.", show_alert=True)
         return

@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from bot.handlers.share import open_shared
 from bot.wizard import CALENDAR_KEY, cancel_running_task
 from bot.auth import max_active
+from bot.services import get_services
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(HELP_TEXT.format(active=max_active(update.effective_user.id)))
+    active = await max_active(get_services(context).db, update.effective_user.id)
+    await update.message.reply_text(HELP_TEXT.format(active=active))
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

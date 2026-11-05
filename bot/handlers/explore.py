@@ -64,7 +64,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ I don't know '{escape(args[0])}'. Type a city or airport name, or a code like ATH.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
-    limit = max_range_days(update.effective_user.id)
+    limit = await max_range_days(get_services(context).db, update.effective_user.id)
     if not 1 <= days <= limit:
         await update.message.reply_text(f"❌ Days ahead must be between 1 and {limit}.")
         return
@@ -106,8 +106,9 @@ async def ask_sort(update: Update, context: Context) -> int:
 
 
 async def ask_window(update: Update, context: Context) -> int:
+    limit = await max_range_days(get_services(context).db, update.effective_user.id)
     await respond(update, "📅 <b>Step 4/6</b>: How far ahead should I look? Tap a button, type a number of days, "
-                          "or pick dates on the calendar:", timeframe_keyboard("exp:when", DAY_OPTIONS, DEFAULT_DAYS))
+                          "or pick dates on the calendar:", timeframe_keyboard("exp:when", DAY_OPTIONS, DEFAULT_DAYS, limit))
     return WINDOW
 
 

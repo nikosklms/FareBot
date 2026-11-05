@@ -63,7 +63,8 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     except ValueError:
         await update.message.reply_text(f"❌ I couldn't read that date.\n{USAGE}")
         return
-    problem = window_problem(start_date, end_date, max_days=max_range_days(update.effective_user.id))
+    limit = await max_range_days(get_services(context).db, update.effective_user.id)
+    problem = window_problem(start_date, end_date, max_days=limit)
     if problem:
         await update.message.reply_text(f"❌ {problem}")
         return

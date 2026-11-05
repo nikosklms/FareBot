@@ -23,7 +23,7 @@ A Telegram bot that watches Google Flights for you. Search a route, track it unt
 - **`/digest`** runs an explore search every week and sends you the results at a time you pick.
 - **`/mytracks`** lists your trackers and digests. You can edit, pause, share or delete them.
 
-FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. As the admin you also get `/users` to manage people and `/stats` for usage; everyone else can have 3 active trackers and digests and search up to 180 days at a time. It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
+FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. As the admin you also get `/users` to manage people, `/stats` for usage, and `/limits` to set how many active trackers and digests people can have and how many days they can search, for everyone or for one person (by default 3 and 180 days). It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
 
 ## Setup
 

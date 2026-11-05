@@ -49,7 +49,7 @@ async def on_startup(app: Application) -> None:
     # bot, so their chat doesn't exist yet), keep going rather than stop the bot.
     try:
         await app.bot.set_my_commands(BOT_COMMANDS)
-        if admin_id():  # the admin's menu also lists /users and /stats
+        if admin_id():  # the admin's menu also lists /users, /limits and /stats
             await app.bot.set_my_commands(BOT_COMMANDS + ADMIN_COMMANDS, scope=BotCommandScopeChat(admin_id()))
     except TelegramError:
         logger.warning("Couldn't set the command menus; commands still work when typed", exc_info=True)

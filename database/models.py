@@ -11,6 +11,9 @@ PENDING = "PENDING"
 APPROVED = "APPROVED"
 DENIED = "DENIED"
 
+# The limits table's row for everyone without limits of their own (Telegram user IDs start at 1).
+EVERYONE = 0
+
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 SORT_MODES = ("discount", "price", "both")
 
@@ -79,3 +82,11 @@ class User:
     status: str
     requested_at: Optional[str] = None
     decided_at: Optional[str] = None
+
+
+@dataclass
+class Limits:
+    """How many trackers and digests someone may have active, and how many days they may search.
+    None in the limits table means "not set": use everyone's, then the defaults in config."""
+    max_active: Optional[int] = None
+    max_range_days: Optional[int] = None

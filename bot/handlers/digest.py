@@ -70,7 +70,7 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
         await update.message.reply_text(f"❌ I don't know '{escape(args[0])}'. Type a city or airport name, or a code like ATH.")
         return
     days = int(float(numbers[0])) if numbers else DEFAULT_DAYS
-    limit = max_range_days(update.effective_user.id)
+    limit = await max_range_days(get_services(context).db, update.effective_user.id)
     if not 1 <= days <= limit:
         await update.message.reply_text(f"❌ Days ahead must be between 1 and {limit}.")
         return
@@ -112,10 +112,11 @@ async def ask_budget(update: Update, context: Context) -> int:
 
 
 async def ask_window(update: Update, context: Context) -> int:
+    limit = await max_range_days(get_services(context).db, update.effective_user.id)
     await respond(update, f"🎯 <b>Budget</b>: {budget_text(draft(context, DRAFT)['budget'])}\n\n"
                           "📅 <b>Step 5/9</b>: Which departures should each digest cover? Tap or type a number of "
                           "days ahead, or pick fixed dates on the calendar:",
-                  timeframe_keyboard("dig:when", DAY_OPTIONS, DEFAULT_DAYS))
+                  timeframe_keyboard("dig:when", DAY_OPTIONS, DEFAULT_DAYS, limit))
     return WINDOW
 
 
@@ -242,8 +243,8 @@ async def create_digest(update: Update, context: Context, d: dict) -> Optional[D
     if existing:
         await respond(update, f"ℹ️ You already have this digest (#{existing.id}). Manage it in /mytracks.")
         return None
-    if await services.db.count_active(user_id) >= max_active(user_id):
-        await respond(update, limit_reached(user_id))
+    if await services.db.count_active(user_id) >= await max_active(services.db, user_id):
+        await respond(update, await limit_reached(services.db, user_id))
         return None
     digest = await services.db.create_digest(
         user_id=user_id, origin_code=d["origin"], region=d["region"], max_budget=d["budget"],

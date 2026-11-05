@@ -8,11 +8,11 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-from database.models import ACTIVE, APPROVED, EXPIRED, PAUSED, PENDING, WEEKDAYS, Digest, Tracker, User
+from database.models import ACTIVE, APPROVED, EXPIRED, PAUSED, PENDING, WEEKDAYS, Digest, Limits, Tracker, User
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 TRACKERS_DDL = """
 CREATE TABLE {name} (
@@ -73,6 +73,16 @@ CREATE TABLE IF NOT EXISTS users (
     decided_at TIMESTAMP
 )
 """
+
+# Limits the admin set in /limits; user_id EVERYONE (0) holds everyone's.
+LIMITS_DDL = """
+CREATE TABLE IF NOT EXISTS limits (
+    user_id INTEGER PRIMARY KEY,
+    max_active INTEGER,
+    max_range_days INTEGER
+)
+"""
+LIMIT_FIELDS = {"max_active", "max_range_days"}
 
 TRACKER_COLUMNS = [
     "id", "user_id", "origin_code", "destination_code", "departure_date", "departure_date_end",
@@ -160,6 +170,8 @@ class Database:
                     await conn.execute("DROP TABLE IF EXISTS unauthorized_attempts")
                 if version < 4 and not await _column_exists(conn, "digests", "direct_only"):
                     await conn.execute("ALTER TABLE digests ADD COLUMN direct_only INTEGER NOT NULL DEFAULT 0")
+                if version < 5:
+                    await conn.execute(LIMITS_DDL)
                 await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 await conn.execute("COMMIT")
             except BaseException:
@@ -432,7 +444,36 @@ class Database:
 
     async def delete_user(self, user_id: int) -> None:
         """Forget a user entirely, so they can ask for access again."""
-        await self._execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        async with self._connect() as db:
+            await db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+            await db.execute("DELETE FROM limits WHERE user_id = ?", (user_id,))
+            await db.commit()
+
+    # ------------------------------------------------------------------
+    # Limits
+    # ------------------------------------------------------------------
+
+    async def get_limits(self, *user_ids: int) -> dict[int, Limits]:
+        """The limits set for these user IDs (EVERYONE for everyone's), or for all with no IDs given.
+        IDs with nothing set are missing; within a row, unset limits are None."""
+        where = f" WHERE user_id IN ({', '.join('?' * len(user_ids))})" if user_ids else ""
+        async with self._connect() as db:
+            async with db.execute(f"SELECT * FROM limits{where}", user_ids) as cur:
+                return {row["user_id"]: Limits(row["max_active"], row["max_range_days"])
+                        for row in await cur.fetchall()}
+
+    async def set_limit(self, user_id: int, field: str, value: Optional[int]) -> None:
+        """Set one limit, or clear it with None; a row with nothing set is removed."""
+        if field not in LIMIT_FIELDS:
+            raise ValueError(f"Not a limit: {field}")
+        async with self._connect() as db:
+            await db.execute("INSERT OR IGNORE INTO limits (user_id) VALUES (?)", (user_id,))
+            await db.execute(f"UPDATE limits SET {field} = ? WHERE user_id = ?", (value, user_id))
+            await db.execute("DELETE FROM limits WHERE max_active IS NULL AND max_range_days IS NULL")
+            await db.commit()
+
+    async def clear_limits(self, user_id: int) -> None:
+        await self._execute("DELETE FROM limits WHERE user_id = ?", (user_id,))
 
     async def purge_stale(self, today: date) -> StaleCleanup:
         """Expire trackers and fixed-date digests whose travel dates have passed, and delete

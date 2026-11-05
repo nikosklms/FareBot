@@ -52,8 +52,8 @@ async def create_tracker_for_user(
 ) -> Tracker:
     """The one place trackers are created: enforces the limit and refuses duplicates."""
     services = get_services(context)
-    if await services.db.count_active(user_id) >= max_active(user_id):
-        raise TrackerRejected(limit_reached(user_id))
+    if await services.db.count_active(user_id) >= await max_active(services.db, user_id):
+        raise TrackerRejected(await limit_reached(services.db, user_id))
     existing = await services.db.find_tracker(user_id, origin, destination, start, end, direct_only)
     if existing:
         raise TrackerRejected(
@@ -97,7 +97,8 @@ async def track_button_pressed(update: Update, context: Context) -> None:
             for day in (start, end):
                 if day:
                     date.fromisoformat(day)  # rejects impossible dates like 2026-02-31
-            problem = window_problem(start, end, max_days=max_range_days(query.from_user.id))
+            limit = await max_range_days(get_services(context).db, query.from_user.id)
+            problem = window_problem(start, end, max_days=limit)
             if end and end <= start:
                 problem = "This button doesn't work."
         except ValueError:
@@ -148,7 +149,8 @@ async def _shortcut(update: Update, context: Context, args: list[str]) -> None:
     if budget is None:
         await update.message.reply_text(f"❌ I couldn't read the date or budget.\n{USAGE}")
         return
-    problem = (window_problem(start_date, end_date, max_days=max_range_days(update.effective_user.id))
+    limit = await max_range_days(get_services(context).db, update.effective_user.id)
+    problem = (window_problem(start_date, end_date, max_days=limit)
                or (None if budget > 0 else "The budget must be above 0."))
     if problem:
         await update.message.reply_text(f"❌ {problem}")

@@ -9,7 +9,7 @@ from bot.keyboards import button
 from bot.services import get_services
 from config import MAX_TRACKERS_PER_USER, MEMBER_MAX_ACTIVE, MEMBER_MAX_RANGE_DAYS, get_allowed_users
 from database.db import Database
-from database.models import DENIED, PENDING
+from database.models import DENIED, EVERYONE, PENDING, Limits
 from utils.date_parser import MAX_RANGE_DAYS
 
 logger = logging.getLogger(__name__)
@@ -26,19 +26,42 @@ def admin_id() -> Optional[int]:
     return allowed[0] if allowed else None
 
 
-def max_active(user_id: int) -> int:
+ADMIN_LIMITS = Limits(MAX_TRACKERS_PER_USER, MAX_RANGE_DAYS)
+
+
+def with_defaults(own: Limits, everyone: Limits) -> Limits:
+    """The limits that apply to a member: their own from /limits, else everyone's from /limits,
+    else the defaults in config."""
+    return Limits(own.max_active or everyone.max_active or MEMBER_MAX_ACTIVE,
+                  own.max_range_days or everyone.max_range_days or MEMBER_MAX_RANGE_DAYS)
+
+
+async def limits_for(db: Database, user_id: int) -> Limits:
+    """A user's limits; the admin always gets the most."""
+    if user_id == admin_id():
+        return ADMIN_LIMITS
+    stored = await db.get_limits(user_id, EVERYONE)
+    return with_defaults(stored.get(user_id, Limits()), stored.get(EVERYONE, Limits()))
+
+
+async def max_active(db: Database, user_id: int) -> int:
     """How many trackers and digests a user may have active at once."""
-    return MAX_TRACKERS_PER_USER if user_id == admin_id() else MEMBER_MAX_ACTIVE
+    return (await limits_for(db, user_id)).max_active
 
 
-def max_range_days(user_id: int) -> int:
+async def max_range_days(db: Database, user_id: int) -> int:
     """The longest date range (or days ahead) a user may search."""
-    return MAX_RANGE_DAYS if user_id == admin_id() else MEMBER_MAX_RANGE_DAYS
+    return (await limits_for(db, user_id)).max_range_days
 
 
-def limit_reached(user_id: int) -> str:
-    return (f"⚠️ You already have {max_active(user_id)} active trackers and digests, the most you can have. "
-            "Pause or delete one in /mytracks first.")
+async def limit_reached(db: Database, user_id: int) -> str:
+    count, limit = await db.count_active(user_id), await max_active(db, user_id)
+    if count <= limit:
+        return (f"⚠️ You already have {count} active trackers and digests, the most you can have. "
+                "Pause or delete one in /mytracks first.")
+    # The admin lowered the limit below what they already had: get under it to add or resume one.
+    return (f"⚠️ You have {count} active trackers and digests, but the most you can have is now {limit}. "
+            f"Pause or delete {count - limit + 1} in /mytracks first.")
 
 
 async def is_allowed(db: Database, user_id: int) -> bool:

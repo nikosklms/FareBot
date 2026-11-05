@@ -18,7 +18,7 @@ from bot.handlers.dashboard import (
 from bot.handlers.digest import BUDGET_OPTIONS, DAY_OPTIONS, DEFAULT_DAYS, MAX_RESULTS, TIME_OPTIONS, parse_clock
 from bot.handlers.track import FREQUENCIES
 from bot.keyboards import RESULT_LIMITS, button, flight_types, markup, pairs, result_limits, sort_modes
-from bot.auth import limit_reached
+from bot.auth import limit_reached, max_range_days
 from bot.services import get_services
 from bot.wizard import (
     parse_price,
@@ -173,10 +173,10 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
                          "budget, so you'll get an alert at the next check.")
         if "max_budget" in changes and item.status == PAUSED:
             notes.append("It was paused, so I've resumed it." if await set_active(services, context, kind, item, True)
-                         else limit_reached(item.user_id))
+                         else await limit_reached(services.db, item.user_id))
         elif "departure_date" in changes and item.status == EXPIRED and not is_past(item.last_departure_date):
             notes.append("The new dates are in the future, so it's active again."
-                         if await set_active(services, context, kind, item, True) else limit_reached(item.user_id))
+                         if await set_active(services, context, kind, item, True) else await limit_reached(services.db, item.user_id))
         elif item.status == ACTIVE:
             schedule_tracker(context.job_queue, item)
     else:
@@ -184,7 +184,7 @@ async def save(update: Update, context: Context, **changes: Any) -> int:
         window_changed = {"days_ahead", "departure_date"} & set(changes)
         if window_changed and item.status == EXPIRED:
             notes.append("It's active again with the new departures."
-                         if await set_active(services, context, kind, item, True) else limit_reached(item.user_id))
+                         if await set_active(services, context, kind, item, True) else await limit_reached(services.db, item.user_id))
         elif item.status == ACTIVE:
             schedule_digest(context.job_queue, item, services.timezone)
 
@@ -269,9 +269,10 @@ async def frequency_picked(update: Update, context: Context, value: str) -> int:
 
 async def ask_window(update: Update, context: Context) -> int:
     item = await _item(update, context)
+    limit = await max_range_days(get_services(context).db, update.effective_user.id)
     await _show(update, context, f"📅 Now: {digest_window_text(item)}\n\nWhich departures should each digest cover? "
                           "Tap or type a number of days ahead, or pick fixed dates:",
-                  timeframe_keyboard("edit:when", DAY_OPTIONS, DEFAULT_DAYS))
+                  timeframe_keyboard("edit:when", DAY_OPTIONS, DEFAULT_DAYS, limit))
     return WINDOW
 
 
