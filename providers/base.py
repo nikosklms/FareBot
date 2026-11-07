@@ -69,6 +69,12 @@ class AbstractFlightProvider(ABC):
         the job is about to start."""
         return None
 
+    async def check_health(self) -> Optional[str]:
+        """Search routes that always have flights, skipping the cache, to spot a change in Google's
+        page format before users do. None if the results could be read, else what's wrong. Raises
+        FlightSearchError if Google couldn't be reached, which says nothing about the format."""
+        return None
+
     async def close(self) -> None:  # noqa: B027 - optional hook, most providers have nothing to release
         """Release network resources when the bot stops."""
 

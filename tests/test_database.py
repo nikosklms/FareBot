@@ -161,3 +161,12 @@ async def test_changing_the_search_clears_the_last_price(db):
 
     updated = await db.update_tracker(tracker.id, direct_only=True)
     assert (updated.last_price_found, updated.last_checked_at) == (None, None)
+
+
+async def test_bot_state_is_stored_replaced_and_removed(db):
+    assert await db.get_state("health_problem") is None
+    await db.set_state("health_problem", "broken")
+    await db.set_state("health_problem", "still broken")
+    assert await db.get_state("health_problem") == "still broken"
+    await db.set_state("health_problem", None)
+    assert await db.get_state("health_problem") is None

@@ -1,5 +1,6 @@
-"""Background jobs: tracker price checks, weekly digests and nightly cleanup."""
+"""Background jobs: tracker price checks, weekly digests, nightly cleanup and a daily health check."""
 import asyncio
+import html
 import logging
 from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Optional
@@ -33,6 +34,14 @@ logger = logging.getLogger(__name__)
 # python-telegram-bot numbers weekdays from Sunday = 0.
 PTB_WEEKDAYS = {"Sunday": 0, "Monday": 1, "Tuesday": 2, "Wednesday": 3, "Thursday": 4, "Friday": 5, "Saturday": 6}
 STARTUP_STAGGER_SECONDS = 20
+HEALTH_CHECK_TIME = time(9, 0)
+# After a restart while the last check had failed (usually to deploy a parser fix), check again
+# soon rather than the next morning.
+HEALTH_RECHECK_SECONDS = 5 * 60
+# A check that couldn't run (blocked, offline) is tried again every hour, up to 3 times.
+HEALTH_RETRIES = 3
+HEALTH_RETRY_SECONDS = 60 * 60
+HEALTH_STATE_KEY = "health_problem"
 
 
 def tracker_job_name(tracker_id: int) -> str:
@@ -111,6 +120,10 @@ async def register_jobs(application: Application) -> None:
     for digest in digests:
         schedule_digest(application.job_queue, digest, services.timezone)
     application.job_queue.run_daily(cleanup_job, time=time(0, 0, tzinfo=services.timezone), name="daily_cleanup")
+    application.job_queue.run_daily(health_job, time=HEALTH_CHECK_TIME.replace(tzinfo=services.timezone),
+                                    name="daily_health_check")
+    if await services.db.get_state(HEALTH_STATE_KEY):
+        application.job_queue.run_once(health_job, when=HEALTH_RECHECK_SECONDS, name="health_recheck")
     logger.info("Scheduled %d trackers and %d digests", len(trackers), len(digests))
 
 
@@ -339,7 +352,7 @@ async def _send(bot: Bot, chat_id: int, text: str,
     try:
         return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     except TelegramError:
-        logger.exception("Failed to send digest message to %s", chat_id)
+        logger.exception("Failed to send message to %s", chat_id)
         return None
 
 
@@ -378,3 +391,50 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     "\n\nℹ️ The travel dates for this digest have passed, so it has been stopped.")
     logger.info("Daily cleanup: %d trackers and %d digests expired, %d deleted",
                 len(result.expired_trackers), len(result.expired_digests), result.purged)
+
+
+# ----------------------------------------------------------------------
+# Health check
+# ----------------------------------------------------------------------
+
+async def health_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    track_task(context.application)
+    try:
+        checked = await check_health(get_services(context), context.bot)
+    except asyncio.CancelledError:
+        return  # shutting down; it runs again tomorrow
+    retries = context.job.data or 0
+    if checked:
+        return
+    if retries < HEALTH_RETRIES:
+        logger.info("[HEALTH] Trying again in an hour (retry %d of %d)", retries + 1, HEALTH_RETRIES)
+        context.job_queue.run_once(health_job, when=HEALTH_RETRY_SECONDS, data=retries + 1, name="health_retry")
+    else:
+        logger.warning("[HEALTH] Still couldn't check after %d retries; next try is the daily check", HEALTH_RETRIES)
+
+
+async def check_health(services: Services, bot: Bot) -> bool:
+    """Tell the admin when Google Flights results can't be read, every day until they can again.
+    False if the check couldn't run, e.g. Google was unreachable."""
+    try:
+        problem = await services.provider.check_health()
+    except FlightSearchError as e:
+        logger.warning("[HEALTH] Couldn't check Google Flights this time: %s", e)
+        return False
+    admin = auth.admin_id()
+    if problem:
+        logger.error("[HEALTH] Google Flights results couldn't be read:\n%s", problem)
+        await services.db.set_state(HEALTH_STATE_KEY, problem)
+        if admin:
+            await _send(bot, admin, "🩺 <b>Health check: Google Flights may have changed</b>\n\n"
+                        "I searched routes that always have flights and couldn't read the results:\n"
+                        + "\n".join(f"• {html.escape(line)}" for line in problem.splitlines())
+                        + "\n\nSearches may come back empty until the parser in providers/fast_flights.py is updated.")
+    elif await services.db.get_state(HEALTH_STATE_KEY):
+        logger.info("[HEALTH] Google Flights results can be read again")
+        # Kept until the admin is told, so a failed message is sent again at the next check.
+        if not admin or await _send(bot, admin, "✅ <b>Health check passed</b>: Google Flights results can be read again."):
+            await services.db.set_state(HEALTH_STATE_KEY, None)
+    else:
+        logger.info("[HEALTH] Google Flights results can be read")
+    return True

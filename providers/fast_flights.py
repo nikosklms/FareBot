@@ -5,7 +5,7 @@ import time
 import urllib.parse
 from collections import deque
 from http.cookiejar import CookieJar, DefaultCookiePolicy
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Awaitable, Callable, List, Optional
 
 import httpx
@@ -16,7 +16,7 @@ from providers.base import AbstractFlightProvider, FlightOffer, FlightSearchErro
 from providers.result_cache import ResultCache
 from providers.slots import CURRENT_JOB, SlotScheduler
 from services.airports_data import MULTI_AIRPORT_CITIES
-from utils.date_parser import generate_date_sequence
+from utils.date_parser import generate_date_sequence, today_local
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,18 @@ FIRST_PAUSE_SECONDS = 60
 MAX_PAUSE_SECONDS = 15 * 60
 MAX_WAIT_SECONDS = 60
 
+# The daily health check searches routes with dozens of flights every day, so finding none means
+# Google changed its page, not that there are no flights.
+HEALTH_ROUTES = (("LHR", "JFK"), ("MAD", "BCN"))
+HEALTH_DAYS_AHEAD = 21
+
 
 class GoogleRateLimitException(Exception):
     """Raised when Google Flights returns a CAPTCHA challenge or HTTP 429/403 rate limit response."""
+
+
+class PageFormatError(Exception):
+    """The results page arrived, but the flight data isn't where the parser looks for it."""
 
 
 BROWSER_HEADERS = {
@@ -165,8 +174,12 @@ def parse_google_flights_payload_generic(
     return_date: Optional[str] = None,
     currency: str = "EUR",
     direct_only: bool = False,
+    strict: bool = False,
 ) -> List[FlightOffer]:
-    """Parse Google Flights html JSON payload and extract matching flight offers."""
+    """Parse Google Flights html JSON payload and extract matching flight offers.
+
+    A page without readable flight data counts as no flights, or raises PageFormatError when strict.
+    """
     html_lower = html.lower()
     if any(marker in html_lower for marker in CAPTCHA_MARKERS):
         raise GoogleRateLimitException("Google served a CAPTCHA / rate-limit page")
@@ -175,6 +188,8 @@ def parse_google_flights_payload_generic(
     parser = LexborHTMLParser(html)
     script = parser.css_first(r"script.ds\:1")
     if not script:
+        if strict:
+            raise PageFormatError("the page has no script.ds:1 block, where the flight data used to be")
         logger.warning(f"[PARSER_WARN] Could not find script.ds:1 tag in HTML response for {default_origin} -> {default_destination} ({len(html)} bytes)")
         return offers
 
@@ -183,6 +198,8 @@ def parse_google_flights_payload_generic(
         data_str = js.split("data:", 1)[1].rsplit(",", 1)[0]
         payload = json.loads(data_str)
     except Exception as e:
+        if strict:
+            raise PageFormatError(f"the script.ds:1 block couldn't be read as JSON ({e})") from e
         logger.warning(f"[PARSER_WARN] Failed to parse script.ds:1 JSON payload for {default_origin} -> {default_destination}: {e}")
         return offers
 
@@ -431,8 +448,10 @@ class FastFlightsProvider(AbstractFlightProvider):
         return_date: Optional[str],
         currency: str,
         direct_only: bool,
+        strict: bool = False,
     ) -> Optional[List[FlightOffer]]:
-        """Offers for one airport, or None if Google couldn't be searched."""
+        """Offers for one airport, or None if Google couldn't be searched. With strict, a page
+        without readable flight data raises PageFormatError instead of counting as no flights."""
         flight_queries = [FlightQuery(date=departure_date, from_airport=origin, to_airport=dest_code)]
         if return_date:
             flight_queries.append(FlightQuery(date=return_date, from_airport=dest_code, to_airport=origin))
@@ -457,18 +476,43 @@ class FastFlightsProvider(AbstractFlightProvider):
                     html = await self._fetcher.fetch_html(q)
                     # Parsing a results page takes tens of milliseconds; keep it off the event loop.
                     offers = await asyncio.to_thread(parse_google_flights_payload_generic, html, origin, dest_code,
-                                                     departure_date, return_date, currency, direct_only)
+                                                     departure_date, return_date, currency, direct_only, strict)
                     self._latencies.append(time.perf_counter() - t0)
                     if started > self._paused_at:  # an answer to a request sent before the block proves nothing
                         self._next_pause = FIRST_PAUSE_SECONDS
                     return offers
                 except GoogleRateLimitException as e:
                     self._pause_after_block(e, started)
+                except PageFormatError:
+                    raise
                 except Exception as e:
                     logger.error(f"[PROVIDER_ERR] Error fetching flights for {origin} -> {dest_code} on {departure_date}: {e}")
                     return None
         logger.error(f"[PROVIDER_ERR] Still rate-limited after the pause: {origin} -> {dest_code} on {departure_date}")
         return None
+
+    async def check_health(self) -> Optional[str]:
+        day = (today_local() + timedelta(days=HEALTH_DAYS_AHEAD)).isoformat()
+        unreadable = []  # the flight data is missing or broken: Google changed the page
+        empty = []       # readable but without flights, which Google now and then serves by itself
+        for origin, destination in HEALTH_ROUTES:
+            route = f"{origin} → {destination}"
+            try:
+                offers = await self._fetch(origin, destination, day, None, "EUR", False, strict=True)
+            except PageFormatError as e:
+                unreadable.append(f"{route}: {e}")
+                continue
+            if offers is None:
+                continue  # blocked or a network error: says nothing about the page format
+            if any(not _is_summary(offer) for offer in offers):
+                return None  # the parser read real flights, with airlines and times
+            empty.append(f"{route}: the page loaded but had no flights" if not offers
+                         else f"{route}: flights were found, but without airlines or times")
+        if unreadable or len(empty) == len(HEALTH_ROUTES):
+            return "\n".join(unreadable + empty)
+        if empty:
+            raise FlightSearchError("only one route's page loaded, and it had no flights")
+        raise FlightSearchError("Google Flights couldn't be reached")
 
     async def _wait_out_pause(self) -> bool:
         """Wait out the pause if at most a minute is left. False otherwise: don't contact Google."""

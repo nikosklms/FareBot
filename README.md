@@ -27,14 +27,6 @@ A Telegram bot that watches Google Flights for you. Search a route, track it unt
 
 FareBot is meant to be self-hosted for yourself and a few friends. Anyone else who messages it sends you an access request, which you approve or deny with one tap. As the admin you also get `/users` to manage people and `/stats` for usage; by default everyone else can have 3 active trackers and digests and search up to 180 days at a time (see [Admin tools](#admin-tools)). It doesn't need an API key: it reads the same data the Google Flights website shows, using [fast-flights](https://github.com/AWeirdDev/flights).
 
-## Admin tools
-
-As the admin you can change limits and manage everyone's trackers and digests from the chat.
-
-- **`/limits`** sets how many active trackers and digests people can have (1–20) and how many days ahead they can search (30–330), for everyone or for one person. The defaults are 3 and 180 days. Tap a number or type one. Lowering a limit doesn't pause anything people already have.
-- **Anyone's trackers and digests**: open a person in `/limits`, or send `/mytracks ID`, to pause, resume, edit or delete theirs. Their limits don't apply to you, and they get a message when you change something.
-- **Shortcuts** take the ID shown in `/users`: `/limits ID active 5 days 90`, `/limits everyone days 120`, `/limits ID reset`.
-
 ## Setup
 
 Get a bot token from [@BotFather](https://t.me/BotFather) and your user ID from [@userinfobot](https://t.me/userinfobot), then:
@@ -59,6 +51,14 @@ python main.py
 | `TIMEZONE` | Your [tz database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) name for digest times, e.g. `Europe/Athens`. Required with Docker. |
 | `FAREBOT_DB_PATH` | Optional. SQLite file, `farebot.db` by default. |
 
+## Admin tools
+
+As the admin you can change limits and manage everyone's trackers and digests from the chat.
+
+- **`/limits`** sets how many active trackers and digests people can have (1–20) and how many days ahead they can search (30–330), for everyone or for one person. The defaults are 3 and 180 days. Tap a number or type one. Lowering a limit doesn't pause anything people already have.
+- **Anyone's trackers and digests**: open a person in `/limits`, or send `/mytracks ID`, to pause, resume, edit or delete theirs. Their limits don't apply to you, and they get a message when you change something.
+- **Shortcuts** take the ID shown in `/users`: `/limits ID active 5 days 90`, `/limits everyone days 120`, `/limits ID reset`.
+
 ## Shortcuts
 
 Every command walks you through its options with buttons, or takes them in one line:
@@ -72,7 +72,7 @@ Every command walks you through its options with buttons, or takes them in one l
 
 ## How it works
 
-Each search is one request to Google Flights for one route and one day, so a single `/explore` can send hundreds. The bot runs 5 at a time, which comes to about 430 searches a minute without being rate-limited (measured with `tools/benchmark.py`). Long searches run in the background with a progress bar and a Stop button, so the bot keeps answering meanwhile. Results are cached for 15 minutes and shared between users, and identical searches running at the same time share one request, so repeated or overlapping searches don't go to Google again. If Google rate-limits the bot, every request pauses for a minute instead of retrying straight away, and the pause doubles (up to 15 minutes) while the blocks continue.
+Each search is one request to Google Flights for one route and one day, so a single `/explore` can send hundreds. The bot runs 5 at a time, which comes to about 430 searches a minute without being rate-limited (measured with `tools/benchmark.py`). Long searches run in the background with a progress bar and a Stop button, so the bot keeps answering meanwhile. Repeated searches come from a cache (see [Caching](#caching)). If Google rate-limits the bot, every request pauses for a minute instead of retrying straight away, and the pause doubles (up to 15 minutes) while the blocks continue.
 
 Trackers and digests are scheduled jobs that are reloaded from SQLite on startup.
 
@@ -84,6 +84,15 @@ Trackers and digests are scheduled jobs that are reloaded from SQLite on startup
 | `database/` | SQLite access, models and migrations. |
 | `providers/` | Google Flights requests and parsing, the result cache and the request scheduler. |
 | `services/` | Deal ranking, airport data, airport name search and progress estimates. |
+
+## Caching
+
+Results are kept for 15 minutes and shared between users, so when two people search the same route and day, or an `/explore` overlaps a tracker, Google is asked once. Prices on Google Flights change a few times a day at most, so a 15-minute-old result is still the price you'd see on the website.
+
+- An identical search that's already running is shared too: the second one waits for the first instead of sending its own request.
+- Failed searches aren't cached, and neither are partial ones (e.g. a city where one of its airports couldn't be searched), so the next search tries again.
+- A search is only stopped when nobody else is waiting for it, so pressing Stop doesn't cancel someone else's results.
+- The cache lives in memory, holds up to 8,000 results (about 100 MB at most) and starts empty after a restart.
 
 ## Scheduling
 
@@ -107,7 +116,7 @@ python -m tools.benchmark   # searches per minute, request times and memory agai
 
 ## Limitations
 
-- Google Flights has no public API. If Google changes its page format, searches fail until the parser is updated.
+- Google Flights has no public API. If Google changes its page format, searches come back empty until the parser is updated. To catch that early, the bot searches a busy route (and a second if needed) every day at 09:00 (retrying hourly, up to 3 times, if Google can't be reached) and messages the admin if it can't read the results, and once more when it can again. After a restart while it's broken, it checks again within 5 minutes, so you know right away if a fix worked.
 - Google limits how fast you can search, so trackers check every 6 hours at most.
 - One-way flights only.
 - FareBot isn't affiliated with Google. Use it for personal projects.

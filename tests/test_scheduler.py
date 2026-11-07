@@ -123,7 +123,7 @@ async def test_register_jobs_schedules_everything(bot):
     await register_jobs(bot.app)
 
     assert sorted(bot.jobs()) == sorted([f"tracker_job_{first.id}", f"tracker_job_{second.id}",
-                                         f"digest_job_{digest.id}", "daily_cleanup"])
+                                         f"digest_job_{digest.id}", "daily_cleanup", "daily_health_check"])
     [digest_job] = bot.app.job_queue.get_jobs_by_name(f"digest_job_{digest.id}")
     assert "day_of_week='mon'" in str(digest_job.job.trigger)
     assert (await db.get_tracker(first.id)).status == ACTIVE
@@ -346,3 +346,128 @@ def test_after_a_restart_trackers_are_checked_when_due():
     assert first_check_in(checked("2026-11-01 01:00:00"), 30, now) == 30         # overdue: soon, staggered
     assert first_check_in(checked(None), 50, now) == 50                          # never checked
     assert first_check_in(checked("not a time"), 10, now) == 10
+
+
+def health(*results):
+    """A check_health that returns (or raises) each result in turn."""
+    results = list(results)
+
+    async def check_health():
+        result = results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+    return check_health
+
+
+async def test_health_check_tells_the_admin_every_day_until_fixed(bot, provider):
+    from daemon.scheduler import check_health
+    provider.check_health = health("LHR → JFK: <no flights>", "LHR → JFK: still broken", None, None)
+
+    await check_health(bot.services, bot.app.bot)
+    alert = bot.telegram.last_text
+    assert "Google Flights may have changed" in alert and "• LHR → JFK: &lt;no flights&gt;" in alert
+    assert bot.telegram.calls_to("sendMessage")[0]["chat_id"] == USER_ID  # the admin
+
+    await check_health(bot.services, bot.app.bot)
+    assert "still broken" in bot.telegram.last_text
+
+    await check_health(bot.services, bot.app.bot)
+    assert "can be read again" in bot.telegram.last_text
+    await check_health(bot.services, bot.app.bot)
+    assert len(bot.telegram.calls_to("sendMessage")) == 3  # nothing on an ordinary good day
+
+
+async def test_health_check_stays_quiet_when_google_is_unreachable(bot, provider):
+    from daemon.scheduler import check_health
+    from providers.base import FlightSearchError
+    provider.check_health = health("MAD → BCN: broken", FlightSearchError("blocked"), None)
+
+    await check_health(bot.services, bot.app.bot)
+    await check_health(bot.services, bot.app.bot)
+    assert len(bot.telegram.calls_to("sendMessage")) == 1
+    assert await bot.services.db.get_state("health_problem") == "MAD → BCN: broken"  # unknown isn't fixed
+    await check_health(bot.services, bot.app.bot)
+    assert "can be read again" in bot.telegram.last_text
+
+
+async def test_a_restart_while_broken_rechecks_soon_and_says_when_fixed(bot, provider):
+    from daemon.scheduler import check_health
+    provider.check_health = health("LHR → JFK: broken", None)
+    await check_health(bot.services, bot.app.bot)
+
+    # A restart (e.g. to deploy a parser fix) forgets nothing and checks again within minutes.
+    await register_jobs(bot.app)
+    assert len(bot.app.job_queue.get_jobs_by_name("health_recheck")) == 1
+    await check_health(bot.services, bot.app.bot)
+    assert "can be read again" in bot.telegram.last_text
+    assert await bot.services.db.get_state("health_problem") is None
+
+
+async def test_no_recheck_after_a_restart_when_healthy(bot):
+    await register_jobs(bot.app)
+    assert bot.app.job_queue.get_jobs_by_name("health_recheck") == ()
+
+
+async def test_health_check_without_an_admin_only_logs(bot, provider, monkeypatch):
+    from daemon.scheduler import check_health
+    monkeypatch.setattr("bot.auth.get_allowed_users", lambda: [])
+    provider.check_health = health("LHR → JFK: broken")
+    await check_health(bot.services, bot.app.bot)
+    assert bot.telegram.calls_to("sendMessage") == []
+    assert await bot.services.db.get_state("health_problem") == "LHR → JFK: broken"
+
+
+async def test_health_job_stops_quietly_on_shutdown(bot, provider):
+    import asyncio
+    from unittest.mock import MagicMock
+    from daemon.scheduler import health_job
+
+    async def cancelled():
+        raise asyncio.CancelledError
+    provider.check_health = cancelled
+    context = MagicMock(bot=bot.app.bot, application=bot.app, bot_data=bot.app.bot_data)
+    await health_job(context)  # doesn't raise
+    assert bot.telegram.calls_to("sendMessage") == []
+
+
+def health_context(bot, retries=None):
+    from unittest.mock import MagicMock
+    return MagicMock(bot=bot.app.bot, application=bot.app, bot_data=bot.app.bot_data,
+                     job_queue=bot.app.job_queue, job=MagicMock(data=retries))
+
+
+async def test_a_check_that_cannot_run_is_retried_hourly_up_to_three_times(bot, provider):
+    from daemon.scheduler import HEALTH_RETRIES, health_job
+    from providers.base import FlightSearchError
+    provider.check_health = health(*[FlightSearchError("blocked")] * 4)
+
+    await health_job(health_context(bot))
+    [retry] = bot.app.job_queue.get_jobs_by_name("health_retry")
+    assert retry.data == 1
+    await health_job(health_context(bot, retries=HEALTH_RETRIES))  # the last retry
+    assert len(bot.app.job_queue.get_jobs_by_name("health_retry")) == 1  # no fourth one
+    assert bot.telegram.calls_to("sendMessage") == []
+
+
+async def test_a_check_that_ran_is_not_retried(bot, provider):
+    from daemon.scheduler import health_job
+    provider.check_health = health("LHR → JFK: broken", None)
+    await health_job(health_context(bot))
+    await health_job(health_context(bot))
+    assert bot.app.job_queue.get_jobs_by_name("health_retry") == ()
+
+
+async def test_the_all_clear_is_sent_again_if_it_could_not_be_delivered(bot, provider):
+    from daemon.scheduler import check_health
+    provider.check_health = health("LHR → JFK: broken", None, None)
+    await check_health(bot.services, bot.app.bot)
+
+    bot.telegram.sending_fails = True
+    await check_health(bot.services, bot.app.bot)
+    assert await bot.services.db.get_state("health_problem") == "LHR → JFK: broken"
+
+    bot.telegram.sending_fails = False
+    await check_health(bot.services, bot.app.bot)
+    assert "Health check passed" in bot.telegram.last_text
+    assert await bot.services.db.get_state("health_problem") is None
