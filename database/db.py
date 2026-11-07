@@ -12,7 +12,7 @@ from database.models import ACTIVE, APPROVED, EXPIRED, PAUSED, PENDING, WEEKDAYS
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 TRACKERS_DDL = """
 CREATE TABLE {name} (
@@ -83,6 +83,14 @@ CREATE TABLE IF NOT EXISTS limits (
 )
 """
 LIMIT_FIELDS = {"max_active", "max_range_days"}
+
+# Small values the bot keeps across restarts, e.g. what the last health check found wrong.
+STATE_DDL = """
+CREATE TABLE IF NOT EXISTS bot_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+)
+"""
 
 TRACKER_COLUMNS = [
     "id", "user_id", "origin_code", "destination_code", "departure_date", "departure_date_end",
@@ -172,6 +180,8 @@ class Database:
                     await conn.execute("ALTER TABLE digests ADD COLUMN direct_only INTEGER NOT NULL DEFAULT 0")
                 if version < 5:
                     await conn.execute(LIMITS_DDL)
+                if version < 6:
+                    await conn.execute(STATE_DDL)
                 await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 await conn.execute("COMMIT")
             except BaseException:
@@ -474,6 +484,19 @@ class Database:
 
     async def clear_limits(self, user_id: int) -> None:
         await self._execute("DELETE FROM limits WHERE user_id = ?", (user_id,))
+
+    async def get_state(self, key: str) -> Optional[str]:
+        async with self._connect() as db:
+            async with db.execute("SELECT value FROM bot_state WHERE key = ?", (key,)) as cur:
+                row = await cur.fetchone()
+        return row["value"] if row else None
+
+    async def set_state(self, key: str, value: Optional[str]) -> None:
+        """Store a value, or remove it with None."""
+        if value is None:
+            await self._execute("DELETE FROM bot_state WHERE key = ?", (key,))
+        else:
+            await self._execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", (key, value))
 
     async def purge_stale(self, today: date) -> StaleCleanup:
         """Expire trackers and fixed-date digests whose travel dates have passed, and delete

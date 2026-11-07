@@ -486,3 +486,97 @@ async def test_an_empty_range_is_empty_not_a_failure():
     provider = FastFlightsProvider(client=mock_client(lambda request: httpx.Response(500)))
     assert await provider.search_flights_range("SKG", "VIE", "2026-12-05", "2026-12-01") == []
     await provider.close()
+
+
+def flights_page(airline="Aegean", times=True):
+    leg = [None]*8 + ([[8, 5], None, [10, 30]] if times else [None, None, None]) + [None]*11 + [["flight_meta"]]
+    payload = [[None, [airline], [leg]], [[None, 120.0]]]
+    return f"<script class=\"ds:1\">data:{json.dumps([payload])},</script>"
+
+
+class PagesClient:
+    """Returns the given pages in turn, one per request."""
+
+    def __init__(self, *pages):
+        self.pages = list(pages)
+        self.requests = 0
+
+    async def fetch_html(self, q):
+        self.requests += 1
+        page = self.pages.pop(0)
+        if isinstance(page, Exception):
+            raise page
+        return page
+
+    async def close(self):
+        pass
+
+
+async def no_sleep(seconds):
+    pass
+
+
+async def test_health_check_passes_when_flights_can_be_read():
+    client = PagesClient(flights_page())
+    assert await FastFlightsProvider(client=client).check_health() is None
+    assert client.requests == 1  # one good route is enough
+
+
+async def test_health_check_reports_a_page_without_flight_data():
+    provider = FastFlightsProvider(client=PagesClient("<html></html>", "<html></html>"))
+    problem = await provider.check_health()
+    assert problem.count("script.ds:1") == 2
+    assert problem.startswith("LHR → JFK:") and "\nMAD → BCN:" in problem
+
+
+async def test_health_check_reports_unreadable_json_and_empty_pages():
+    broken_json = "<script class=\"ds:1\">data:{not json,</script>"
+    empty = f"<script class=\"ds:1\">data:{json.dumps([[]])},</script>"
+    problem = await FastFlightsProvider(client=PagesClient(broken_json, empty)).check_health()
+    assert "couldn't be read as JSON" in problem
+    assert "MAD → BCN: the page loaded but had no flights" in problem
+
+
+async def test_health_check_reports_flights_without_details():
+    client = PagesClient(flights_page(times=False), flights_page(times=False))
+    problem = await FastFlightsProvider(client=client).check_health()
+    assert problem.count("without airlines or times") == 2
+
+
+async def test_health_check_passes_if_the_second_route_works():
+    provider = FastFlightsProvider(client=PagesClient("<html></html>", flights_page()))
+    assert await provider.check_health() is None
+
+
+async def test_health_check_raises_when_google_is_unreachable():
+    from providers.base import FlightSearchError
+    client = PagesClient(*[httpx.ConnectError("down")] * 2)
+    with pytest.raises(FlightSearchError):
+        await FastFlightsProvider(client=client).check_health()
+
+
+async def test_health_check_raises_when_google_blocks_it():
+    captcha = "<html>Our systems have detected unusual traffic</html>"
+    from providers.base import FlightSearchError
+    provider = FastFlightsProvider(client=PagesClient(captcha, captcha), sleep=no_sleep)
+    with pytest.raises(FlightSearchError):
+        await provider.check_health()  # blocked: the page format can't be judged
+
+
+async def test_normal_searches_still_treat_a_page_without_flight_data_as_no_flights():
+    provider = FastFlightsProvider(client=PagesClient("<html></html>"))
+    assert await provider.search_flights("ATH", "BUD", "2027-04-03") == []
+
+
+async def test_one_empty_page_is_not_enough_to_call_it_broken():
+    from providers.base import FlightSearchError
+    empty = f"<script class=\"ds:1\">data:{json.dumps([[]])},</script>"
+    client = PagesClient(empty, httpx.ConnectError("down"))
+    with pytest.raises(FlightSearchError, match="only one route"):
+        await FastFlightsProvider(client=client).check_health()
+
+
+async def test_one_unreadable_page_is_enough_when_the_other_route_is_down():
+    client = PagesClient("<html></html>", httpx.ConnectError("down"))
+    problem = await FastFlightsProvider(client=client).check_health()
+    assert problem == "LHR → JFK: the page has no script.ds:1 block, where the flight data used to be"
